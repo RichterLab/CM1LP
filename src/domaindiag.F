@@ -66,7 +66,7 @@
         ! end_domaindiag
     use input
     use constants
-    use cm1libs , only : rslf,rsif
+    use cm1libs , only : eslf,rslf,rsif
     use getcape_module
     use sfcphys_module , only : stabil_funcs
     use turb_module , only : getepst
@@ -3590,6 +3590,41 @@
         do j=1,nj
         do i=1,ni
           dum1(i,j,k) = q3d(i,j,k,nqv)/rslf(prs(i,j,k),th(i,j,k)*(pi0(i,j,k)+pp3d(i,j,k)))
+        enddo
+        enddo
+        enddo
+        !$acc end parallel
+        call getavg3d(dum1,savg)
+        call write3d(savg,trecs,trecw,vargrid,nvar,varname,vardesc,varunit)
+
+        nvar = nvar+1
+        varname(nvar) = 'rh2'
+        vardesc(nvar) = 'relative humidity with eslf'
+        varunit(nvar) = 'nondimensional'
+     
+        !$acc parallel loop gang vector collapse(3) default(present)
+        do k=1,nk
+        do j=1,nj
+        do i=1,ni
+          !dum1(i,j,k) = rho(i,j,k)*(q3d(i,j,k,nqv)/(1 + q3d(i,j,k,nqv)))*rv*(th(i,j,k)*(pi0(i,j,k)+pp3d(i,j,k)))/eslf(prs(i,j,k),th(i,j,k)*(pi0(i,j,k)+pp3d(i,j,k)))
+          dum1(i,j,k) = rho(i,j,k)*q3d(i,j,k,nqv)*rv*(th(i,j,k)*(pi0(i,j,k)+pp3d(i,j,k)))/eslf(prs(i,j,k),th(i,j,k)*(pi0(i,j,k)+pp3d(i,j,k)))
+        enddo
+        enddo
+        enddo
+        !$acc end parallel
+        call getavg3d(dum1,savg)
+        call write3d(savg,trecs,trecw,vargrid,nvar,varname,vardesc,varunit)
+
+        nvar = nvar+1
+        varname(nvar) = 'rh3'
+        vardesc(nvar) = 'relative humidity with eslf and ideal gas rho'
+        varunit(nvar) = 'nondimensional'
+     
+        !$acc parallel loop gang vector collapse(3) default(present)
+        do k=1,nk
+        do j=1,nj
+        do i=1,ni
+          dum1(i,j,k) = (prs(i,j,k)/(th(i,j,k)*(pi0(i,j,k)+pp3d(i,j,k))*rd*(1+0.61*q3d(i,j,k,nqv))))*(q3d(i,j,k,nqv)/(1 + q3d(i,j,k,nqv)))*rv*(th(i,j,k)*(pi0(i,j,k)+pp3d(i,j,k)))/eslf(prs(i,j,k),th(i,j,k)*(pi0(i,j,k)+pp3d(i,j,k)))
         enddo
         enddo
         enddo

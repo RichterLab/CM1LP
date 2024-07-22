@@ -364,7 +364,7 @@
     dt2 = dt/2.0
     part_grav1 = 0.0
     part_grav2 = 0.0
-    part_grav3 = -9.81
+    part_grav3 = -2.3122
 
 
 #ifdef _B4B01F

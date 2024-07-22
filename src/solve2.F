@@ -1674,8 +1674,10 @@
       do j=1,nj
       do i=1,ni
         prs(i,j,k)=prs0(i,j,k)
-        rho(i,j,k)=rho0(i,j,k)
-        rr(i,j,k)=rr0(i,j,k)
+        !rho(i,j,k)=rho0(i,j,k)
+        rho(i,j,k)=prs(i,j,k)/( (th0(i,j,k)+th3d(i,j,k))*(pi0(i,j,k)+pp3d(i,j,k))*(rd+max(0.0,q3d(i,j,k,nqv))*rv) )
+        !rr(i,j,k)=rr0(i,j,k)
+        rr(i,j,k)=1./rho(i,j,k)
       enddo
       enddo
       enddo

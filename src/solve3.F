@@ -1036,7 +1036,8 @@
               w3d(i,j,k)=w3d(i,j,k)+dt_dropsub*dpten(i,j,k,5)
           
               !DHR KLUDGE FOR SWALL
-              q3d(i,j,k,nqv)=q3d(i,j,k,nqv)-dt_dropsub*7.6e-5
+              !q3d(i,j,k,nqv)=q3d(i,j,k,nqv)-dt_dropsub*7.8e-5  For H = 0.2
+              q3d(i,j,k,nqv)=q3d(i,j,k,nqv)-dt_dropsub*6.2e-6
             enddo
             enddo
             enddo
