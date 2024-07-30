@@ -916,7 +916,7 @@
           prvpx,prvpy,prvpz,prrp,prms,prtp,prx,pry,prsig,prz,pru,prv, &
           prw,prt,prqv,prprs,prrho,pract,prtime,prmult,ni,nj,mywest, &
           mysw,mynw,myeast,myse,myne,mysouth,mynorth,nparcelsLocal, &
-          myid,dx,dy,pi_sp,pi_dp,ngxy
+          myid,dx,dy,pi_sp,pi_dp,ngxy,nbc,sbc,ebc,wbc
       use constants , only : rhow,rhow_dp,undefined_index,cpl
       use comm_module
       use parcel_module
@@ -952,6 +952,7 @@
       real :: tp0
       real :: sig1
       real :: top,bot,restime10_tmp,rad10_tmp
+      real :: north,south,east,west
       integer :: i,j,k,ibin,ibin_res
       double precision :: taup,volp,rhop
       double precision :: taup_scale,dt_nondim
@@ -1066,20 +1067,54 @@
       !Wall BCs:
       top = maxz-1.0e-4
       bot = 1.0e-4
-      if ( z3d .gt. top ) then
-         z3d = top - (z3d - top)
-         pdata(np,prvpz) = -pdata(np,prvpz)
-         pdata_locind(np,3) = undefined_index
-      elseif ( z3d .lt. bot ) then
-         if ( use_wall_bc ) then
-            ! use Wall BC
-            z3d = bot + (bot-z3d)
-            pdata(np,prvpz) = -pdata(np,prvpz)
-         else
-            ! fall off the bottom and "die"
-            z3d = 1.0e-6            !Just temporary 
-            pdata(np,pract) = -1.0  !Signal this as no longer alive
+      east = maxx - 1.0e-4
+      west = 1.0e-4
+      north = maxy - 1.0e-4
+      south = 1.0e-4
+
+      !Bounce off the top wall:
+      !if ( z3d .gt. top ) then
+      !   z3d = top - (z3d - top)
+      !   pdata(np,prvpz) = -pdata(np,prvpz)
+      !   pdata_locind(np,3) = undefined_index
+
+      !The different cases that kill a particle:
+      if (z3d.gt.top .or. z3d.lt.bot) then
+         print *, 'DHR4:',z3d
+         z3d = bot            !Just temporary  
+         pdata(np,pract) = -1.0  !Signal this as no longer alive
+      end if
+
+      if (x3d.gt.east .and. ebc.eq.4) then
+         print *, 'DHR5:',x3d
+         x3d = pdata(np,prx)   !Temporary
+         pdata(np,pract) = -1.0  !Signal this as no longer alive
+      end if
+
+      if (x3d.lt.west .and. wbc.eq.4) then
+         print *, 'DHR6:',x3d
+         x3d = pdata(np,prx)   !Temporary
+         pdata(np,pract) = -1.0  !Signal this as no longer alive
+      end if
+
+      if (y3d.gt.north .and. nbc.eq.4) then
+         print *, 'DHR7:',y3d
+         y3d = pdata(np,pry)   !Temporary
+         pdata(np,pract) = -1.0  !Signal this as no longer alive
+      end if
+
+      if (y3d.lt.south .and. sbc.eq.4) then
+         print *, 'DHR8:',y3d
+         y3d = pdata(np,pry)     !Temporary
+         pdata(np,pract) = -1.0  !Signal this as no longer alive
+      end if
+
+
+      !Collect statistics on all of those that have died
+      if (pdata(np,pract).lt.0.0) then
+
             num_fallout = num_fallout + 1
+
             !Collect some statistics on those falling out:
 
             num_destroyed = num_destroyed + pdata(np,prmult)
@@ -1120,8 +1155,8 @@
 
             !$acc atomic update
             hist_fallrad(ibin) = hist_fallrad(ibin) + pdata(np,prmult)
-         end if 
-         pdata_locind(np,3) = undefined_index
+
+            pdata_locind(np,3) = undefined_index
       endif
 
       ! New for cm1r17:  if parcel exits domain,
@@ -1142,20 +1177,20 @@
       end if
 #endif
 
-      if ( x3d .lt. minx ) then
+      if ( x3d .lt. minx .and. wbc.ne.4) then
          x3d = x3d + ( maxx - minx )
          pdata_locind(np,1) = undefined_index
       end if
-      if ( x3d .gt. maxx ) then
+      if ( x3d .gt. maxx .and. ebc.ne.4) then
          x3d = x3d - ( maxx - minx )
          pdata_locind(np,1) = undefined_index
       end if
 
-      if ( y3d .gt. maxy .and. axisymm .ne. 1 .and. ny .ne. 1 ) then
+      if ( y3d .gt. maxy .and. axisymm .ne. 1 .and. ny .ne. 1 .and. nbc.ne.4) then
          y3d = y3d - ( maxy - miny )
          pdata_locind(np,2) = undefined_index
       end if
-      if ( y3d .lt. miny .and. axisymm .ne. 1 .and. ny .ne. 1 ) then
+      if ( y3d .lt. miny .and. axisymm .ne. 1 .and. ny .ne. 1 .and. sbc.ne.4) then
          y3d = y3d + ( maxy - miny )
          pdata_locind(np,2) = undefined_index
       end if
