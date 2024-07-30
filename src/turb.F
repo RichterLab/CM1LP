@@ -1499,7 +1499,7 @@
 
       IF( cm1setup.eq.3 )THEN
        
-        !$acc data copy(viscosity,pr_num)
+        !$acc data copy(viscosity,pr_num,sc_num)
         !$acc parallel default(present) private(i,j,k)
         tem = viscosity/pr_num
         temq = viscosity/sc_num

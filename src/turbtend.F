@@ -23,7 +23,7 @@
           kbc,kec,ni,nj,nk,rdx,rdy,rdz,wbc,ebc,nbc,sbc,ibw,ibe,ibs,ibn,sc_num,pr_num,cm1setup, &
           cgs1,cgs2,cgs3,cgt1,cgt2,cgt3,viscosity,axisymm,timestats,time_ttend,mytime,bc_temp, &
           ptc_bot,ptc_top,dohturb,dovturb,base_pbot,base_pibot,base_ptop,base_pitop,doimpl, &
-          bcturbs,terrain_flag
+          bcturbs,terrain_flag,ptc_n,ptc_s,ptc_w,ptc_e
       use constants
       use cm1libs , only : rslf,rsif
       implicit none
@@ -57,6 +57,7 @@
       integer :: i,j,k,k1,k2
       real :: rdt,tema,temb,temc
       real :: tem,r1,r2,cfa,cfb,cfc,cfd,kappa,ptcb,ptct,le_num
+      real :: ptc_n_tmp,ptc_s_tmp,ptc_w_tmp,ptc_e_tmp
       !$acc declare present(xh,rxh,arh1,arh2,uh) &
       !$acc present(xf,arf1,arf2,uf,vh,vf) &
       !$acc present(sflux, rds,sigma,rdsf,sigmaf,mh,mf) &
@@ -68,6 +69,8 @@
 
 !---------------------------------------------------------------
 
+  !$acc update device (ivar)
+
   !First off, define the Lewis number, which is ratio of Schmidt to Prandtl:
   if (cm1setup.eq.3) then
     le_num = 1.0
@@ -75,6 +78,13 @@
   else
     le_num = 1.0
   endif
+  if( cm1setup.eq.3 )then
+      kappa = viscosity/pr_num
+      if (ivar.eq.2) then      !! for DNS of moist RB convection
+        kappa = viscosity/sc_num
+      end if
+  endif
+
   dohoriz:  &
   IF( dohturb )THEN
 
@@ -140,6 +150,71 @@
           enddo
         enddo
       ENDIF
+
+      !Lateral Dirichlet BCs for scalars using DNS
+      !ptc_s,n,e,w are assumed to be temperature, not potential temperature!
+      IF (cm1setup.eq.3) THEN
+         IF (wbc.eq.4 .and. ibw.eq.1) THEN
+            !$omp parallel do default(shared) private(i,k)
+            !$acc parallel loop gang vector collapse(2) default(present) private(j,k)
+            do k=1,nk
+            do j=1,nj
+              if (ivar.eq.1) then
+                ptc_w_tmp = ptc_w/pi0(1,j,k) - th0r
+              elseif (ivar.eq.2) then
+                ptc_w_tmp = rslf(prs0(1,j,k),ptc_w)
+              endif
+              dumx(1,j,k) = -kappa*2.0*(s(1,j,k)-ptc_w_tmp)*rdx*(rho(1,j,k)+rho(2,j,k))*uf(1)*0.5
+            enddo
+            enddo
+         ENDIF
+
+         IF (ebc.eq.4 .and. ibe.eq.1) THEN
+            !$omp parallel do default(shared) private(i,k)
+            !$acc parallel loop gang vector collapse(2) default(present) private(j,k)
+            do k=1,nk
+            do j=1,nj
+              if (ivar.eq.1) then
+                ptc_e_tmp = ptc_e/pi0(ni,j,k) - th0r
+              elseif (ivar.eq.2) then
+                ptc_e_tmp = rslf(prs0(ni,j,k),ptc_e)
+              endif
+              dumx(ni+1,j,k) = kappa*2.0*(s(ni,j,k)-ptc_e_tmp)*rdx*(rho(ni,j,k)+rho(ni-1,j,k))*uf(ni)*0.5
+            enddo
+            enddo
+         ENDIF
+
+         IF (sbc.eq.4 .and. ibs.eq.1) THEN
+            !$omp parallel do default(shared) private(i,k)
+            !$acc parallel loop gang vector collapse(2) default(present) private(i,k)
+            do k=1,nk
+            do i=1,ni
+              if (ivar.eq.1) then
+                ptc_s_tmp = ptc_s/pi0(i,1,k) - th0r
+              elseif (ivar.eq.2) then
+                ptc_s_tmp = rslf(prs0(i,1,k),ptc_s)
+              endif
+              dumy(i,1,k) = -kappa*2.0*(s(i,1,k)-ptc_s_tmp)*rdy*(rho(i,1,k)+rho(i,2,k))*vf(1)*0.5
+            enddo
+            enddo
+         ENDIF
+
+         IF (nbc.eq.4 .and. ibn.eq.1) THEN
+            !$omp parallel do default(shared) private(i,k)
+            !$acc parallel loop gang vector collapse(2) default(present) private(i,k)
+            do k=1,nk
+            do i=1,ni
+              if (ivar.eq.1) then
+                ptc_n_tmp = ptc_n/pi0(i,nj,k) - th0r
+              elseif (ivar.eq.2) then
+                ptc_n_tmp = rslf(prs0(i,nj,k),ptc_n)
+              endif
+              dumy(i,nj+1,k) = kappa*2.0*(s(i,nj,k)-ptc_n_tmp)*rdy*(rho(i,nj,k)+rho(i,nj-1,k))*vf(nj)*0.5
+            enddo
+            enddo
+         ENDIF
+
+      endif !DNS
 
       !$omp parallel do default(shared) private(i,j,k)
       !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
