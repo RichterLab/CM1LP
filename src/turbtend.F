@@ -18,7 +18,7 @@
       subroutine turbs(iflux,dt,dosfcflx,xh,rxh,arh1,arh2,uh,xf,arf1,arf2,uf,vh,vf,sflux,  &
                        rds,sigma,rdsf,sigmaf,mh,mf,gz,rgz,gzu,rgzu,gzv,rgzv,gx,gxu,gy,gyv, &
                        turbx,turby,turbz,dumx,dumy,dumz,rho,rr,rf,s,sten,khh,khv,dum7,dum8, &
-                       dobud,ibd,ied,jbd,jed,kbd,ked,ndiag,diag,sd_hturb,sd_vturb,ivar)
+                       dobud,ibd,ied,jbd,jed,kbd,ked,ndiag,diag,sd_hturb,sd_vturb,ivar,pi0,prs0)
       use input, only: ib,ie,jb,je,kb,ke,itb,ite,jtb,jte,ktb,kte,ibc,iec,jbc,jec, &
           kbc,kec,ni,nj,nk,rdx,rdy,rdz,wbc,ebc,nbc,sbc,ibw,ibe,ibs,ibn,sc_num,pr_num,cm1setup, &
           cgs1,cgs2,cgs3,cgt1,cgt2,cgt3,viscosity,axisymm,timestats,time_ttend,mytime,bc_temp, &
@@ -40,6 +40,7 @@
       real, intent(in), dimension(kb:ke+1) :: rdsf,sigmaf
       real, intent(in), dimension(ib:ie,jb:je,kb:ke) :: mh
       real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: mf
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke) :: pi0,prs0
       real, intent(in), dimension(itb:ite,jtb:jte) :: gz,rgz,gzu,rgzu,gzv,rgzv
       real, intent(in), dimension(itb:ite,jtb:jte,ktb:kte) :: gx,gxu,gy,gyv
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: turbx,turby,turbz,dumx,dumy,dumz,sten
@@ -62,7 +63,7 @@
       !$acc present(gz,rgz,gzu,rgzu,gzv,rgzv) &
       !$acc present(gx,gxu,gy,gyv) &
       !$acc present(turbx,turby,turbz) &
-      !$acc present(sten) &
+      !$acc present(sten,pi0,prs0) &
       !$acc present(rho,rr,rf,s,khh,khv,dum7,dum8)
 
 !---------------------------------------------------------------
