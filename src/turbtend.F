@@ -69,7 +69,7 @@
 
 !---------------------------------------------------------------
 
-  !$acc update device (ivar)
+!!  !$acc update device (ivar)
 
   !First off, define the Lewis number, which is ratio of Schmidt to Prandtl:
   if (cm1setup.eq.3) then
