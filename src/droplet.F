@@ -555,6 +555,8 @@
 
     numHoles = numDepart + num_fallout + (nparcelsLocal-nparcelsLocalActive)
 
+    write(*,'(a8,6i)') 'DHR11:',myid,numHoles,numDepart,num_fallout,nparcelsLocal,nparcelsLocalActive
+
 !----------------------------------------------------------------------
 !  communicate data  (for MPI runs)
 !  note Step 1 is also needed for a non-MPI run
@@ -601,6 +603,12 @@
         end if
      end do
      !$acc end parallel
+
+     !$acc update host(holes_ind,Cindx)
+     if(Cindx(nparcelsLocal)+1 .ne. numHoles) then
+         print *,'holes_ind: ',myid,holes_ind(numHoles),numHoles,Cindx(nparcelsLocal)+1,nparcelsLocal
+         !print *,'holes_ind: ',holes_ind(1:numHoles),numHoles,Cindx(nparcelsLocal)+1,nparcelsLocal
+     endif
 
      ! Special treatment for the last value in the array
      !$acc kernels default(present) 
@@ -961,6 +969,8 @@
       logical :: is_local
       integer :: mflag,flag
 
+      integer :: oute,outw,outn,outs
+
       !Store interpolated quantities for the sake of statistics
       pdata(np,pru) = uval
       pdata(np,prv) = vval
@@ -1067,10 +1077,15 @@
       !Wall BCs:
       top = maxz-1.0e-4
       bot = 1.0e-4
-      east = maxx - 1.0e-4
-      west = 1.0e-4
-      north = maxy - 1.0e-4
-      south = 1.0e-4
+      east = maxx-1.0e-4
+      west = minx+1.0e-4
+      north = maxy-1.0e-4
+      south = miny+1.0e-4
+
+      oute = 0
+      outw = 0
+      outn = 0
+      outs = 0
 
       !Bounce off the top wall:
       !if ( z3d .gt. top ) then
@@ -1080,31 +1095,35 @@
 
       !The different cases that kill a particle:
       if (z3d.gt.top .or. z3d.lt.bot) then
-         print *, 'DHR4:',z3d
+         print *, 'DHR4:',x3d,pdata(np,prx),y3d,pdata(np,pry),z3d,pdata(np,prz)
          z3d = bot            !Just temporary  
          pdata(np,pract) = -1.0  !Signal this as no longer alive
       end if
 
       if (x3d.gt.east .and. ebc.eq.4) then
-         print *, 'DHR5:',x3d
+         oute = 1
+         print *, 'DHR5:',x3d,pdata(np,prx),y3d,pdata(np,pry),z3d,pdata(np,prz)
          x3d = pdata(np,prx)   !Temporary
          pdata(np,pract) = -1.0  !Signal this as no longer alive
       end if
 
       if (x3d.lt.west .and. wbc.eq.4) then
-         print *, 'DHR6:',x3d
+         outw = 1
+         print *, 'DHR6:',x3d,pdata(np,prx),y3d,pdata(np,pry),z3d,pdata(np,prz)
          x3d = pdata(np,prx)   !Temporary
          pdata(np,pract) = -1.0  !Signal this as no longer alive
       end if
 
       if (y3d.gt.north .and. nbc.eq.4) then
-         print *, 'DHR7:',y3d
+         outn = 1
+         print *, 'DHR7:',x3d,pdata(np,prx),y3d,pdata(np,pry),z3d,pdata(np,prz)
          y3d = pdata(np,pry)   !Temporary
          pdata(np,pract) = -1.0  !Signal this as no longer alive
       end if
 
       if (y3d.lt.south .and. sbc.eq.4) then
-         print *, 'DHR8:',y3d
+         outs = 1
+         print *, 'DHR8:',x3d,pdata(np,prx),y3d,pdata(np,pry),z3d,pdata(np,prz)
          y3d = pdata(np,pry)     !Temporary
          pdata(np,pract) = -1.0  !Signal this as no longer alive
       end if
@@ -1163,54 +1182,70 @@
       ! just assume periodic lateral boundary conditions
       ! (no matter what actual settings are for wbc,ebc,sbc,nbc)
 
-#ifdef MPI
-      ! determine which new MPI region this droplet 
-      ! enters or stays for the next time step
-
-      call check_droplet_ownership(x3d,y3d,xf,yf,is_local, &
-                                   neighbor,errcode)
-
-      if ( neighbor .ne. undefined_index ) then
-         pdata_locind(np,1) = undefined_index
-         pdata_locind(np,2) = undefined_index
-         pdata_locind(np,3) = undefined_index
-      end if
-#endif
-
-      if ( x3d .lt. minx .and. wbc.ne.4) then
-         x3d = x3d + ( maxx - minx )
-         pdata_locind(np,1) = undefined_index
-      end if
-      if ( x3d .gt. maxx .and. ebc.ne.4) then
-         x3d = x3d - ( maxx - minx )
-         pdata_locind(np,1) = undefined_index
-      end if
-
-      if ( y3d .gt. maxy .and. axisymm .ne. 1 .and. ny .ne. 1 .and. nbc.ne.4) then
-         y3d = y3d - ( maxy - miny )
-         pdata_locind(np,2) = undefined_index
-      end if
-      if ( y3d .lt. miny .and. axisymm .ne. 1 .and. ny .ne. 1 .and. sbc.ne.4) then
-         y3d = y3d + ( maxy - miny )
-         pdata_locind(np,2) = undefined_index
-      end if
-
-      pdata(np,prx) = x3d
-      pdata(np,pry) = y3d
-      if ( .not. terrain_flag )then
-         pdata(np,prz) = z3d
-      else
-         pdata(np,prsig) = sig3d
-      end if
-
-      ! If this droplet falls outside the bottom boundary,
-      ! it "dies" and should not enter any other MPI rank
-      ! even if its x/y location is valid
       if ( pdata(np,pract) .lt. 0.0 ) then
+
+         !If it was killed, set parameters to undefined so it gets removed from list later
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR19: SHOULD BE HERE',oute,outw,outn,outs
          neighbor = undefined_index
          pdata_locind(np,1) = undefined_index
          pdata_locind(np,2) = undefined_index
+      else
+
+         !If it was not killed, look for neighbors and prepare for transfer
+
+#ifdef MPI
+         ! determine which new MPI region this droplet 
+         ! enters or stays for the next time step
+ 
+         call check_droplet_ownership(x3d,y3d,xf,yf,is_local,oute,outw,outn,outs, &
+                                   neighbor,errcode)
+         !Returns neighbor = undefined_index when it stays put
+         !Otherwise neighbor = some integer when is moving
+
+         !Found a meaningful neighbor: should NOT happen when particle is dying
+         if ( neighbor .ne. undefined_index ) then
+            if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR14: SHOULD NOT BE HERE',oute,outw,outn,outs
+            pdata_locind(np,1) = undefined_index
+            pdata_locind(np,2) = undefined_index
+            pdata_locind(np,3) = undefined_index
+         end if
+#endif
+
+         !Periodic boundaries in x and y
+         !Should only get here if ebc,wbc,nbc,sbc .ne. 4 
+         !since these would have been marked dead above if they exceeded maxx,minx,maxy,miny
+         if ( x3d .lt. minx) then
+            if (outw.eq.1) print *, 'DHR15: SHOULD NOT BE HERE',x3d,minx
+            x3d = x3d + ( maxx - minx )
+            pdata_locind(np,1) = undefined_index
+         end if
+         if ( x3d .gt. maxx) then
+            if (oute.eq.1) print *, 'DHR16: SHOULD NOT BE HERE',x3d,maxx
+            x3d = x3d - ( maxx - minx )
+            pdata_locind(np,1) = undefined_index
+         end if
+
+         if ( y3d .gt. maxy .and. axisymm .ne. 1 .and. ny .ne. 1) then
+            if (outn.eq.1) print *, 'DHR17: SHOULD NOT BE HERE',y3d,maxy
+            y3d = y3d - ( maxy - miny )
+            pdata_locind(np,2) = undefined_index
+         end if
+         if ( y3d .lt. miny .and. axisymm .ne. 1 .and. ny .ne. 1) then
+            if (outs.eq.1) print *, 'DHR18: SHOULD NOT BE HERE',y3d,miny
+            y3d = y3d + ( maxy - miny )
+            pdata_locind(np,2) = undefined_index
+         end if
+   
+         pdata(np,prx) = x3d
+         pdata(np,pry) = y3d
+         if ( .not. terrain_flag )then
+            pdata(np,prz) = z3d
+         else
+            pdata(np,prsig) = sig3d
+         end if
+
       end if
+
 
       if ( pdata_locind(np,1) .eq. undefined_index .or. &
            pdata_locind(np,2) .eq. undefined_index ) then
@@ -4382,7 +4417,7 @@
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 
-      subroutine check_droplet_ownership(x3d,y3d,xf,yf,is_local, &
+      subroutine check_droplet_ownership(x3d,y3d,xf,yf,is_local,oute,outw,outn,outs, &
                                          neighbor,errcode)
 
       ! This subroutine will check if a droplet falls into this MPI region or not
@@ -4407,6 +4442,7 @@
       real, dimension(jb:je+1), intent(in) :: yf
       logical, intent(out) :: is_local
       integer, intent(out), optional :: neighbor, errcode
+      integer, intent(in) ::  oute,outw,outn,outs
 
       ! Local variable
 
@@ -4442,18 +4478,21 @@
                print *, 'Droplet jumped over west nearest neighbor'
                errcode = 50
             end if
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR14.1: SHOULD NOT BE HERE',oute,outw,outn,outs,x3d,y3d,xf(1),xf(ni+1),yf(1),yf(nj+1)
             neighbor = mywest
          else if ( x3d .lt. xf(1) .and. y3d .lt. yf(1) ) then
             if ( x3d .lt. xf(1)-dx*ni .or. y3d .lt. yf(1)-dy*nj ) then
                print *, 'Droplet jumped over southwest nearest neighbor'
                errcode = 50
             end if
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR14.2: SHOULD NOT BE HERE',oute,outw,outn,outs,x3d,y3d,xf(1),xf(ni+1),yf(1),yf(nj+1)
             neighbor = mysw
          else if ( x3d .lt. xf(1) .and. y3d .gt. yf(nj+1) ) then
             if ( x3d .lt. xf(1)-dx*ni .or. y3d .gt. yf(nj+1)+dy*nj ) then
                print *, 'Droplet jumped over northwest nearest neighbor'
                errcode = 50
             end if
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR14.3: SHOULD NOT BE HERE',oute,outw,outn,outs,x3d,y3d,xf(1),xf(ni+1),yf(1),yf(nj+1)
             neighbor = mynw
          else if ( x3d .gt. xf(ni+1) .and. y3d .ge. yf(1) .and. &
                    y3d .le. yf(nj+1) ) then
@@ -4461,18 +4500,21 @@
                print *, 'Droplet jumped over east nearest neighbor'
                errcode = 50
             end if
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR14.4: SHOULD NOT BE HERE',oute,outw,outn,outs,x3d,y3d,xf(1),xf(ni+1),yf(1),yf(nj+1)
             neighbor = myeast
          else if ( x3d .gt. xf(ni+1) .and. y3d .lt. yf(1) ) then
             if ( x3d .gt. xf(ni+1)+dx*ni .or. y3d .lt. yf(1)-dy*nj ) then
                print *, 'Droplet jumped over southeast nearest neighbor'
                errcode = 50
             end if
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR14.5: SHOULD NOT BE HERE',oute,outw,outn,outs,x3d,y3d,xf(1),xf(ni+1),yf(1),yf(nj+1)
             neighbor = myse
          else if ( x3d .gt. xf(ni+1) .and. y3d .gt. yf(nj+1) ) then
             if ( x3d .gt. xf(ni+1)+dx*ni .or. y3d .gt. yf(nj+1)+dy*nj ) then
                print *, 'Droplet jumped over northeast nearest neighbor'
                errcode = 50
             end if
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR14.6: SHOULD NOT BE HERE',oute,outw,outn,outs,x3d,y3d,xf(1),xf(ni+1),yf(1),yf(nj+1)
             neighbor = myne
          else if ( x3d .ge. xf(1) .and. x3d .le. xf(ni+1) .and. &
                    y3d .lt. yf(1) ) then
@@ -4480,6 +4522,7 @@
                print *, 'Droplet jumped over south nearest neighbor'
                errcode = 50
             end if
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR14.7: SHOULD NOT BE HERE',oute,outw,outn,outs,x3d,y3d,xf(1),xf(ni+1),yf(1),yf(nj+1)
             neighbor = mysouth
          else if ( x3d .ge. xf(1) .and. x3d .le. xf(ni+1) .and. &
                    y3d .gt. yf(nj+1) ) then
@@ -4487,6 +4530,7 @@
                print *,'Droplet jumped over north nearest neighbor'
                errcode = 50
             end if
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR14.8: SHOULD NOT BE HERE',oute,outw,outn,outs,x3d,y3d,xf(1),xf(ni+1),yf(1),yf(nj+1)
             neighbor = mynorth
          else
             ! This condition should never be entered
