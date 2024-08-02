@@ -110,7 +110,7 @@
       real, intent(in), dimension(ibl:iel,jbl:jel) :: s10
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: rho,prs,ta
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: pi0,th0,th_in,ppa
-      double precision, intent(inout), dimension(:,:,:,:) :: dpten
+      double precision, intent(inout), dimension(ib:ie,jb:je,kb:ke,7) :: dpten
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke,numq) :: qa
       real, intent(inout), dimension(ib:ie+1,jb:je,kb:ke) :: ua
       real, intent(inout), dimension(ib:ie,jb:je+1,kb:ke) :: va
@@ -1106,35 +1106,46 @@
       !The different cases that kill a particle:
       if (z3d.gt.top .or. z3d.lt.bot) then
          !print *, 'DHR4:',x3d,pdata(np,prx),y3d,pdata(np,pry),z3d,pdata(np,prz)
-         z3d = bot            !Just temporary  
+         !Temporary: don't advance position to avoid MPI rank confusion
+         x3d = pdata(np,prx)
+         y3d = pdata(np,pry)
+         z3d = pdata(np,prz)
          pdata(np,pract) = -1.0  !Signal this as no longer alive
       end if
 
       if (x3d.gt.east .and. ebc.eq.4) then
          oute = 1
          print *, 'DHR5:',x3d,pdata(np,prx),y3d,pdata(np,pry),z3d,pdata(np,prz)
-         x3d = pdata(np,prx)   !Temporary
+         !Temporary: don't advance position to avoid MPI rank confusion
+         x3d = pdata(np,prx)
+         y3d = pdata(np,pry)
          pdata(np,pract) = -1.0  !Signal this as no longer alive
       end if
 
       if (x3d.lt.west .and. wbc.eq.4) then
          outw = 1
          print *, 'DHR6:',x3d,pdata(np,prx),y3d,pdata(np,pry),z3d,pdata(np,prz)
-         x3d = pdata(np,prx)   !Temporary
+         !Temporary: don't advance position to avoid MPI rank confusion
+         x3d = pdata(np,prx)
+         y3d = pdata(np,pry)
          pdata(np,pract) = -1.0  !Signal this as no longer alive
       end if
 
       if (y3d.gt.north .and. nbc.eq.4) then
          outn = 1
          print *, 'DHR7:',x3d,pdata(np,prx),y3d,pdata(np,pry),z3d,pdata(np,prz)
-         y3d = pdata(np,pry)   !Temporary
+         !Temporary: don't advance position to avoid MPI rank confusion
+         x3d = pdata(np,prx)
+         y3d = pdata(np,pry)
          pdata(np,pract) = -1.0  !Signal this as no longer alive
       end if
 
       if (y3d.lt.south .and. sbc.eq.4) then
          outs = 1
          print *, 'DHR8:',x3d,pdata(np,prx),y3d,pdata(np,pry),z3d,pdata(np,prz)
-         y3d = pdata(np,pry)     !Temporary
+         !Temporary: don't advance position to avoid MPI rank confusion
+         x3d = pdata(np,prx)
+         y3d = pdata(np,pry)
          pdata(np,pract) = -1.0  !Signal this as no longer alive
       end if
 
@@ -1641,7 +1652,7 @@
       real, intent(in), dimension(ib:ie,jb:je,kb:ke) :: zh
       real, intent(in), dimension(kb:ke) :: sigma
       real, intent(in), dimension(kb:ke+1) :: sigmaf
-      double precision, intent(inout), dimension(:,:,:,:) :: dpten
+      double precision, intent(inout), dimension(ib:ie,jb:je,kb:ke,7) :: dpten
 
       integer, intent(in) :: np
       integer, intent(in) :: iflag,jflag,kflag
