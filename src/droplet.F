@@ -110,7 +110,7 @@
       real, intent(in), dimension(ibl:iel,jbl:jel) :: s10
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: rho,prs,ta
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: pi0,th0,th_in,ppa
-      double precision, intent(inout), dimension(ib:ie,jb:je,kb:ke,6) :: dpten
+      double precision, intent(inout), dimension(:,:,:,:) :: dpten
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke,numq) :: qa
       real, intent(inout), dimension(ib:ie+1,jb:je,kb:ke) :: ua
       real, intent(inout), dimension(ib:ie,jb:je+1,kb:ke) :: va
@@ -1641,7 +1641,7 @@
       real, intent(in), dimension(ib:ie,jb:je,kb:ke) :: zh
       real, intent(in), dimension(kb:ke) :: sigma
       real, intent(in), dimension(kb:ke+1) :: sigmaf
-      double precision, intent(inout), dimension(ib:ie,jb:je,kb:ke,6) :: dpten
+      double precision, intent(inout), dimension(:,:,:,:) :: dpten
 
       integer, intent(in) :: np
       integer, intent(in) :: iflag,jflag,kflag
