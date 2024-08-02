@@ -1068,7 +1068,7 @@
 
       !Wall BCs:
       top = maxz-pdata(np,prrp)
-      bot = minz+pdata(np,prrp)
+      bot = pdata(np,prrp)
       east = maxx-pdata(np,prrp)
       west = minx+pdata(np,prrp)
       north = maxy-pdata(np,prrp)
