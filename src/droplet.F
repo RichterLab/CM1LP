@@ -196,6 +196,8 @@
       integer :: tmp_flag
 #endif
 
+      integer :: oute,outw,outs,outn
+
 
       call date_and_time(values=values)
       ! 1) To match the initial and restart runs for total droplet number,
@@ -470,31 +472,39 @@
                            x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
                            rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                            part_grav1,part_grav2,part_grav3,debug, &
-                           neighbor,num_fallout,errcode)
+                           neighbor,num_fallout,errcode,oute,outw,outn,outs)
 
 #ifdef MPI
       if(neighbor .eq. mynorth) then 
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR15.1: SHOULD NOT BE HERE',oute,outw,outn,outs,pdata(np,prx),pdata(np,pry),pdata(np,prz)
          pdata_neighbor(np) = inorth
          numDepartN=numDepartN+1
       else if(neighbor .eq. mysouth) then 
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR15.2: SHOULD NOT BE HERE',oute,outw,outn,outs,pdata(np,prx),pdata(np,pry),pdata(np,prz)
          pdata_neighbor(np) = isouth
          numDepartS=numDepartS+1
       else if(neighbor .eq. mywest) then 
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR15.3: SHOULD NOT BE HERE',oute,outw,outn,outs,pdata(np,prx),pdata(np,pry),pdata(np,prz)
          pdata_neighbor(np) = iwest
          numDepartW=numDepartW+1
       else if(neighbor .eq. myeast) then 
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR15.4: SHOULD NOT BE HERE',oute,outw,outn,outs,pdata(np,prx),pdata(np,pry),pdata(np,prz)
          pdata_neighbor(np) = ieast
          numDepartE=numDepartE+1
       else if(neighbor .eq. mynw) then 
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR15.5: SHOULD NOT BE HERE',oute,outw,outn,outs,pdata(np,prx),pdata(np,pry),pdata(np,prz)
          pdata_neighbor(np) = inw
          numDepartNW=numDepartNW+1
       else if(neighbor .eq. myne) then 
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR15.6: SHOULD NOT BE HERE',oute,outw,outn,outs,pdata(np,prx),pdata(np,pry),pdata(np,prz)
          pdata_neighbor(np) = ine
          numDepartNE=numDepartNE+1
       else if(neighbor .eq. mysw) then 
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR15.7: SHOULD NOT BE HERE',oute,outw,outn,outs,pdata(np,prx),pdata(np,pry),pdata(np,prz)
          pdata_neighbor(np) = isw
          numDepartSW=numDepartSW+1
       else if(neighbor .eq. myse) then 
+         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR15.8: SHOULD NOT BE HERE',oute,outw,outn,outs,pdata(np,prx),pdata(np,pry),pdata(np,prz)
          pdata_neighbor(np) = ise
          numDepartSE=numDepartSE+1
       endif
@@ -555,7 +565,7 @@
 
     numHoles = numDepart + num_fallout + (nparcelsLocal-nparcelsLocalActive)
 
-    write(*,'(a8,6i)') 'DHR11:',myid,numHoles,numDepart,num_fallout,nparcelsLocal,nparcelsLocalActive
+    !write(*,'(a8,6i)') 'DHR11:',myid,numHoles,numDepart,num_fallout,nparcelsLocal,nparcelsLocalActive
 
 !----------------------------------------------------------------------
 !  communicate data  (for MPI runs)
@@ -915,7 +925,7 @@
                              x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
                              rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                              part_grav1,part_grav2,part_grav3,debug, &
-                             neighbor,num_fallout,errcode)
+                             neighbor,num_fallout,errcode,oute,outw,outn,outs)
 
       !$acc routine seq
 
@@ -948,6 +958,7 @@
                                         ! stays after this time step 
       integer, intent(inout) :: num_fallout
       integer, intent(inout) :: errcode
+      integer, intent(out) :: oute,outw,outn,outs
 
       real :: dt2
       real :: xrhs1,xrhs2,xrhs3,vrhs1,vrhs2,vrhs3
@@ -969,7 +980,6 @@
       logical :: is_local
       integer :: mflag,flag
 
-      integer :: oute,outw,outn,outs
 
       !Store interpolated quantities for the sake of statistics
       pdata(np,pru) = uval
@@ -1077,10 +1087,10 @@
       !Wall BCs:
       top = maxz-1.0e-4
       bot = 1.0e-4
-      east = maxx-1.0e-4
-      west = minx+1.0e-4
-      north = maxy-1.0e-4
-      south = miny+1.0e-4
+      east = maxx-0.05
+      west = minx+0.05
+      north = maxy-0.05
+      south = miny+0.05
 
       oute = 0
       outw = 0
@@ -1095,7 +1105,7 @@
 
       !The different cases that kill a particle:
       if (z3d.gt.top .or. z3d.lt.bot) then
-         print *, 'DHR4:',x3d,pdata(np,prx),y3d,pdata(np,pry),z3d,pdata(np,prz)
+         !print *, 'DHR4:',x3d,pdata(np,prx),y3d,pdata(np,pry),z3d,pdata(np,prz)
          z3d = bot            !Just temporary  
          pdata(np,pract) = -1.0  !Signal this as no longer alive
       end if
@@ -1175,20 +1185,12 @@
             !$acc atomic update
             hist_fallrad(ibin) = hist_fallrad(ibin) + pdata(np,prmult)
 
+
+            !If it was killed, set parameters to undefined so it gets removed from list later
+            neighbor = undefined_index
+            pdata_locind(np,1) = undefined_index
+            pdata_locind(np,2) = undefined_index
             pdata_locind(np,3) = undefined_index
-      endif
-
-      ! New for cm1r17:  if parcel exits domain,
-      ! just assume periodic lateral boundary conditions
-      ! (no matter what actual settings are for wbc,ebc,sbc,nbc)
-
-      if ( pdata(np,pract) .lt. 0.0 ) then
-
-         !If it was killed, set parameters to undefined so it gets removed from list later
-         if (oute.eq.1 .or. outw.eq.1 .or. outn.eq.1 .or. outs.eq.1) print *, 'DHR19: SHOULD BE HERE',oute,outw,outn,outs
-         neighbor = undefined_index
-         pdata_locind(np,1) = undefined_index
-         pdata_locind(np,2) = undefined_index
       else
 
          !If it was not killed, look for neighbors and prepare for transfer
