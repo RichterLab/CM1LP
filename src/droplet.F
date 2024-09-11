@@ -15,7 +15,7 @@
 
   !These are quantities which are needed in the droplet_diag output, so must be public
   real :: num100,num1000
-  integer, parameter :: nbins = 258  !Bins for the droplet histograms
+  integer, parameter :: nbins = 130  !Bins for the droplet histograms
   real,dimension(nbins) :: bins_restime  !Bins for droplet residence time
   real,dimension(nbins,nbins) :: hist_restime  !Droplet residence time joint pdf (with size)
   real,dimension(nbins) :: bins_radius,hist_radius,hist_radius10,hist_fallrad  !Histograms for droplet radius
@@ -1991,6 +1991,8 @@
 
       real :: partnumrz(nk,nbins),multnumrz(nk,nbins),vp3meanrz(nk,nbins)
 
+      real :: tnumpart_r(nbins)
+
       integer, parameter :: num0 = 26, num1 = 29   !Number of 0th and 1st order statistics in droplet_diag
       real :: rad10_tmp
       double precision :: qstar_tmp
@@ -2014,7 +2016,7 @@
       !$acc              vp3mean,vp1msqr,vp2msqr,vp3msqr,radmsqrdp, &
       !$acc              uf1mean,uf2mean,uf3mean, &
       !$acc              Tpmsqr,m1src,m2src,m3src,qstardp,kmoist,mse,wk,wtmp, &
-      !$acc               partnumrz,multnumrz,vp3meanrz) 
+      !$acc              partnumrz,multnumrz,vp3meanrz,tnumpart_r) 
 
       !!!!!!! 0th order  !!!!!!!!
 
@@ -2588,6 +2590,7 @@
 
       hist_radius = 0.0
       hist_radius10 = 0.0
+      tnumpart_r = 0.0
 
       !$acc update device (hist_radius,hist_radius10)
 
@@ -2615,11 +2618,14 @@
             !$acc atomic update
             hist_radius10(ibin) = hist_radius10(ibin) + pdata(np,prmult)
          end if
+
+         !$acc atomic update
+	 tnumpart_r(ibin) = tnumpart_r(ibin) + 1.0
      
       end do
       !$acc end parallel
 
-      !$acc update host (hist_radius,hist_radius10,hist_restime,hist_fallrad)
+      !$acc update host (hist_radius,hist_radius10,hist_restime,hist_fallrad,tnumpart_r)
 
 #ifdef MPI
        !Sum up the histograms across MPI processes
@@ -2632,6 +2638,8 @@
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
           call mpi_reduce(MPI_IN_PLACE,hist_fallrad,nbins,MPI_REAL, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
+          call mpi_reduce(MPI_IN_PLACE,tnumpart_r,nbins,MPI_REAL, &
+                         MPI_SUM,0,MPI_COMM_WORLD,ierr)
        else
           call mpi_reduce(hist_radius,hist_radius,nbins,MPI_REAL, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
@@ -2640,6 +2648,8 @@
           call mpi_reduce(hist_restime,hist_restime,nbins*nbins,MPI_REAL, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
           call mpi_reduce(hist_fallrad,hist_fallrad,nbins,MPI_REAL, &
+                         MPI_SUM,0,MPI_COMM_WORLD,ierr)
+          call mpi_reduce(tnumpart_r,tnumpart_r,nbins,MPI_REAL, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
        end if
 #endif
@@ -2652,7 +2662,7 @@
 #endif
       call writedropdiag_nc(nrec,nbins, &
            rtime,tnumpart,tnummult,tnumaerosol,tnumdrop,radavg,radsqr,radmin,radmax,Tpavg,Tpsqr,Tpmin,Tpmax,Tfavg,qfavg,prsavg,rhoavg, &
-           dumzh,numconc,massconc,vp1mean,vp2mean,vp3mean,uf1mean,uf2mean,uf3mean,vp1msqr,vp2msqr,vp3msqr,m1src,m2src,m3src,Tpsrc,qvsrc,Tf,qf,Tpmean,Tpmsqr,radmean,radmsqr,qfsat,qstarmean,kmoist,mse,wk,multnumrz,vp3meanrz)
+           dumzh,numconc,massconc,vp1mean,vp2mean,vp3mean,uf1mean,uf2mean,uf3mean,vp1msqr,vp2msqr,vp3msqr,m1src,m2src,m3src,Tpsrc,qvsrc,Tf,qf,Tpmean,Tpmsqr,radmean,radmsqr,qfsat,qstarmean,kmoist,mse,wk,multnumrz,vp3meanrz,tnumpart_r)
 #ifdef MPI
       end if
 #endif
@@ -3814,7 +3824,7 @@
 
       subroutine writedropdiag_nc(nrec,nbins,&
                                   rtime,tnumpart,tnummult,tnumaerosol,tnumdrop,radavg,radsqr,radmin,radmax,Tpavg,Tpsqr,Tpmin,Tpmax,Tfavg,qfavg,prsavg,rhoavg,&
-                                  zhvec,numconc,massconc,vp1mean,vp2mean,vp3mean,uf1mean,uf2mean,uf3mean,vp1msqr,vp2msqr,vp3msqr,m1src,m2src,m3src,Tpsrc,qvsrc,Tf,qf,Tpmean,Tpmsqr,radmean,radmsqr,qfsat,qstarmean,kmoist,mse,wk,multnumrz,vp3meanrz)
+                                  zhvec,numconc,massconc,vp1mean,vp2mean,vp3mean,uf1mean,uf2mean,uf3mean,vp1msqr,vp2msqr,vp3msqr,m1src,m2src,m3src,Tpsrc,qvsrc,Tf,qf,Tpmean,Tpmsqr,radmean,radmsqr,qfsat,qstarmean,kmoist,mse,wk,multnumrz,vp3meanrz,tnumpart_r)
       use input
       use constants
       use netcdf
@@ -3825,6 +3835,7 @@
       real,    intent(in)    :: rtime,radavg,radsqr,radmin,radmax,Tpavg,Tpsqr,Tpmin,Tpmax,Tfavg,qfavg,prsavg,rhoavg,tnummult,tnumaerosol,tnumdrop
       real,    intent(in)    :: zhvec(nk),numconc(nk),massconc(nk),vp1mean(nk),vp2mean(nk),vp3mean(nk),vp1msqr(nk),vp2msqr(nk),vp3msqr(nk),m1src(nk),m2src(nk),m3src(nk),Tpsrc(nk),qvsrc(nk),Tf(nk),qf(nk),Tpmean(nk),Tpmsqr(nk),radmean(nk),radmsqr(nk),qfsat(nk),qstarmean(nk),uf1mean(nk),uf2mean(nk),uf3mean(nk),kmoist(nk),mse(nk),wk(nk)
       real,    intent(in)    :: multnumrz(nk,nbins),vp3meanrz(nk,nbins)
+      real,    intent(in)    :: tnumpart_r(nbins)
       integer, intent(in)    :: nbins
       real, intent(in) :: tnumpart
 
@@ -4161,6 +4172,10 @@
     call disp_err( nf90_put_att(ncid,varid,"long_name","total radius count of droplet which fell out over the past statfrq time") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
 
+    call disp_err( nf90_def_var(ncid,"tnumpart_r",nf90_float,(/binsid,timeid/),varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Droplet count as a function of radius, binned by bins_radius") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
+
 
     call disp_err( nf90_put_att(ncid,NF90_GLOBAL,'CM1 version',trim(cm1version)) , .true. )
     call disp_err( nf90_enddef(ncid=ncid) , .true. )
@@ -4376,6 +4391,9 @@
 
     call disp_err( nf90_inq_varid(ncid,"hist_fallrad",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,hist_fallrad,(/1,time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"tnumpart_r",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,tnumpart_r,(/1,time_index/)) , .true. )
 
     ! close file
 
