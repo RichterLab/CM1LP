@@ -23,9 +23,9 @@
   real :: dhrad,rmin,rmax,rmin10,rmax10  !Bin parameters for droplet size
 
   double precision :: u10_ssgf 
-  real :: num_destroyed,num_injected,mass_destroyed,mass_injected !Cumulative particle counts between droplet_diag calls
-  real :: eng_destroyed,eng_injected,m1_destroyed,m2_destroyed,m1_injected,m2_injected   !Same but for droplet internal energy and momentum
-  real :: mass_reentry,eng_reentry,m1_reentry,m2_reentry
+  double precision :: num_destroyed,num_injected,mass_destroyed,mass_injected !Cumulative particle counts between droplet_diag calls
+  double precision :: eng_destroyed,eng_injected,m1_destroyed,m2_destroyed,m1_injected,m2_injected   !Same but for droplet internal energy and momentum
+  double precision :: mass_reentry,eng_reentry,m1_reentry,m2_reentry
   double precision :: mass_evap,mass_dpten
 
   integer :: particle_seed
