@@ -125,6 +125,17 @@
         xls    = 2834000.0
         earth_radius  =  6370000.0
 
+      ELSEIF( testcase.eq.16)THEN
+
+	! Pi chamber DNS
+        g      = 0.545
+        rd     = 287.04
+        cp     = 1005.7
+        cp_dp  = 1005.7d0
+        cpv    = 1870.0
+        xlv    = 2501000.0
+        xls    = 2834000.0
+        earth_radius  =  6370000.0
       ELSE
 
         !  RCEMIP
@@ -137,8 +148,7 @@
 !!!        earth_radius  =  6371000.0
 
         !  cm1 defaults:
-        !g      = 9.81
-        g      = 0.545
+        g      = 9.81
         rd     = 287.04
         cp     = 1005.7
         cp_dp  = 1005.7d0

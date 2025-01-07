@@ -299,10 +299,8 @@
       call bcast_int(iprcl)
       call bcast_int(nparcelsInit) ! DEVICE
       call bcast_int(nparcelsMax)
-      call bcast_real(injectHMax)
       call bcast_real(drop_inject_elapse)
       call bcast_real(drop_inject_time)
-      call bcast_real(drop_w_init)
       call bcast_real(drop_mult)
       call bcast_real(kdiff2)
       call bcast_real(kdiff6)
@@ -2693,7 +2691,6 @@
       if(dowr) write(outfile,*) 'iprcl     =',iprcl
       if(dowr) write(outfile,*) 'nparcelsInit=',nparcelsInit
       if(dowr) write(outfile,*) 'nparcelsMax=',nparcelsMax
-      if(dowr) write(outfile,*) 'injectHMax= ',injectHMax
       if(dowr) write(outfile,*)
       if(dowr) write(outfile,*) 'kdiff2    =',kdiff2
       if(dowr) write(outfile,*) 'kdiff6    =',kdiff6
@@ -6225,7 +6222,6 @@
       !$acc update device(nparcelsInit,npvals,pru,prv,prw,prt,prqv,prprs,prrho)
 
       if(dowr) write(outfile,*)
-      if(dowr) write(outfile,*) '  injectHMax = ',injectHMax
       if(dowr) write(outfile,*) ' nparcelsMax = ',nparcelsMax
       if(dowr) write(outfile,*) ' nparcelsInit= ',nparcelsInit
       if(dowr) write(outfile,*) '  npvals     = ',npvals

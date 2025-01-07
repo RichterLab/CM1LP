@@ -77,7 +77,7 @@
           mywest,myid,nparcelsLocal,nparcelsLocalActive, &
           time_phys_H2D,time_phys_D2H,drop_inject_elapse, &
           drop_inject_time,time_dropC1,time_dropC2,time_dropC3, &
-          time_dropC4,ngxy,dx,dy,dz
+          time_dropC4,ngxy,dx,dy,dz,testcase
       use constants
       use comm_module
       use comm_droplet_module
@@ -379,8 +379,12 @@
     dt2 = dt/2.0
     part_grav1 = 0.0
     part_grav2 = 0.0
-    part_grav3 = -2.3122
-    !part_grav3 = -9.81
+    part_grav3 = -9.81
+
+    !For Pi chamber, this is often scaled to some other value
+    if (testcase.eq.16) then
+       part_grav3 = -2.3122
+    end if
 
 
 #ifdef _B4B01F
@@ -859,8 +863,16 @@
 
       if (doinject .eq. 1) then
 
-            call droplet_injection_pi(pdata,xf,yf,max(drop_inject_elapse,dt),mtime,my_reintro)
-            !call droplet_injection(pdata,xf,yf,max(drop_inject_elapse,dt),mtime,my_reintro)
+	    my_reintro = 0
+
+	    if (testcase.eq.15) then  !Hurricane boundary layer spray LES case
+               call droplet_injection(pdata,xf,yf,max(drop_inject_elapse,dt),mtime,my_reintro)
+	    end if
+
+            if (testcase.eq.16) then  !Pi chamber
+               call droplet_injection_pi(pdata,xf,yf,max(drop_inject_elapse,dt),mtime,my_reintro)
+	    end if
+
 
             !This loop isn't strictly necessary, but populate the interpolated values to the newly injected particles
             !Doesn't affect solution at all! Since interpolation happens at start of droplet_driver 
@@ -3415,8 +3427,8 @@
       use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz,prrp,prrp0,prtp,prms,pract,prtime, &
                         prmult,prt,prrho,prprs,prqv,nparcelsLocalActive,numprocs,nparcelsMax, &
-                        time_phys_H2D,time_phys_D2H,time_droplet,timestats,mytime,injectHMax, &
-                        drop_w_init,drop_mult,tsk0,pi_sp,myid,nx,ny,dx,dy
+                        time_phys_H2D,time_phys_D2H,time_droplet,timestats,mytime, &
+                        drop_mult,tsk0,pi_sp,myid,nx,ny,dx,dy
       use constants
       use MersenneTwister_mod
 #ifdef MPI
@@ -3551,7 +3563,7 @@
       !Now that my_reintro has been calculated, reset to the LOCAL area for initializing droplet location
       xrange = xf(ni+1)-xf(1)
       yrange = yf(nj+1)-yf(1)
-      zrange = injectHMax
+      zrange = 20.0
 
       !Update the cumulative injection statistics
       num_injected = num_injected + real(my_reintro)*drop_mult
@@ -3626,11 +3638,11 @@
                rad_init = 10.0e-6
                pdata(np,prx) = xf(1) + xrange/2.0
                pdata(np,pry) = yf(1) + yrange/2.0
-               pdata(np,prz) = injectHMax
+               pdata(np,prz) = zrange
             end if
             pdata(np,prvpx) = 0.0
             pdata(np,prvpy) = 0.0
-            pdata(np,prvpz) = drop_w_init   !Specified in namelist file
+            pdata(np,prvpz) = 3.0 
             pdata(np,prrp) = rad_init
             pdata(np,prrp0) = rad_init
             salinity = 0.034
@@ -3697,8 +3709,8 @@
       use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz,prrp,prrp0,prtp,prms,pract,prtime, &
                         prmult,prt,prrho,prprs,prqv,nparcelsLocalActive,numprocs,nparcelsMax, &
-                        time_phys_H2D,time_phys_D2H,time_droplet,timestats,mytime,injectHMax, &
-                        drop_w_init,drop_mult,tsk0,pi_sp,myid,nx,ny,nz,dx,dy,dz
+                        time_phys_H2D,time_phys_D2H,time_droplet,timestats,mytime, &
+                        drop_mult,tsk0,pi_sp,myid,nx,ny,nz,dx,dy,dz
       use constants
       use MersenneTwister_mod
 #ifdef MPI

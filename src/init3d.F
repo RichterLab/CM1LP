@@ -180,7 +180,7 @@
       logical, parameter :: use_truly_random_pert  =  .true.
 
       real :: tmpx, tmpy, tmpz
-      real :: xrange, yrange
+      real :: xrange, yrange, zrange
       integer(i8) :: np_tmp
 
 !--------------------------
@@ -431,6 +431,7 @@
         nparcelsLocalActive = 0
         xrange = xf(ni+1) - xf(1)
         yrange = yf(nj+1) - yf(1)
+	zrange = maxz
 
         iter = floor(real(nparcelsInit) / real(numprocs))
         if ( mod(real(nparcelsInit),real(numprocs)) /= 0 ) then
@@ -446,7 +447,7 @@
           rand = getRandomReal(randomNumbers)
           tmpy = yf(1)+rand*yrange
           rand = getRandomReal(randomNumbers)
-          tmpz = rand*injectHMax
+          tmpz = rand*zrange
 
           pdata(i,prx) = tmpx
           pdata(i,pry) = tmpy

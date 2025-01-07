@@ -199,6 +199,9 @@
            - Almost same as testcase 10, but with no nudging, other tweaks
            - 2023 Derecho ASD project 
 
+    16 =   Pi Chamber DNS case with Lagrangian droplet injection
+           - Based on MacMillan et al. (2022)
+           - Changes droplet injection scheme, gravitation acceleration, vapor sink
 
 
  adapt_dt - Use adaptive timestep?  (0=no, 1=yes)
@@ -663,11 +666,12 @@
 
  pdtra - Ensure positive-definiteness for tracers?  (0=no, 1=yes)
 
- iprcl - Integrate passive parcels? (0=no, 1=yes)
+ iprcl - Integrate parcels? (0=no, 1=yes)
+         Deprecated, now that there are droplets in the code. Likely 
+         does not work as originally intended. Meant to be joined with 
+         prcl_droplet below
 
-           User must initialize "pdata" array in init3d.F.
-
- nparcels - Total number of parcels.
+ prcl_droplet - Makes what was "parcels" into Lagrangian microphysical droplets
 
 -------------------------------------------------------------------------
   param3 section -- enter REAL values
@@ -1578,6 +1582,20 @@
  prcl_qsat  -  saturation vapor pressure
 
  prcl_sfc   -  surface variables  (roughness length and friction velocity)
+
+ nparcelsInit  -  The number of Lagrangian particles to be initialized at the 
+                  start of the simulation. Must always be 1 or greater.
+
+ nparcelsMax  -  The maximum total number of Lagrangian particles allowed. When 
+                 injecting new particles, this will stop when this number is 
+                 reached. This is typically based on computational resources (e.g. memory).
+
+ drop_mult  -  The particle multiplicity. Total number of represented particles = nparcels*drop_mult
+
+ drop_inject_elapse  -  Time between calls to particle injection
+
+ drop_inject_time  - Time after which particle injection begins
+   
 
 
 -------------------------------------------------------------------------

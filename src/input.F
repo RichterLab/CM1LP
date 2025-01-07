@@ -121,8 +121,7 @@
               output_ubudget,output_vbudget,output_wbudget,output_pdcomp,     &
               prcl_th,prcl_t,prcl_prs,prcl_ptra,prcl_q,prcl_nc,               &
               prcl_km,prcl_kh,prcl_tke,prcl_dbz,prcl_b,prcl_vpg,prcl_vort,    &
-              prcl_rho,prcl_qsat,prcl_sfc,                                    &
-              prcl_droplet,                                                   &
+              prcl_rho,prcl_qsat,prcl_sfc,prcl_droplet,                       &
               n_out,s_out,u_out,v_out,w_out,z_out,sout2d,sout3d,              &
               stat_w,stat_wlevs,stat_u,stat_v,stat_rmw,                       &
               stat_pipert,stat_prspert,stat_thpert,stat_q,                    &
@@ -207,12 +206,12 @@
            rad_solcon,rad_jday,rad_zenangle,rad_declin,rad_hrang,             &
            adapt_move_frq,                                                    &
            base_pbot,base_ptop,base_thbot,base_thtop,base_qvbot,base_qvtop,   &
-           base_tbot,base_ttop,base_pibot,base_pitop,injectHMax,drop_mult,    &
-           drop_inject_elapse,drop_inject_time,drop_w_init
+           base_tbot,base_ttop,base_pibot,base_pitop,drop_mult,               &
+           drop_inject_elapse,drop_inject_time
 
       !$acc declare create (dx,dy,zt,rzt,umove,vmove,viscosity,pr_num,sc_num, &
       !$acc                 ptc_n,ptc_s,ptc_e,ptc_w,                          &
-      !$acc                 minx,maxx,miny,maxy,maxz,drop_w_init)
+      !$acc                 minx,maxx,miny,maxy,maxz)
 
 !-----------------------------------------------------------------------
 
@@ -277,8 +276,7 @@
           wbc,ebc,sbc,nbc,bbc,tbc,irbc,roflux,nudgeobc,                 &
           isnd,iwnd,itern,iinit,                                        &
           irandp,ibalance,iorigin,axisymm,imove,iptra,npt,pdtra,        &
-          iprcl,nparcelsInit,nparcelsMax,injectHMax,                    &
-          drop_mult,drop_inject_elapse,drop_inject_time,drop_w_init
+          iprcl,prcl_droplet
       namelist /param3/ kdiff2,kdiff6,fcor,kdiv,alph,rdalpha,zd,xhd,alphobc, &
                         umove,vmove,v_t,l_h,lhref1,lhref2,l_inf,ndcnst
       namelist /param4/ stretch_x,dx_inner,dx_outer,nos_x_len,tot_x_len
@@ -332,7 +330,9 @@
       namelist /param13/                                                      &
               prcl_th,prcl_t,prcl_prs,prcl_ptra,prcl_q,prcl_nc,               &
               prcl_km,prcl_kh,prcl_tke,prcl_dbz,prcl_b,prcl_vpg,prcl_vort,    &
-              prcl_rho,prcl_qsat,prcl_sfc,prcl_droplet
+              prcl_rho,prcl_qsat,prcl_sfc,                                    &
+              nparcelsInit,nparcelsMax,drop_mult,                             &
+	      drop_inject_elapse,drop_inject_time
       namelist /param14/                                                      &
               dodomaindiag,diagfrq
       namelist /param15/                                                      &
