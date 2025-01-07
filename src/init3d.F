@@ -177,7 +177,7 @@
       !        every time it is called.  To use truly random perturbations 
       !        (ie, different sets of random perturbations every time CM1 
       !        is used), then change this varliable to .true.
-      logical, parameter :: use_truly_random_pert  =  .false.
+      logical, parameter :: use_truly_random_pert  =  .true.
 
       real :: tmpx, tmpy, tmpz
       real :: xrange, yrange
@@ -459,7 +459,8 @@
              pdata(i,prvpz) = 0.0
      
              !Droplet size (radius)
-             pdata(i,prrp) = 2.0e-7
+             pdata(i,prrp) = 2.0e-6
+             pdata(i,prrp0) = 2.0e-6
      
              !Droplet solute mass
              salinity = 0.066
