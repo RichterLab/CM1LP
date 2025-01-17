@@ -161,7 +161,7 @@
           nutk,nvtk,nwtk,cgs1,cgs2,cgs3,cgt1,cgt2,cgt3,rzt,zt,rdx,rdy,rdz,nqg,nqr,dot2p, &
           kd_turb,ud_rdamp,vd_rdamp,wd_rdamp,td_rdamp,td_hediff,td_vediff,qd_hediff,qd_vediff, &
           td_diss,td_rad,td_pbl,td_hturb,td_vturb,qd_hturb,qd_vturb,ud_pbl,vd_pbl,qd_pbl, &
-          td_nudge,qd_nudge,prcl_droplet,ntwk,pdcomp,nbc,ebc,sbc,wbc, &
+          td_nudge,qd_nudge,prcl_droplet,ntwk,pdcomp,nbc,ebc,sbc,wbc,two_way_coupling, &
           output_rain,output_sws,output_svs,output_sps,output_srs,output_sgs,output_sus,output_shs
 
       use constants
@@ -343,7 +343,7 @@
 
       double precision :: weps,afoo,bfoo,p0,p2
 
-      logical :: get_time_avg,dopf,two_way_coupling
+      logical :: get_time_avg,dopf
 
 #ifdef MPI
       integer :: reqp1,reqp2
@@ -1022,8 +1022,7 @@
             enddo
             enddo
           endif
-          two_way_coupling = .true.
-          IF( two_way_coupling )THEN
+          IF( two_way_coupling.eq.1 )THEN
             !$omp parallel do default(shared) private(i,j,k)
             !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
             do k=1,nk

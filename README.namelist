@@ -1595,10 +1595,13 @@
  drop_inject_elapse  -  Time between calls to particle injection
 
  drop_inject_time  - Time after which particle injection begins
+
+ two_way_coupling  -  Whether the change in the particles is coupled to the surrounding flow
+                      (1 = coupled, 0 = particles feel flow, flow does not feel particles)
    
 
 
--------------------------------------------------------------------------
+------------------------------------------------------------------------
   nssl2mom_params section - parameters/options for NSSL microphysics scheme
     (used only if ptype=26,27,28)
     Default values are noted. 

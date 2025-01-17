@@ -298,6 +298,7 @@
       call bcast_int(pdtra)
       call bcast_int(iprcl)
       call bcast_int(nparcelsInit) ! DEVICE
+      call bcast_int(two_way_coupling) ! DEVICE
       call bcast_int(nparcelsMax)
       call bcast_real(drop_inject_elapse)
       call bcast_real(drop_inject_time)
@@ -2691,6 +2692,7 @@
       if(dowr) write(outfile,*) 'iprcl     =',iprcl
       if(dowr) write(outfile,*) 'nparcelsInit=',nparcelsInit
       if(dowr) write(outfile,*) 'nparcelsMax=',nparcelsMax
+      if(dowr) write(outfile,*) 'two_way_coupling=',two_way_coupling
       if(dowr) write(outfile,*)
       if(dowr) write(outfile,*) 'kdiff2    =',kdiff2
       if(dowr) write(outfile,*) 'kdiff6    =',kdiff6
