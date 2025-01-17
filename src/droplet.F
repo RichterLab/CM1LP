@@ -953,8 +953,8 @@
           prvpx,prvpy,prvpz,prrp,prrp0,prms,prtp,prx,pry,prsig,prz,pru,prv, &
           prw,prt,prqv,prprs,prrho,pract,prtime,prmult,ni,nj,mywest, &
           mysw,mynw,myeast,myse,myne,mysouth,mynorth,nparcelsLocal, &
-          myid,dx,dy,pi_sp,pi_dp,ngxy,nbc,sbc,ebc,wbc,tsk0
-      use constants , only : rhow,rhow_dp,undefined_index,cpl
+          myid,dx,dy,pi_sp,pi_dp,ngxy,nbc,sbc,ebc,wbc,tsk0,drop_evap
+      use constants , only : rhow,rhow_dp,undefined_index,cpl,cpl_dp,cp_dp
       use comm_module
       use parcel_module
       use mpi
@@ -991,7 +991,7 @@
       real :: top,bot,restime10_tmp,rad10_tmp
       real :: north,south,east,west
       integer :: i,j,k,ibin,ibin_res
-      double precision :: taup,volp,rhop
+      double precision :: taup,volp,rhop,tmp_coeff
       double precision :: taup_scale,dt_nondim
       double precision :: guess
       double precision :: rt_zeros(2),rt_start(2)
@@ -1052,6 +1052,8 @@
       pdata(np,prvpz) = (pdata(np,prvpz) + wval*(dbldt/taup) + dbldt*part_grav3)/(1.0d0 + dbldt/taup)
 
       !Nonlinear solver for the radius and temperature:
+      !Only do this if the droplet evaporation is turned on
+      if (drop_evap.eq.1) then
 
       !Nondimensionalize parameters before the solver using 1-micron water droplet as ref
       taup_scale = rhow_dp*(1.0d-6)**2/(18.0d0*dble(rhoval)*dble(viscosity))
@@ -1096,6 +1098,14 @@
       !Now redimsionalize
       pdata(np,prrp) = rt_zeros(1)*pdata(np,prrp)
       pdata(np,prtp) = rt_zeros(2)*pdata(np,prtp)
+
+      else !If droplet evaporation is turned off, leave radius unchanged and update temperature via BE
+
+      tmp_coeff = Nup/3.0/pr_num*(rhop/rhow_dp)*(cp_dp/cpl_dp)/taup
+      pdata(np,prtp) = (pdata(np,prtp) + tmp_coeff*dbldt*tval)/(1+dbldt*tmp_coeff)
+
+
+      end if !drop_evap
 
       !Update the droplet timer
       pdata(np,prtime) = pdata(np,prtime) + dt

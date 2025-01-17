@@ -1599,6 +1599,8 @@
  two_way_coupling  -  Whether the change in the particles is coupled to the surrounding flow
                       (1 = coupled, 0 = particles feel flow, flow does not feel particles)
    
+ drop_evap  -  Are the droplets allowed to evaporate/condense and change size?
+               (1 = yes, 0 = no)
 
 
 ------------------------------------------------------------------------
