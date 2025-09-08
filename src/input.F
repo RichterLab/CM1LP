@@ -123,7 +123,7 @@
               prcl_th,prcl_t,prcl_prs,prcl_ptra,prcl_q,prcl_nc,               &
               prcl_km,prcl_kh,prcl_tke,prcl_dbz,prcl_b,prcl_vpg,prcl_vort,    &
               prcl_rho,prcl_qsat,prcl_sfc,prcl_droplet,two_way_coupling,      &
-	      drop_evap,                                                      &
+	      drop_evap,drop_traj,                                            &
               n_out,s_out,u_out,v_out,w_out,z_out,sout2d,sout3d,              &
               stat_w,stat_wlevs,stat_u,stat_v,stat_rmw,                       &
               stat_pipert,stat_prspert,stat_thpert,stat_q,                    &
@@ -170,6 +170,7 @@
       !$acc                 nqv,bbc,imove,prvpx,prvpy,prvpz,prrp,prms,prtp,   &
       !$acc                 prx,pry,prz,prsig,ngxy,ngz,ptype,pru,prv,prw,     &
       !$acc                 ibw,ibe,ibs,ibn,two_way_coupling,drop_evap,       &
+      !$acc                 drop_traj,                                        &
       !$acc                 prt,prqv,prprs,prrho,nparcelsLocal,mywest,        &
       !$acc                 myeast,mynorth,mysouth,myne,myse,mysw,mynw,       &
       !$acc                 prmult,pract,prtime)
@@ -335,7 +336,7 @@
               prcl_rho,prcl_qsat,prcl_sfc,                                    &
               nparcelsInit,nparcelsMax,drop_mult,                             &
 	      drop_inject_elapse,drop_inject_time,two_way_coupling,           &
-	      drop_evap
+	      drop_evap,drop_traj
       namelist /param14/                                                      &
               dodomaindiag,diagfrq
       namelist /param15/                                                      &

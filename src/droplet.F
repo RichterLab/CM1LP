@@ -66,7 +66,7 @@
                                  ne2,sw1,sw2,se1,se2,reqs_p,sw31,sw32, &
                                  se31,se32,ss31,ss32,sn31,sn32,n3w1, &
                                  n3w2,n3e1,n3e2,s3w1,s3w2,s3e1,s3e2, &
-                                 reqs_s,dpten,pdata_locind)
+                                 reqs_s,dpten,pdata_locind,nstep)
 
       use input, only : ib,ie,jb,je,kb,ke,ibl,iel,jbl,jel,numq,ni,nj, &
           nk,imp,jmp,kmp,rmp,cmp,kmt,npvals,npvars,cgs1,cgs2,cgs3, &
@@ -79,7 +79,7 @@
           mywest,myid,nparcelsLocal,nparcelsLocalActive, &
           time_phys_H2D,time_phys_D2H,drop_inject_elapse, &
           drop_inject_time,time_dropC1,time_dropC2,time_dropC3, &
-          time_dropC4,ngxy,dx,dy,dz,testcase
+          time_dropC4,ngxy,dx,dy,dz,testcase,drop_traj
       use constants
       use comm_module
       use comm_droplet_module
@@ -99,6 +99,7 @@
 !-----------------------------------------------------------------------
 
       real, intent(in) :: dt
+      integer, intent(in) :: nstep
       double precision, intent(in) :: dbldt
       double precision, intent(in) :: mtime
       real, intent(in), dimension(ib:ie) :: xh,uh,ruh
@@ -407,6 +408,13 @@
       !write(*,*) 'DHR TRAJ:',pdata(np,prx),pdata(np,prrp),transfer(pdata(np,prpidx),ngidx),transfer(pdata(np,prprocidx),ngidx)
       if ( transfer(pdata(np,prpidx),ngidx).eq.15 .and. transfer(pdata(np,prprocidx),ngidx).eq.0 ) then
          write(*,*) 'DHR TRAJ:',pdata(np,prx),pdata(np,pry),pdata(np,prz),pdata(np,prrp)
+      end if
+
+      !Right away store the particle trajectory info if desired
+      if (drop_traj.eq.1) then
+         call write_drop_traj(nstep,real(mtime),transfer(pdata(np,prprocidx),ngidx),transfer(pdata(np,prpidx),ngidx),pdata(np,prx),pdata(np,pry),pdata(np,prz), &
+              pdata(np,prvpx),pdata(np,prvpy),pdata(np,prvpz),pdata(np,prrp),pdata(np,prtp),pdata(np,prms),pdata(np,prmult), &
+              pdata(np,prt),pdata(np,prqv))
       end if
 
       x3d = pdata(np,prx)
@@ -2788,6 +2796,42 @@
       !$acc end data
 
       end subroutine droplet_diag
+
+      subroutine write_drop_traj(nstep,mtime,prprocidx,prpidx,prx,pry,prz,prvpx,prvpy,prvpz,prrp,prtp,prms,prmult,prt,prqv)
+      use input, only : myid
+      implicit none
+
+      real, intent(in) :: mtime,prx,pry,prz,prvpx,prvpy,prvpz,prrp,prtp,prms,prmult,prt,prqv
+      integer, intent(in) :: prprocidx,prpidx,nstep
+      integer :: funit
+      logical :: exist
+      character*180 :: fname
+      character*4 :: myid_char
+
+      funit = 17
+      write(myid_char,'(i4.4)') myid
+      fname = trim(adjustl("./particle_traj/"//myid_char//".dat"))
+
+      if (nstep.eq.1) then  !If you are on the first time step of a run, just overwrite
+         open(unit=funit,file=fname,access="stream",form="unformatted",status="replace")
+      else
+         inquire(file=fname,exist=exist)
+         if (exist) then
+            !File exists and you are NOT on first step, then append
+            open(unit=funit,file=fname,access="stream",form="unformatted",status="old",position="append")
+         else 
+            !File doesn't exist, you're NOT on first step, but want to start trajectories
+            open(unit=funit,file=fname,access="stream",form="unformatted",status="new")
+          end if
+      end if
+
+
+      write(funit) mtime,prprocidx,prpidx,prx,pry,prz,prvpx,prvpy,prvpz,prrp,prtp,prms,prmult,prt,prqv
+      
+      close(funit)
+
+
+      end subroutine write_drop_traj
 
       subroutine find_horizontal_location_index (loc_ind, loc, lb, ub, dsize, end_ind, ind)
       !$acc routine seq

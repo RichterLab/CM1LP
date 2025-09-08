@@ -300,6 +300,7 @@
       call bcast_int(nparcelsInit) ! DEVICE
       call bcast_int(two_way_coupling) ! DEVICE
       call bcast_int(drop_evap) ! DEVICE
+      call bcast_int(drop_traj) ! DEVICE
       call bcast_int(nparcelsMax)
       call bcast_real(drop_inject_elapse)
       call bcast_real(drop_inject_time)
