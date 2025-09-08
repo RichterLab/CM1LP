@@ -11,7 +11,7 @@
 
   private
   public :: droplet_driver,droplet_diag,initialize_droplet_histograms, &
-            check_droplet_ownership,particle_seed
+            check_droplet_ownership,particle_seed,ngidx
 
   !These are quantities which are needed in the droplet_diag output, so must be public
   real :: num100,num1000
@@ -29,6 +29,8 @@
   double precision :: mass_evap,mass_dpten
 
   integer :: particle_seed
+
+  integer :: ngidx  !Each MPI rank will keep a "global" particle index counter which increases for every new particle created on this rank
 
   ! If we already know that a parcel stays on the same process 
   !    in the previous time step and it is still here, we start 
@@ -71,7 +73,7 @@
           cgt1,cgt2,cgt3,bbc,tbc,imove,zt,rzt,umove,vmove,nqv, &
           terrain_flag,nx,ny,axisymm,nodex,nodey,myi,myj,viscosity, &
           prx,pry,prz,prsig,pract,prvpx,prvpy,prvpz,prtp,prrp,prmult, &
-          prms,przs,pru,prv,prw,prt,prqv,prprs,prrho,prtime, &
+          prms,przs,pru,prv,prw,prt,prqv,prprs,prrho,prtime,prpidx,prprocidx, &
           timestats,time_droplet,time_droplet_inject,mytime,ierr,maxx, &
           maxy,maxz,ierr,mynw,mysw,myne,myse,mynorth,mysouth,myeast, &
           mywest,myid,nparcelsLocal,nparcelsLocalActive, &
@@ -401,6 +403,11 @@
 #endif
     nploop:  &
     DO np=1,nparcelsLocalActive
+
+      !write(*,*) 'DHR TRAJ:',pdata(np,prx),pdata(np,prrp),transfer(pdata(np,prpidx),ngidx),transfer(pdata(np,prprocidx),ngidx)
+      if ( transfer(pdata(np,prpidx),ngidx).eq.15 .and. transfer(pdata(np,prprocidx),ngidx).eq.0 ) then
+         write(*,*) 'DHR TRAJ:',pdata(np,prx),pdata(np,pry),pdata(np,prz),pdata(np,prrp)
+      end if
 
       x3d = pdata(np,prx)
       y3d = pdata(np,pry)
@@ -3436,7 +3443,7 @@
       !Here use the sea spray generation function (SSGF) of Andreas (1998)
       use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz,prrp,prrp0,prtp,prms,pract,prtime, &
-                        prmult,prt,prrho,prprs,prqv,nparcelsLocalActive,numprocs,nparcelsMax, &
+                        prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive,numprocs,nparcelsMax, &
                         time_phys_H2D,time_phys_D2H,time_droplet,timestats,mytime, &
                         drop_mult,tsk0,pi_sp,myid,nx,ny,dx,dy
       use constants
@@ -3669,6 +3676,11 @@
             pdata(np,prprs) = 101325.0
             pdata(np,prrho) = 1.0
             pdata(np,prtime) = 0.0
+
+            !Assign the particle IDs (both rank-local "pidx" and "procidx" -- the combination gives a unique particle ID
+            pdata(np,prpidx) = transfer(ngidx,0.0)
+            pdata(np,prprocidx) = transfer(myid,0.0)
+
             !Update mass_injected for statistics purposes
             mass_injected = mass_injected + (pdata(np,prms)+rhow*4.0/3.0*pi*pdata(np,prrp)**3)*pdata(np,prmult)
             eng_injected = eng_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp)
@@ -3676,6 +3688,8 @@
             m2_injected = m2_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy)
 
             call finalize_randomNumberSequence(randomNumbers)
+
+            ngidx = ngidx+1  !For every new particle update the global ID 
          end do
          !$acc end data
 
@@ -3718,7 +3732,7 @@
       !Here use the pi chamber protocol: uniform aerosols at centerplane
       use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz,prrp,prrp0,prtp,prms,pract,prtime, &
-                        prmult,prt,prrho,prprs,prqv,nparcelsLocalActive,numprocs,nparcelsMax, &
+                        prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive,numprocs,nparcelsMax, &
                         time_phys_H2D,time_phys_D2H,time_droplet,timestats,mytime, &
                         drop_mult,tsk0,pi_sp,myid,nx,ny,nz,dx,dy,dz
       use constants
@@ -3842,6 +3856,11 @@
             pdata(np,prprs) = 101325.0
             pdata(np,prrho) = 1.0
             pdata(np,prtime) = 0.0
+
+            !Assign the particle IDs (both rank-local "pidx" and "procidx" -- the combination gives a unique particle ID
+            pdata(np,prpidx) = transfer(ngidx,0.0)
+            pdata(np,prprocidx) = transfer(myid,0.0)
+
             !Update mass_injected for statistics purposes
             mass_injected = mass_injected + (pdata(np,prms)+rhow*4.0/3.0*pi*pdata(np,prrp)**3)*pdata(np,prmult)
             eng_injected = eng_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp)
@@ -3849,6 +3868,8 @@
             m2_injected = m2_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy)
 
             call finalize_randomNumberSequence(randomNumbers)
+
+            ngidx = ngidx+1  !For every new particle update the global ID 
          end do
          !$acc end data
          !Then once the new droplets have been added, update nparcelsLocalActive

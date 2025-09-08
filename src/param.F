@@ -6027,7 +6027,8 @@
 
         npvals = 3
 
-        !Parcel information that isn't just diagnostic
+        !Parcel information that isn't just diagnostic (and thus needs
+        !to included in a restart since the droplet can't recreate it)
         npvars = 3
 
         prx = 1
@@ -6087,6 +6088,21 @@
           npvals = npvals+1
           npvars = npvars+1
           prrho = npvals   !density at droplet
+
+
+          !NOTE: These two particle indices are mean to be read using
+          !the Fortran intrinsic "transfer" function. Would be a major
+          !pain to create a integer-type "pdata" array, so use these two
+          !columns and interpret the bits as integer rather than reals
+
+          npvals = npvals+1
+          npvars = npvars+1
+          prpidx = npvals !Particle ID based on ngidx for a given MPI rank
+
+          npvals = npvals+1
+          npvars = npvars+1
+          prprocidx = npvals !MPI rank which created particle. This + prpidx gives a unique particle
+          
 
         end if
 

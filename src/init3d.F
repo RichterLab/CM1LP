@@ -84,7 +84,7 @@
       use module_mp_nssl_2mom, only: ccn, lccn
       use poiss_module
       use parcel_module , only : getparcelzs
-      use droplet_module, only: initialize_droplet_histograms,particle_seed
+      use droplet_module, only: initialize_droplet_histograms,particle_seed,ngidx
 #ifdef MPI
       use mpi
 #endif
@@ -427,6 +427,8 @@
 #endif
         call new_RandomNumberSequence(randomNumbers, particle_seed)
 
+	ngidx = 0  !Set the global particle ID counter to 0 at the beginning
+
         i = 1
         nparcelsLocalActive = 0
         xrange = xf(ni+1) - xf(1)
@@ -488,6 +490,12 @@
        
              !Start the stopwatch for each particle at 0
              pdata(i,prtime) = 0.0
+
+             !Assign the particle IDs (both rank-local "pidx" and "procidx" -- the combination gives a unique particle ID
+             pdata(i,prpidx) = transfer(ngidx,0.0)
+             pdata(i,prprocidx) = transfer(myid,0.0)
+
+             ngidx = ngidx+1  !For every new particle update the global ID 
 
           end if ! end of if statement for prcl_droplet == 1
 
