@@ -2826,7 +2826,7 @@
       end if
 
 
-      write(funit) mtime,prprocidx,prpidx,prx,pry,prz,prvpx,prvpy,prvpz,prrp,prtp,prms,prmult,prt,prqv
+      write(funit) real(prpidx),real(prprocidx),mtime,prx,pry,prz,prvpx,prvpy,prvpz,prrp,prtp,prms,prmult,prt,prqv
       
       close(funit)
 
