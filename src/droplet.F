@@ -390,6 +390,13 @@
     end if
 
 
+    !Before entering the droplet update loop, save droplet trajectories
+
+    if (drop_traj.eq.1) then
+       call write_drop_traj(nstep,real(mtime),pdata)
+    end if
+
+
 #ifdef _B4B01F
     !$acc update &
     !$acc host(pdata,xf,yf,zf,zh,sigma,sigmaf, &
@@ -405,17 +412,10 @@
     nploop:  &
     DO np=1,nparcelsLocalActive
 
-      !write(*,*) 'DHR TRAJ:',pdata(np,prx),pdata(np,prrp),transfer(pdata(np,prpidx),ngidx),transfer(pdata(np,prprocidx),ngidx)
-      if ( transfer(pdata(np,prpidx),ngidx).eq.15 .and. transfer(pdata(np,prprocidx),ngidx).eq.0 ) then
-         write(*,*) 'DHR TRAJ:',pdata(np,prx),pdata(np,pry),pdata(np,prz),pdata(np,prrp)
-      end if
+    if ( transfer(pdata(np,prpidx),ngidx).eq.15 .and. transfer(pdata(np,prprocidx),ngidx).eq.0 ) then
+       write(*,*) 'DHR TRAJ:',pdata(np,prx),pdata(np,pry),pdata(np,prz),pdata(np,prrp)
+    end if
 
-      !Right away store the particle trajectory info if desired
-      if (drop_traj.eq.1) then
-         call write_drop_traj(nstep,real(mtime),transfer(pdata(np,prprocidx),ngidx),transfer(pdata(np,prpidx),ngidx),pdata(np,prx),pdata(np,pry),pdata(np,prz), &
-              pdata(np,prvpx),pdata(np,prvpy),pdata(np,prvpz),pdata(np,prrp),pdata(np,prtp),pdata(np,prms),pdata(np,prmult), &
-              pdata(np,prt),pdata(np,prqv))
-      end if
 
       x3d = pdata(np,prx)
       y3d = pdata(np,pry)
@@ -2797,17 +2797,48 @@
 
       end subroutine droplet_diag
 
-      subroutine write_drop_traj(nstep,mtime,prprocidx,prpidx,prx,pry,prz,prvpx,prvpy,prvpz,prrp,prtp,prms,prmult,prt,prqv)
-      use input, only : myid
+      subroutine write_drop_traj(nstep,mtime,pdata)
+      use input, only : myid,nparcelsLocal,npvals,nparcelsLocalActive
       implicit none
 
-      real, intent(in) :: mtime,prx,pry,prz,prvpx,prvpy,prvpz,prrp,prtp,prms,prmult,prt,prqv
-      integer, intent(in) :: prprocidx,prpidx,nstep
+      real, intent(in), dimension(nparcelsLocal,npvals) :: pdata
+      integer, parameter :: num_local_traj = 500 !The maximum number of droplets which could be selected on a single MPI rank
+      integer, parameter :: num_traj_skip = 1 !The stride of the droplet trajectory PIDX
+      real :: compacted(num_local_traj,npvals)  !A buffer array to collect all droplets selected for trajectory output
+      integer :: np,pcount,idx
       integer :: funit
       logical :: exist
       character*180 :: fname
       character*4 :: myid_char
 
+      !$acc data create(compacted)
+      
+      !Pull out some subset of trajectories
+      pcount = 0
+      !$acc parallel loop gang vector default(present) private(idx)
+      do np=1,nparcelsLocalActive
+
+         if (mod(transfer(pdata(np,prpidx),ngidx),1).eq.0) then
+           !$acc atomic capture
+           pcount = pcount + 1
+           idx = pcount
+           !$acc end atomic
+
+           if (pcount.lt.num_local_traj) then
+             compacted(idx,:) = pdata(np,:)
+           else
+             print *, 'WARNING: SELECTED TRAJECTORIES EXCEED MAXIMUM NUMBER'
+           end if
+
+         end if
+
+      end do
+
+      !$acc update host(pcount)
+      !$acc update host(compacted(1:pcount,:))
+      
+
+      !Now write them to a file
       funit = 17
       write(myid_char,'(i4.4)') myid
       fname = trim(adjustl("./particle_traj/"//myid_char//".dat"))
@@ -2826,9 +2857,13 @@
       end if
 
 
-      write(funit) real(prpidx),real(prprocidx),mtime,prx,pry,prz,prvpx,prvpy,prvpz,prrp,prtp,prms,prmult,prt,prqv
+      do np=1,pcount
+        write(funit) real(transfer(compacted(np,prpidx),ngidx)),real(transfer(compacted(np,prprocidx),ngidx)),mtime,compacted(np,prx),compacted(np,pry),compacted(np,prz),compacted(np,prvpx),compacted(np,prvpy),compacted(np,prvpz),compacted(np,prrp),compacted(np,prtp),compacted(np,prms),compacted(np,prmult),compacted(np,prt),compacted(np,prqv)
+      end do
       
       close(funit)
+
+      !$acc end data
 
 
       end subroutine write_drop_traj
