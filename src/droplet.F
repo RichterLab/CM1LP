@@ -2801,6 +2801,8 @@
       use input, only : myid,nparcelsLocal,npvals,nparcelsLocalActive
       implicit none
 
+      integer, intent(in) :: nstep
+      real, intent(in) :: mtime
       real, intent(in), dimension(nparcelsLocal,npvals) :: pdata
       integer, parameter :: num_local_traj = 500 !The maximum number of droplets which could be selected on a single MPI rank
       integer, parameter :: num_traj_skip = 1 !The stride of the droplet trajectory PIDX
