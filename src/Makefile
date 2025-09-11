@@ -201,8 +201,8 @@ endif
 #-----------------------------------------------------------------------------
 ifeq (${USE_MPI_L},true)
     DM           += -DMPI
-    #override FC  = mpif90
-    override FC  = mpiifort -fc=ifx -fno-lto
+    override FC  = mpif90
+    #override FC  = mpiifort -fc=ifx -fno-lto
 endif
 
 $(info $$DEBUG_L is [${DEBUG_L}])

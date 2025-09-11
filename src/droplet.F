@@ -54,7 +54,7 @@
   !$acc                 num_injected,mass_destroyed,mass_injected, &
   !$acc                 mass_reentry,eng_reentry,m1_reentry,m2_reentry, &
   !$acc                 eng_destroyed,eng_injected,m1_destroyed,m2_destroyed,m1_injected,m2_injected, &
-  !$acc                 num100,num1000)
+  !$acc                 num100,num1000,ngidx)
 
   CONTAINS
 
@@ -411,10 +411,6 @@
 #endif
     nploop:  &
     DO np=1,nparcelsLocalActive
-
-    if ( transfer(pdata(np,prpidx),ngidx).eq.15 .and. transfer(pdata(np,prprocidx),ngidx).eq.0 ) then
-       write(*,*) 'DHR TRAJ:',pdata(np,prx),pdata(np,pry),pdata(np,prz),pdata(np,prrp)
-    end if
 
 
       x3d = pdata(np,prx)
@@ -945,7 +941,8 @@
                          mpi_sum,mpi_comm_world,ierr)
 #endif
       if (myid==0) then 
-         write(*,'(a8,3i)')  'DHR1:',myid,np_tmp,nparcelsLocalActive
+         !write(*,'(a8,3i)')  'DHR1:',myid,np_tmp,nparcelsLocalActive
+         write(*,'(a18,i)')  'Total particles:',np_tmp
       end if
    end if  ! end of "if use_wall_bc" statement
 
@@ -2798,7 +2795,7 @@
       end subroutine droplet_diag
 
       subroutine write_drop_traj(nstep,mtime,pdata)
-      use input, only : myid,nparcelsLocal,npvals,nparcelsLocalActive
+      use input, only : myid,nparcelsLocal,npvals,nparcelsLocalActive,prpidx,prprocidx,prx,pry,prz,prvpx,prvpy,prvpz,prrp,prtp,prms,prmult,prt,prqv
       implicit none
 
       integer, intent(in) :: nstep
@@ -2814,19 +2811,27 @@
       character*4 :: myid_char
 
       !$acc data create(compacted)
+
+      !$acc update device(ngidx)
       
       !Pull out some subset of trajectories
       pcount = 0
+
       !$acc parallel loop gang vector default(present) private(idx)
       do np=1,nparcelsLocalActive
 
-         if (mod(transfer(pdata(np,prpidx),ngidx),1).eq.0) then
+        !if ( transfer(pdata(np,prpidx),ngidx).eq.15 .and. transfer(pdata(np,prprocidx),ngidx).eq.1 ) then
+        !   print *, 'DHR TRAJ:',pdata(np,prx),pdata(np,pry),pdata(np,prz),pdata(np,prrp)
+        !end if
+
+
+         if (mod(transfer(pdata(np,prpidx),ngidx),num_traj_skip).eq.0) then
            !$acc atomic capture
            pcount = pcount + 1
            idx = pcount
            !$acc end atomic
 
-           if (pcount.lt.num_local_traj) then
+           if (idx.lt.num_local_traj) then
              compacted(idx,:) = pdata(np,:)
            else
              print *, 'WARNING: SELECTED TRAJECTORIES EXCEED MAXIMUM NUMBER'
@@ -2835,10 +2840,11 @@
          end if
 
       end do
+      !$acc end parallel
 
-      !$acc update host(pcount)
-      !$acc update host(compacted(1:pcount,:))
+      !$acc update host(compacted)
       
+      !$acc end data
 
       !Now write them to a file
       funit = 17
@@ -2865,7 +2871,6 @@
       
       close(funit)
 
-      !$acc end data
 
 
       end subroutine write_drop_traj
@@ -3540,7 +3545,7 @@
       double precision, intent(in) :: mtime
       integer, intent(out) :: my_reintro
     
-      integer :: i,np
+      integer :: i,np,idx_tmp
       integer(i8) :: tot_after_reintro
       integer :: sum_buf(2)
       double precision :: dFssum(101)  !Discretized cumulative spray generation function (to be calculated)
@@ -3695,9 +3700,9 @@
 #else
         particle_seed =  values(8)+values(7)+values(6)
 #endif
-        if (myid .eq. 0) print *, 'DHR7',particle_seed
 
          !$acc data copyin(dFssum,binsdata,binsdata10) create(randomNumbers,randomNumbers%state)
+         !$acc update device(ngidx)
          !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) private(randomNumbers)
          do j=1,my_reintro
             np=nparcelsLocalActive+j
@@ -3758,8 +3763,13 @@
             pdata(np,prrho) = 1.0
             pdata(np,prtime) = 0.0
 
+            !$acc atomic capture
+            idx_tmp = ngidx
+            ngidx = ngidx+1  !For every new particle update the global ID 
+            !$acc end atomic
+
             !Assign the particle IDs (both rank-local "pidx" and "procidx" -- the combination gives a unique particle ID
-            pdata(np,prpidx) = transfer(ngidx,0.0)
+            pdata(np,prpidx) = transfer(idx_tmp,0.0)
             pdata(np,prprocidx) = transfer(myid,0.0)
 
             !Update mass_injected for statistics purposes
@@ -3770,8 +3780,8 @@
 
             call finalize_randomNumberSequence(randomNumbers)
 
-            ngidx = ngidx+1  !For every new particle update the global ID 
          end do
+         !$acc update host(ngidx)
          !$acc end data
 
          !Then once the new droplets have been added, update nparcelsLocalActive
@@ -3829,7 +3839,7 @@
       double precision, intent(in) :: mtime
       integer, intent(out) :: my_reintro
     
-      integer :: i,np
+      integer :: i,np,idx_tmp
       integer(i8) :: tot_after_reintro
       integer :: sum_buf(2)
 
@@ -3893,6 +3903,7 @@
 #endif
 
          !$acc data create(randomNumbers,randomNumbers%state)
+         !$acc update device(ngidx)
          !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) private(randomNumbers)
          do j=1,my_reintro
             np=nparcelsLocalActive+j
@@ -3938,8 +3949,13 @@
             pdata(np,prrho) = 1.0
             pdata(np,prtime) = 0.0
 
+            !$acc atomic capture
+            idx_tmp = ngidx
+            ngidx = ngidx+1  !For every new particle update the global ID 
+            !$acc end atomic
+
             !Assign the particle IDs (both rank-local "pidx" and "procidx" -- the combination gives a unique particle ID
-            pdata(np,prpidx) = transfer(ngidx,0.0)
+            pdata(np,prpidx) = transfer(idx_tmp,0.0)
             pdata(np,prprocidx) = transfer(myid,0.0)
 
             !Update mass_injected for statistics purposes
@@ -3950,8 +3966,8 @@
 
             call finalize_randomNumberSequence(randomNumbers)
 
-            ngidx = ngidx+1  !For every new particle update the global ID 
          end do
+         !$acc update host(ngidx)
          !$acc end data
          !Then once the new droplets have been added, update nparcelsLocalActive
          nparcelsLocalActive = nparcelsLocalActive + my_reintro
