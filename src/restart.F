@@ -3,7 +3,7 @@
   implicit none
 
   private
-  public :: write_restart,read_restart
+  public :: write_restart,read_restart,read_fields
 
   CONTAINS
 
@@ -1715,7 +1715,7 @@
           endif
         endif
 
-        if(myid.eq.0)then
+        if(myid.eq.0 .and. nparcelstot.gt.0)then
           if( restart_format.eq.1 )then
 #ifdef MPI
             write(50) rbuf(1:nparcelstot,1:npvars)
@@ -1741,6 +1741,9 @@
           if( restart_format.eq.1 )then
             !$acc update host(nvar) if_present
             write(50) nvar
+            do i = 1, numprocs
+               write(50) nvar
+            end do
 #ifdef NETCDF
           elseif( restart_format.eq.2 )then
             call disp_err( nf90_inq_varid(ncid,"numparcels",varid) , .true. )
@@ -4089,6 +4092,362 @@
       call stopcm1
 
       end subroutine read_restart
+
+
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+
+
+      subroutine read_fields(nstep,                                                &
+                              rho,prs,ua,va,wa,ppi,tha,qa,ppx,phi1,phi2,           &
+                              rain,sws,svs,sps,srs,sgs,sus,shs,tsk,                &
+                              qname,dat1,dat2,dat3,reqt,myi1p,myi2p,myj1p,myj2p)
+      use input
+      use constants
+#ifdef MPI
+      use mpi
+#endif
+      use bcast_module
+#ifdef NETCDF
+      use netcdf
+      use writeout_nc_module, only : disp_err
+#endif
+      implicit none
+
+      !----------------------------------------------------------
+      ! This subroutine reads in 3D fields as an initial condition
+      !----------------------------------------------------------
+
+      integer, intent(inout) :: nstep
+      real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: rho,prs
+      real, intent(inout), dimension(ib:ie+1,jb:je,kb:ke) :: ua
+      real, intent(inout), dimension(ib:ie,jb:je+1,kb:ke) :: va
+      real, intent(inout), dimension(ib:ie,jb:je,kb:ke+1) :: wa
+      real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: ppi,tha
+      real, intent(inout), dimension(ibm:iem,jbm:jem,kbm:kem,numq) :: qa
+      real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: ppx
+      real, intent(inout), dimension(ibph:ieph,jbph:jeph,kbph:keph) :: phi1,phi2
+
+      real, intent(inout), dimension(ib:ie,jb:je,nrain) :: rain,sws,svs,sps,srs,sgs,sus,shs
+      real, intent(inout), dimension(ib:ie,jb:je) :: tsk
+
+      character(len=3), intent(in), dimension(maxq) :: qname
+      real, intent(inout), dimension(d3i,d3j) :: dat1
+      real, intent(inout), dimension(d2i,d2j) :: dat2
+      real, intent(inout), dimension(d3i,d3j,d3n) :: dat3
+      integer, intent(inout), dimension(d3t) :: reqt
+      integer, intent(in), dimension(numprocs) :: myi1p,myi2p,myj1p,myj2p
+
+      character(len=maxstring) fname
+      character(len=8) :: text1
+      character(len=6) :: aname
+      integer :: i,j,k,n,np,nvar,nread,reqs,orecs,orecu,orecv,orecw,ndum
+      integer :: ncid,time_index,old_format
+      real, dimension(:,:), allocatable :: rbuf, tmp_buf
+#ifdef MPI
+      integer :: proc,index,count,req1,req2,req3,reqp,tag
+      integer :: beg_loc,end_loc
+#endif
+#ifdef NETCDF
+      integer :: varid,ncstatus
+#endif
+
+!-----------------------------------------------------------------------
+
+  IF( restart_format.eq.1 )THEN
+    ! unformatted direct-access (grads) format:
+
+  IF( restart_filetype.eq.1 )THEN
+
+    !------------------
+    ! one restart file (per stagger type):
+    IF(myid.eq.nodemaster)THEN
+
+      do i=1,maxstring
+        fname(i:i) = ' '
+      enddo
+
+      fname = 'cm1rst_s.dat'
+      if(dowr) write(outfile,*) '  Reading 3D fields!'
+      if(dowr) write(outfile,*) '  fname=',fname
+      open(unit=51,file=fname,form='unformatted',access='direct',recl=4*nx*ny,status='old',err=779)
+      orecs = 1
+
+      fname = 'cm1rst_u.dat'
+      if(dowr) write(outfile,*) '  fname=',fname
+      open(unit=52,file=fname,form='unformatted',access='direct',recl=4*(nx+1)*ny,status='old',err=779)
+      orecu = 1
+
+      fname = 'cm1rst_v.dat'
+      if(dowr) write(outfile,*) '  fname=',fname
+      open(unit=53,file=fname,form='unformatted',access='direct',recl=4*nx*(ny+1),status='old',err=779)
+      orecv = 1
+
+      fname = 'cm1rst_w.dat'
+      if(dowr) write(outfile,*) '  fname=',fname
+      open(unit=54,file=fname,form='unformatted',access='direct',recl=4*nx*ny,status='old',err=779)
+      orecw = 1
+
+      if(dowr) write(outfile,*)
+    ENDIF
+
+  ELSEIF( restart_filetype.eq.2 )THEN
+
+    !------------------
+    ! one restart file (per restart time):
+    IF(myid.eq.nodemaster)THEN
+
+      do i=1,maxstring
+        fname(i:i) = ' '
+      enddo
+
+101   format(i6.6)
+
+      fname = 'cm1rst_XXXXXX_s.dat'
+      write(fname( 8:13),101) rstnum
+      if(dowr) write(outfile,*) '  Reading 3D fields!'
+      if(dowr) write(outfile,*) '  fname=',fname
+      open(unit=51,file=fname,form='unformatted',access='direct',recl=4*nx*ny,status='old',err=779)
+      orecs = 1
+
+      fname = 'cm1rst_XXXXXX_u.dat'
+      write(fname( 8:13),101) rstnum
+      if(dowr) write(outfile,*) '  fname=',fname
+      open(unit=52,file=fname,form='unformatted',access='direct',recl=4*(nx+1)*ny,status='old',err=779)
+      orecu = 1
+
+      fname = 'cm1rst_XXXXXX_v.dat'
+      write(fname( 8:13),101) rstnum
+      if(dowr) write(outfile,*) '  fname=',fname
+      open(unit=53,file=fname,form='unformatted',access='direct',recl=4*nx*(ny+1),status='old',err=779)
+      orecv = 1
+
+      fname = 'cm1rst_XXXXXX_w.dat'
+      write(fname( 8:13),101) rstnum
+      if(dowr) write(outfile,*) '  fname=',fname
+      open(unit=54,file=fname,form='unformatted',access='direct',recl=4*nx*ny,status='old',err=779)
+      orecw = 1
+
+      if(dowr) write(outfile,*)
+    ENDIF
+
+  ELSEIF( restart_filetype.eq.3 )THEN
+
+    !------------------
+    ! one restart file per node (cm1r17 format):
+    IF(myid.eq.nodemaster)THEN
+
+      do i=1,maxstring
+        fname(i:i) = ' '
+      enddo
+
+      fname = 'cm1rst_XXXXXX_YYYYYY.dat'
+
+      write(fname( 8:13),102) mynode
+      write(fname(15:20),102) rstnum
+102   format(i6.6)
+
+      if(dowr) write(outfile,*)
+      if(dowr) write(outfile,*) '  Reading 3D fields!'
+      if(dowr) write(outfile,*) '  fname=',fname
+      if(dowr) write(outfile,*)
+
+      open(unit=50,file=fname,form='unformatted',status='old')
+    ENDIF
+  ELSE
+    stop 12389
+  ENDIF
+
+#ifdef NETCDF
+  ELSEIF( restart_format.eq.2 )THEN
+    ! netcdf format:
+
+    if( myid.eq.0 )then
+
+      do i=1,maxstring
+        string(i:i) = ' '
+      enddo
+
+    IF(     restart_filetype.eq.1 )THEN
+      string = 'cm1rst.nc'
+      time_index = rstnum
+    ELSEIF( restart_filetype.eq.2 )THEN
+      string = 'cm1rst_XXXXXX.nc'
+      write(string(8:13),100) rstnum
+100   format(i6.6)
+      time_index = 1
+    ENDIF
+      if(myid.eq.0) print *,'  string = ',string
+
+      call disp_err( nf90_open( path=string , mode=nf90_nowrite , ncid=ncid ) , .true. )
+
+    endif
+
+#endif
+  ELSE
+
+    if( myid.eq.0 )then
+      print *
+      print *,'  unrecognized value for restart_format '
+      print *
+      print *,'      restart_format = ',restart_format
+      print *
+    endif
+#ifdef MPI
+    call MPI_BARRIER (MPI_COMM_WORLD,ierr)
+#endif
+    call stopcm1
+
+  ENDIF
+
+!---------------------------------------------------------------
+
+!---------------------------------------------------------------
+! standard 2D:
+
+      n = 1
+      call  readr(ni,nj,1,1,nx,ny,rain(ib,jb,n),'rain    ',        &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,1,nx,ny,sws(ib,jb,n),'sws     ',         &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,1,nx,ny,svs(ib,jb,n),'svs     ',         &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,1,nx,ny,sps(ib,jb,n),'sps     ',         &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,1,nx,ny,srs(ib,jb,n),'srs     ',         &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,1,nx,ny,sgs(ib,jb,n),'sgs     ',         &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,1,nx,ny,sus(ib,jb,n),'sus     ',         &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,1,nx,ny,shs(ib,jb,n),'shs     ',         &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+    if( nrain.eq.2 )then
+      n = 2
+      call  readr(ni,nj,1,1,nx,ny,rain(ib,jb,n),'rain2   ',        &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,1,nx,ny,sws(ib,jb,n),'sws2    ',         &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,1,nx,ny,svs(ib,jb,n),'svs2    ',         &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,1,nx,ny,sps(ib,jb,n),'sps2    ',         &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,1,nx,ny,srs(ib,jb,n),'srs2    ',         &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,1,nx,ny,sgs(ib,jb,n),'sgs2    ',         &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,1,nx,ny,sus(ib,jb,n),'sus2    ',         &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,1,nx,ny,shs(ib,jb,n),'shs2    ',         &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+    endif
+      call  readr(ni,nj,1,1,nx,ny,tsk(ib,jb),'tsk     ',           &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+
+
+
+! standard 3D:
+
+      call  readr(ni,nj,1,nk,nx,ny,rho(ib,jb,1),'rho     ',        &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,nk,nx,ny,prs(ib,jb,1),'prs     ',        &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni+1,nj,1,nk,nx+1,ny,ua(ib,jb,1),'ua      ',     &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecu,52,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2iu,d2ju,d3iu,d3ju)
+      call  readr(ni,nj+1,1,nk,nx,ny+1,va(ib,jb,1),'va      ',     &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecv,53,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2iv,d2jv,d3iv,d3jv)
+      call  readr(ni,nj,1,nk+1,nx,ny,wa(ib,jb,1),'wa      ',       &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecw,54,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,nk,nx,ny,ppi(ib,jb,1),'ppi     ',        &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,nk,nx,ny,tha(ib,jb,1),'tha     ',        &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,nk,nx,ny,ppx(ib,jb,1),'ppx     ',        &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+    if( psolver.eq.6 )then
+      call  readr(ni,nj,1,nk,nx,ny,phi1(ib,jb,1),'phi1    ',       &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+      call  readr(ni,nj,1,nk,nx,ny,phi2(ib,jb,1),'phi2    ',       &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+    endif
+    IF(imoist.eq.1)THEN
+    do n=1,numq
+      text1 = '        '
+      write(text1(1:3),156) qname(n)
+156   format(a3)
+      call  readr(ni,nj,1,nk,nx,ny,qa(ib,jb,1,n),text1     ,       &
+                  ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
+                  ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
+                  dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
+    enddo
+    ENDIF
+
+
+!---------------------------------------------------------------
+
+
+      return
+
+779   print *,'  error opening fields file '
+      print *,'    ... stopping cm1 ... '
+      call stopcm1
+
+      end subroutine read_fields
 
 
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc

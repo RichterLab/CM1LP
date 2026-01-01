@@ -278,6 +278,8 @@ end module cuda_rt
       double precision :: adaptmovetim
       integer :: mvrec,nwritemv
 
+      integer :: ifields
+
 #ifdef MPI
       integer :: reqs,rc,ii,jj,id,itmp1,itmp2,jtmp1,jtmp2
       integer, dimension(MPI_STATUS_SIZE) :: status
@@ -2511,6 +2513,25 @@ end module cuda_rt
                         lu_index,xland,tsk,slab_zs,slab_dzs,tslb, &
                         emiss,thc,albd,znt,rznt,mavail,dsxy,prs0s,prs0,   &
                         tmn,tml,t0ml,hml,h0ml,huml,hvml,tmoml,z0base)
+
+      ifields = 0
+      IF (ifields.eq.1) THEN
+
+         rho = 0.0
+         prs = 0.0
+         ua = 0.0
+         va = 0.0
+         wa = 0.0
+         ppi = 0.0
+         tha = 0.0
+         qa = 0.0
+
+         call    read_fields(nstep,                                                &
+                              rho,prs,ua,va,wa,ppi,tha,qa,ppx,phi1,phi2,           &
+                              rain,sws,svs,sps,srs,sgs,sus,shs,tsk,                &
+                              qname,dat1,dat2,dat3,reqt,myi1p,myi2p,myj1p,myj2p)
+
+      END IF
 
       IF(irst.eq.1)THEN
 
