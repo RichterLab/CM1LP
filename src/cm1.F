@@ -2528,7 +2528,6 @@ end module cuda_rt
 
          call    read_fields(nstep,                                                &
                               rho,prs,ua,va,wa,ppi,tha,qa,ppx,phi1,phi2,           &
-                              rain,sws,svs,sps,srs,sgs,sus,shs,tsk,                &
                               qname,dat1,dat2,dat3,reqt,myi1p,myi2p,myj1p,myj2p)
 
       END IF

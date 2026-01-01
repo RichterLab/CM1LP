@@ -4101,7 +4101,6 @@
 
       subroutine read_fields(nstep,                                                &
                               rho,prs,ua,va,wa,ppi,tha,qa,ppx,phi1,phi2,           &
-                              rain,sws,svs,sps,srs,sgs,sus,shs,tsk,                &
                               qname,dat1,dat2,dat3,reqt,myi1p,myi2p,myj1p,myj2p)
       use input
       use constants
@@ -4129,8 +4128,8 @@
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: ppx
       real, intent(inout), dimension(ibph:ieph,jbph:jeph,kbph:keph) :: phi1,phi2
 
-      real, intent(inout), dimension(ib:ie,jb:je,nrain) :: rain,sws,svs,sps,srs,sgs,sus,shs
-      real, intent(inout), dimension(ib:ie,jb:je) :: tsk
+      real, dimension(ib:ie,jb:je,nrain) :: raintmp
+      real, dimension(ib:ie,jb:je) :: tmp
 
       character(len=3), intent(in), dimension(maxq) :: qname
       real, intent(inout), dimension(d3i,d3j) :: dat1
@@ -4307,74 +4306,74 @@
 ! standard 2D:
 
       n = 1
-      call  readr(ni,nj,1,1,nx,ny,rain(ib,jb,n),'rain    ',        &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'rain    ',        &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
-      call  readr(ni,nj,1,1,nx,ny,sws(ib,jb,n),'sws     ',         &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'sws     ',         &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
-      call  readr(ni,nj,1,1,nx,ny,svs(ib,jb,n),'svs     ',         &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'svs     ',         &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
-      call  readr(ni,nj,1,1,nx,ny,sps(ib,jb,n),'sps     ',         &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'sps     ',         &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
-      call  readr(ni,nj,1,1,nx,ny,srs(ib,jb,n),'srs     ',         &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'srs     ',         &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
-      call  readr(ni,nj,1,1,nx,ny,sgs(ib,jb,n),'sgs     ',         &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'sgs     ',         &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
-      call  readr(ni,nj,1,1,nx,ny,sus(ib,jb,n),'sus     ',         &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'sus     ',         &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
-      call  readr(ni,nj,1,1,nx,ny,shs(ib,jb,n),'shs     ',         &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'shs     ',         &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
     if( nrain.eq.2 )then
       n = 2
-      call  readr(ni,nj,1,1,nx,ny,rain(ib,jb,n),'rain2   ',        &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'rain2   ',        &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
-      call  readr(ni,nj,1,1,nx,ny,sws(ib,jb,n),'sws2    ',         &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'sws2    ',         &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
-      call  readr(ni,nj,1,1,nx,ny,svs(ib,jb,n),'svs2    ',         &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'svs2    ',         &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
-      call  readr(ni,nj,1,1,nx,ny,sps(ib,jb,n),'sps2    ',         &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'sps2    ',         &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
-      call  readr(ni,nj,1,1,nx,ny,srs(ib,jb,n),'srs2    ',         &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'srs2    ',         &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
-      call  readr(ni,nj,1,1,nx,ny,sgs(ib,jb,n),'sgs2    ',         &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'sgs2    ',         &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
-      call  readr(ni,nj,1,1,nx,ny,sus(ib,jb,n),'sus2    ',         &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'sus2    ',         &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
-      call  readr(ni,nj,1,1,nx,ny,shs(ib,jb,n),'shs2    ',         &
+      call  readr(ni,nj,1,1,nx,ny,raintmp(ib,jb,n),'shs2    ',         &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
     endif
-      call  readr(ni,nj,1,1,nx,ny,tsk(ib,jb),'tsk     ',           &
+      call  readr(ni,nj,1,1,nx,ny,tmp(ib,jb),'tsk     ',           &
                   ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
                   ncid,time_index,restart_format,restart_filetype,myi1p,myi2p,myj1p,myj2p, &
                   dat1(1,1),dat2(1,1),dat3(1,1,1),reqt,ppnode,d3n,d3t,mynode,nodemaster,nodes,d2is,d2js,d3is,d3js)
