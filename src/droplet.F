@@ -60,8 +60,8 @@
 
       subroutine droplet_driver (dt,dbldt,mtime,xh,uh,ruh,xf,yh,vh, &
                                  rvh,yf,zh,mh,rmh,zf,mf,zs,sigma, &
-                                 sigmaf,znt,rho,ua,va,wa,s10,pdata, &
-                                 th_in,qa,th0,pi0,ppa,prs,ta,pw1,pw2, &
+                                 sigmaf,znt,rho,u3d,v3d,w3d,s10,pdata, &
+                                 th3d,q3d,th0,pi0,pp3d,prs,ta,pw1,pw2, &
                                  pe1,pe2,ps1,ps2,pn1,pn2,nw1,nw2,ne1, &
                                  ne2,sw1,sw2,se1,se2,reqs_p,sw31,sw32, &
                                  se31,se32,ss31,ss32,sn31,sn32,n3w1, &
@@ -115,12 +115,12 @@
       real, intent(in), dimension(ib:ie,jb:je) :: znt
       real, intent(in), dimension(ibl:iel,jbl:jel) :: s10
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: rho,prs,ta
-      real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: pi0,th0,th_in,ppa
+      real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: pi0,th0,th3d,pp3d
       double precision, intent(inout), dimension(ib:ie,jb:je,kb:ke,7) :: dpten
-      real, intent(inout), dimension(ib:ie,jb:je,kb:ke,numq) :: qa
-      real, intent(inout), dimension(ib:ie+1,jb:je,kb:ke) :: ua
-      real, intent(inout), dimension(ib:ie,jb:je+1,kb:ke) :: va
-      real, intent(inout), dimension(ib:ie,jb:je,kb:ke+1) :: wa
+      real, intent(inout), dimension(ib:ie,jb:je,kb:ke,numq) :: q3d
+      real, intent(inout), dimension(ib:ie+1,jb:je,kb:ke) :: u3d
+      real, intent(inout), dimension(ib:ie,jb:je+1,kb:ke) :: v3d
+      real, intent(inout), dimension(ib:ie,jb:je,kb:ke+1) :: w3d
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
 
       real, intent(inout), dimension(jmp,kmp) :: pw1,pw2,pe1,pe2
@@ -255,14 +255,14 @@
       !$acc parallel loop gang vector collapse(2) default(present)
       do j=jb,je
          do i=ib,ie+1
-            ua(i,j,0) = cgs1*ua(i,j,1)+cgs2*ua(i,j,2)+cgs3*ua(i,j,3)
+            u3d(i,j,0) = cgs1*u3d(i,j,1)+cgs2*u3d(i,j,2)+cgs3*u3d(i,j,3)
          end do
       end do
       !$acc end parallel
       !$acc parallel loop gang vector collapse(2) default(present)
       do j=jb,je+1
          do i=ib,ie
-            va(i,j,0) = cgs1*va(i,j,1)+cgs2*va(i,j,2)+cgs3*va(i,j,3)
+            v3d(i,j,0) = cgs1*v3d(i,j,1)+cgs2*v3d(i,j,2)+cgs3*v3d(i,j,3)
          end do
       end do
       !$acc end parallel
@@ -272,14 +272,14 @@
         !$acc parallel loop gang vector collapse(2) default(present)
         do j=jb,je
            do i=ib,ie+1
-              ua(i,j,0) = 0.0 - umove
+              u3d(i,j,0) = 0.0 - umove
            end do
         end do
         !$acc end parallel
         !$acc parallel loop gang vector collapse(2) default(present)
         do j=jb,je+1
            do i=ib,ie
-              va(i,j,0) = 0.0 - vmove
+              v3d(i,j,0) = 0.0 - vmove
            end do
         end do
         !$acc end parallel
@@ -287,14 +287,14 @@
         !$acc parallel loop gang vector collapse(2) default(present)
         do j=jb,je
            do i=ib,ie+1
-              ua(i,j,0) = 0.0
+              u3d(i,j,0) = 0.0
            end do
         end do
         !$acc end parallel
         !$acc parallel loop gang vector collapse(2) default(present)
         do j=jb,je+1
            do i=ib,ie
-              va(i,j,0) = 0.0
+              v3d(i,j,0) = 0.0
            end do
         end do
         !$acc end parallel
@@ -310,14 +310,14 @@
       !$acc parallel loop gang vector collapse(2) default(present)
       do j=jb,je
          do i=ib,ie+1
-            ua(i,j,nk+1) = cgt1*ua(i,j,nk)+cgt2*ua(i,j,nk-1)+cgt3*ua(i,j,nk-2)
+            u3d(i,j,nk+1) = cgt1*u3d(i,j,nk)+cgt2*u3d(i,j,nk-1)+cgt3*u3d(i,j,nk-2)
          end do
       end do
       !$acc end parallel
       !$acc parallel loop gang vector collapse(2) default(present)
       do j=jb,je+1
          do i=ib,ie
-            va(i,j,nk+1) = cgt1*va(i,j,nk)+cgt2*va(i,j,nk-1)+cgt3*va(i,j,nk-2)
+            v3d(i,j,nk+1) = cgt1*v3d(i,j,nk)+cgt2*v3d(i,j,nk-1)+cgt3*v3d(i,j,nk-2)
          end do
       end do
       !$acc end parallel
@@ -326,14 +326,14 @@
       !$acc parallel loop gang vector collapse(2) default(present)
       do j=jb,je
          do i=ib,ie+1
-            ua(i,j,nk+1) = 0.0
+            u3d(i,j,nk+1) = 0.0
          end do
       end do
       !$acc end parallel
       !$acc parallel loop gang vector collapse(2) default(present)
       do j=jb,je+1
          do i=ib,ie
-            va(i,j,nk+1) = 0.0
+            v3d(i,j,nk+1) = 0.0
          end do
       end do
       !$acc end parallel
@@ -344,7 +344,7 @@
     !$acc parallel loop gang vector collapse(2) default(present)
     do j=jb,je
        do i=ib,ie
-          wa(i,j,nk+1) = 0.0
+          w3d(i,j,nk+1) = 0.0
        end do
     end do
     !$acc end parallel
@@ -357,9 +357,9 @@
     do j=jb,je
     do i=ib,ie
 
-      !th_tmp = (th0(i,j,k)+th_in(i,j,k))
-      !ta(i,j,k) = th_tmp*(pi0(i,j,k)+ppa(i,j,k))
-      ta(i,j,k) = (th0(i,j,k)+th_in(i,j,k))*(pi0(i,j,k)+ppa(i,j,k))
+      !th_tmp = (th0(i,j,k)+th3d(i,j,k))
+      !ta(i,j,k) = th_tmp*(pi0(i,j,k)+pp3d(i,j,k))
+      ta(i,j,k) = (th0(i,j,k)+th3d(i,j,k))*(pi0(i,j,k)+pp3d(i,j,k))
 
     enddo
     enddo
@@ -373,7 +373,7 @@
                           n3w1,n3w2,n3e1,n3e2,s3w1,s3w2,s3e1,s3e2,reqs_s,1)
     call prepcorners3(prs,sw31,sw32,se31,se32,ss31,ss32,sn31,sn32,  &
                           n3w1,n3w2,n3e1,n3e2,s3w1,s3w2,s3e1,s3e2,reqs_s,1)
-    call prepcorners3(qa(ib,jb,kb,nqv),sw31,sw32,se31,se32,ss31,ss32,sn31,sn32,  &
+    call prepcorners3(q3d(ib,jb,kb,nqv),sw31,sw32,se31,se32,ss31,ss32,sn31,sn32,  &
                           n3w1,n3w2,n3e1,n3e2,s3w1,s3w2,s3e1,s3e2,reqs_s,1)
 
 !----------------------------------------------------------------------
@@ -400,7 +400,7 @@
 #ifdef _B4B01F
     !$acc update &
     !$acc host(pdata,xf,yf,zf,zh,sigma,sigmaf, &
-    !$acc      ua,va,wa,qa,ta,rho,prs,znt,dpten,zs)
+    !$acc      u3d,v3d,w3d,q3d,ta,rho,prs,znt,dpten,zs)
 #else
     !JMD WARNING: Loop does not yet match CPU version.
     !$acc parallel default(present)
@@ -485,7 +485,7 @@
       call interpolate_to_parcel(np,iflag,jflag,kflag,x3d,y3d,z3d,sig3d, &
                                  uval,vval,wval,tval,qval,rhoval,prsval, &
                                  xh,xf,yh,yf,zh,zf,zs,znt,sigma,sigmaf, &
-                                 ua,va,wa,ta,qa,rho,prs,sigdot)
+                                 u3d,v3d,w3d,ta,q3d,rho,prs,sigdot)
 
 
       call BE_integration (dt,dbldt,np,pdata,pdata_locind,xf,yf, &
@@ -924,7 +924,7 @@
                call interpolate_to_parcel(np,iflag,jflag,kflag,x3d,y3d,z3d,sig3d, &
                                           uval,vval,wval,tval,qval,rhoval,prsval, &
                                           xh,xf,yh,yf,zh,zf,zs,znt,sigma,sigmaf, &
-                                          ua,va,wa,ta,qa,rho,prs,sigdot)
+                                          u3d,v3d,w3d,ta,q3d,rho,prs,sigdot)
                !Now set to actual interpolated values
                pdata(np,pru) = uval
                pdata(np,prv) = vval
@@ -1298,7 +1298,7 @@
 
       end subroutine BE_integration
 
-      subroutine interpolate_to_parcel(np,iflag,jflag,kflag,x3d,y3d,z3d,sig3d,uval,vval,wval,tval,qval,rhoval,prsval,xh,xf,yh,yf,zh,zf,zs,znt,sigma,sigmaf,ua,va,wa,ta,qa,rho,prs,sigdot)
+      subroutine interpolate_to_parcel(np,iflag,jflag,kflag,x3d,y3d,z3d,sig3d,uval,vval,wval,tval,qval,rhoval,prsval,xh,xf,yh,yf,zh,zf,zs,znt,sigma,sigmaf,u3d,v3d,w3d,ta,q3d,rho,prs,sigdot)
       !$acc routine seq
       use input, only : ib,ie,jb,je,kb,ke,numq,nparcelsLocal,nx,ny, &
                         axisymm,terrain_flag,ni,nj,nip1,nk,nkp1, &
@@ -1316,10 +1316,10 @@
       real, intent(in), dimension(ib:ie,jb:je) :: zs
       real, intent(in), dimension(kb:ke) :: sigma
       real, intent(in), dimension(kb:ke+1) :: sigmaf
-      real, intent(inout), dimension(ib:ie+1,jb:je,kb:ke) :: ua
-      real, intent(inout), dimension(ib:ie,jb:je+1,kb:ke) :: va
-      real, intent(inout), dimension(ib:ie,jb:je,kb:ke+1) :: wa
-      real, intent(inout), dimension(ib:ie,jb:je,kb:ke,numq) :: qa
+      real, intent(inout), dimension(ib:ie+1,jb:je,kb:ke) :: u3d
+      real, intent(inout), dimension(ib:ie,jb:je+1,kb:ke) :: v3d
+      real, intent(inout), dimension(ib:ie,jb:je,kb:ke+1) :: w3d
+      real, intent(inout), dimension(ib:ie,jb:je,kb:ke,numq) :: q3d
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: ta
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: rho,prs
       real, intent(in), dimension(ib:ie,jb:je) :: znt
@@ -1382,15 +1382,15 @@
         w7 = rx*ry*(1.0-rz)
         w8 = rx*ry*rz
 
-        uval = tri_interp(nip1,nj,nk,i,j,k,w1,w2,w3,w4,w5,w6,w7,w8,ua)
-        ! uval = ua(i  ,j  ,k  )*w1 &
-        !      + ua(i+1,j  ,k  )*w2 &
-        !      + ua(i  ,j+1,k  )*w3 &
-        !      + ua(i  ,j  ,k+1)*w4 &
-        !      + ua(i+1,j  ,k+1)*w5 &
-        !      + ua(i  ,j+1,k+1)*w6 &
-        !      + ua(i+1,j+1,k  )*w7 &
-        !      + ua(i+1,j+1,k+1)*w8
+        uval = tri_interp(nip1,nj,nk,i,j,k,w1,w2,w3,w4,w5,w6,w7,w8,u3d)
+        ! uval = u3d(i  ,j  ,k  )*w1 &
+        !      + u3d(i+1,j  ,k  )*w2 &
+        !      + u3d(i  ,j+1,k  )*w3 &
+        !      + u3d(i  ,j  ,k+1)*w4 &
+        !      + u3d(i+1,j  ,k+1)*w5 &
+        !      + u3d(i  ,j+1,k+1)*w6 &
+        !      + u3d(i+1,j+1,k  )*w7 &
+        !      + u3d(i+1,j+1,k+1)*w8
 
 !----------------------------------------------------------------------
 !  Data on v points
@@ -1437,15 +1437,15 @@
         w6 = (1.0-rx)*ry*rz
         w7 = rx*ry*(1.0-rz)
         w8 = rx*ry*rz
-        vval = tri_interp(ni,nj+1,nk,i,j,k,w1,w2,w3,w4,w5,w6,w7,w8,va)
-        ! vval = va(i  ,j  ,k  )*w1 &
-        !      + va(i+1,j  ,k  )*w2 &
-        !      + va(i  ,j+1,k  )*w3 &
-        !      + va(i  ,j  ,k+1)*w4 &
-        !      + va(i+1,j  ,k+1)*w5 &
-        !      + va(i  ,j+1,k+1)*w6 &
-        !      + va(i+1,j+1,k  )*w7 &
-        !      + va(i+1,j+1,k+1)*w8
+        vval = tri_interp(ni,nj+1,nk,i,j,k,w1,w2,w3,w4,w5,w6,w7,w8,v3d)
+        ! vval = v3d(i  ,j  ,k  )*w1 &
+        !      + v3d(i+1,j  ,k  )*w2 &
+        !      + v3d(i  ,j+1,k  )*w3 &
+        !      + v3d(i  ,j  ,k+1)*w4 &
+        !      + v3d(i+1,j  ,k+1)*w5 &
+        !      + v3d(i  ,j+1,k+1)*w6 &
+        !      + v3d(i+1,j+1,k  )*w7 &
+        !      + v3d(i+1,j+1,k+1)*w8
 
 
 !----------------------------------------------------------------------
@@ -1489,26 +1489,26 @@
         w6 = (1.0-rx)*ry*rz
         w7 = rx*ry*(1.0-rz)
         w8 = rx*ry*rz
-        wval = tri_interp(ni,nj,nkp1,i,j,k,w1,w2,w3,w4,w5,w6,w7,w8,wa)
-        ! wval = wa(i  ,j  ,k  )*w1 &
-        !      + wa(i+1,j  ,k  )*w2 &
-        !      + wa(i  ,j+1,k  )*w3 &
-        !      + wa(i  ,j  ,k+1)*w4 &
-        !      + wa(i+1,j  ,k+1)*w5 &
-        !      + wa(i  ,j+1,k+1)*w6 &
-        !      + wa(i+1,j+1,k  )*w7 &
-        !      + wa(i+1,j+1,k+1)*w8
+        wval = tri_interp(ni,nj,nkp1,i,j,k,w1,w2,w3,w4,w5,w6,w7,w8,w3d)
+        ! wval = w3d(i  ,j  ,k  )*w1 &
+        !      + w3d(i+1,j  ,k  )*w2 &
+        !      + w3d(i  ,j+1,k  )*w3 &
+        !      + w3d(i  ,j  ,k+1)*w4 &
+        !      + w3d(i+1,j  ,k+1)*w5 &
+        !      + w3d(i  ,j+1,k+1)*w6 &
+        !      + w3d(i+1,j+1,k  )*w7 &
+        !      + w3d(i+1,j+1,k+1)*w8
 
         if( terrain_flag )then
-          sigdot = tri_interp(ni,nj,nkp1,i,j,k,w1,w2,w3,w4,w5,w6,w7,w8,wa)
-          ! sigdot = wa(i  ,j  ,k  )*w1 &
-          !    + wa(i+1,j  ,k  )*w2 &
-          !    + wa(i  ,j+1,k  )*w3 &
-          !    + wa(i  ,j  ,k+1)*w4 &
-          !    + wa(i+1,j  ,k+1)*w5 &
-          !    + wa(i  ,j+1,k+1)*w6 &
-          !    + wa(i+1,j+1,k  )*w7 &
-          !    + wa(i+1,j+1,k+1)*w8
+          sigdot = tri_interp(ni,nj,nkp1,i,j,k,w1,w2,w3,w4,w5,w6,w7,w8,w3d)
+          ! sigdot = w3d(i  ,j  ,k  )*w1 &
+          !    + w3d(i+1,j  ,k  )*w2 &
+          !    + w3d(i  ,j+1,k  )*w3 &
+          !    + w3d(i  ,j  ,k+1)*w4 &
+          !    + w3d(i+1,j  ,k+1)*w5 &
+          !    + w3d(i  ,j+1,k+1)*w6 &
+          !    + w3d(i+1,j+1,k  )*w7 &
+          !    + w3d(i+1,j+1,k+1)*w8
           zsp = get2d(i,j,x3d,y3d,xh,xf,yh,yf, 0, 0, 0, 0,zs)
           z3d = zsp + sig3d*((zt-zsp)*rzt)
         endif
@@ -1561,15 +1561,15 @@
 
       if(imoist.eq.1)then
         !!print *,'parcel: before qval'
-        qval = tri_interp(ni,nj,nk,i,j,k,w1,w2,w3,w4,w5,w6,w7,w8,qa(ib,jb,kb,nqv))
-        ! qval = qa(i  ,j  ,k  ,nqv)*w1 &
-        !      + qa(i+1,j  ,k  ,nqv)*w2 &
-        !      + qa(i  ,j+1,k  ,nqv)*w3 &
-        !      + qa(i  ,j  ,k+1,nqv)*w4 &
-        !      + qa(i+1,j  ,k+1,nqv)*w5 &
-        !      + qa(i  ,j+1,k+1,nqv)*w6 &
-        !      + qa(i+1,j+1,k  ,nqv)*w7 &
-        !      + qa(i+1,j+1,k+1,nqv)*w8
+        qval = tri_interp(ni,nj,nk,i,j,k,w1,w2,w3,w4,w5,w6,w7,w8,q3d(ib,jb,kb,nqv))
+        ! qval = q3d(i  ,j  ,k  ,nqv)*w1 &
+        !      + q3d(i+1,j  ,k  ,nqv)*w2 &
+        !      + q3d(i  ,j+1,k  ,nqv)*w3 &
+        !      + q3d(i  ,j  ,k+1,nqv)*w4 &
+        !      + q3d(i+1,j  ,k+1,nqv)*w5 &
+        !      + q3d(i  ,j+1,k+1,nqv)*w6 &
+        !      + q3d(i+1,j+1,k  ,nqv)*w7 &
+        !      + q3d(i+1,j+1,k+1,nqv)*w8
       endif
       !if(np==100) then 
       !  print *,'parcel: ngxy,ngz: ',ngxy,ngz
@@ -1618,7 +1618,7 @@
           if( y3d.lt.yh(j) )then
             j=j-1
           endif
-          uval = get2d(i,j,x3d,y3d,xh,xf,yh,yf, 1, 0, 1, 0,ua(ib,jb,1))
+          uval = get2d(i,j,x3d,y3d,xh,xf,yh,yf, 1, 0, 1, 0,u3d(ib,jb,1))
           !------
           ! v at lowest model level:
           i=iflag
@@ -1626,7 +1626,7 @@
           if( x3d.lt.xh(i) )then
             i=i-1
           endif
-          vval = get2d(i,j,x3d,y3d,xh,xf,yh,yf, 0, 1, 0, 1,va(ib,jb,1))
+          vval = get2d(i,j,x3d,y3d,xh,xf,yh,yf, 0, 1, 0, 1,v3d(ib,jb,1))
           !------
           ! z0:
           i=iflag
@@ -1761,14 +1761,14 @@
       dpten(i+1,j+1,k+1,3) = dpten(i+1,j+1,k+1,3) - partmass/rhoval*(dvpdt1-part_grav1)*w8/dV*pdata(np,prmult)
 
       !What interpolation is doing, for reference
-      ! uval = ua(i  ,j  ,k  )*w1 &
-      !      + ua(i+1,j  ,k  )*w2 &
-      !      + ua(i  ,j+1,k  )*w3 &
-      !      + ua(i  ,j  ,k+1)*w4 &
-      !      + ua(i+1,j  ,k+1)*w5 &
-      !      + ua(i  ,j+1,k+1)*w6 &
-      !      + ua(i+1,j+1,k  )*w7 &
-      !      + ua(i+1,j+1,k+1)*w8
+      ! uval = u3d(i  ,j  ,k  )*w1 &
+      !      + u3d(i+1,j  ,k  )*w2 &
+      !      + u3d(i  ,j+1,k  )*w3 &
+      !      + u3d(i  ,j  ,k+1)*w4 &
+      !      + u3d(i+1,j  ,k+1)*w5 &
+      !      + u3d(i  ,j+1,k+1)*w6 &
+      !      + u3d(i+1,j+1,k  )*w7 &
+      !      + u3d(i+1,j+1,k+1)*w8
 
 !----------------------------------------------------------------------
 !  Project to v points
@@ -1831,14 +1831,14 @@
       !$acc atomic update
       dpten(i+1,j+1,k+1,4) = dpten(i+1,j+1,k+1,4) - partmass/rhoval*(dvpdt2-part_grav2)*w8/dV*pdata(np,prmult)
 
-      ! vval = va(i  ,j  ,k  )*w1 &
-      !      + va(i+1,j  ,k  )*w2 &
-      !      + va(i  ,j+1,k  )*w3 &
-      !      + va(i  ,j  ,k+1)*w4 &
-      !      + va(i+1,j  ,k+1)*w5 &
-      !      + va(i  ,j+1,k+1)*w6 &
-      !      + va(i+1,j+1,k  )*w7 &
-      !      + va(i+1,j+1,k+1)*w8
+      ! vval = v3d(i  ,j  ,k  )*w1 &
+      !      + v3d(i+1,j  ,k  )*w2 &
+      !      + v3d(i  ,j+1,k  )*w3 &
+      !      + v3d(i  ,j  ,k+1)*w4 &
+      !      + v3d(i+1,j  ,k+1)*w5 &
+      !      + v3d(i  ,j+1,k+1)*w6 &
+      !      + v3d(i+1,j+1,k  )*w7 &
+      !      + v3d(i+1,j+1,k+1)*w8
 
 !----------------------------------------------------------------------
 !  Project to w points
@@ -1897,14 +1897,14 @@
       !$acc atomic update
       dpten(i+1,j+1,k+1,5) = dpten(i+1,j+1,k+1,5) - partmass/rhoval*(dvpdt3-part_grav3)*w8/dV*pdata(np,prmult)
 
-      ! wval = wa(i  ,j  ,k  )*w1 &
-      !      + wa(i+1,j  ,k  )*w2 &
-      !      + wa(i  ,j+1,k  )*w3 &
-      !      + wa(i  ,j  ,k+1)*w4 &
-      !      + wa(i+1,j  ,k+1)*w5 &
-      !      + wa(i  ,j+1,k+1)*w6 &
-      !      + wa(i+1,j+1,k  )*w7 &
-      !      + wa(i+1,j+1,k+1)*w8
+      ! wval = w3d(i  ,j  ,k  )*w1 &
+      !      + w3d(i+1,j  ,k  )*w2 &
+      !      + w3d(i  ,j+1,k  )*w3 &
+      !      + w3d(i  ,j  ,k+1)*w4 &
+      !      + w3d(i+1,j  ,k+1)*w5 &
+      !      + w3d(i  ,j+1,k+1)*w6 &
+      !      + w3d(i+1,j+1,k  )*w7 &
+      !      + w3d(i+1,j+1,k+1)*w8
 
 !----------------------------------------------------------------------
 !  Project to scalar points
@@ -1967,14 +1967,14 @@
         !$acc atomic update
         dpten(i+1,j+1,k+1,2) = dpten(i+1,j+1,k+1,2) - dmpdt/rhoval/dV*w8*pdata(np,prmult)
 
-        ! qval = qa(i  ,j  ,k  ,nqv)*w1 &
-        !      + qa(i+1,j  ,k  ,nqv)*w2 &
-        !      + qa(i  ,j+1,k  ,nqv)*w3 &
-        !      + qa(i  ,j  ,k+1,nqv)*w4 &
-        !      + qa(i+1,j  ,k+1,nqv)*w5 &
-        !      + qa(i  ,j+1,k+1,nqv)*w6 &
-        !      + qa(i+1,j+1,k  ,nqv)*w7 &
-        !      + qa(i+1,j+1,k+1,nqv)*w8
+        ! qval = q3d(i  ,j  ,k  ,nqv)*w1 &
+        !      + q3d(i+1,j  ,k  ,nqv)*w2 &
+        !      + q3d(i  ,j+1,k  ,nqv)*w3 &
+        !      + q3d(i  ,j  ,k+1,nqv)*w4 &
+        !      + q3d(i+1,j  ,k+1,nqv)*w5 &
+        !      + q3d(i  ,j+1,k+1,nqv)*w6 &
+        !      + q3d(i+1,j+1,k  ,nqv)*w7 &
+        !      + q3d(i+1,j+1,k+1,nqv)*w8
       endif
 
       lhv=lv1-lv2*pdata(np,prt)
@@ -2021,7 +2021,7 @@
 
       end subroutine project_feedback
 
-      subroutine droplet_diag(rtime,nrec,zh,zf,pdata,pdata_locind,dpten,wa,qa,th_in,th0,pi0,ppa,rho)
+      subroutine droplet_diag(rtime,nrec,zh,zf,pdata,pdata_locind,dpten,w3d,q3d,th3d,th0,pi0,pp3d,rho)
 
       use input
       use constants
@@ -2038,9 +2038,9 @@
       integer, intent(inout), dimension(nparcelsLocal,3) :: pdata_locind    ! x/y/z location index of each parcel
       real, intent(in), dimension(ib:ie,jb:je,kb:ke) :: zh
       real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: zf
-      real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: wa
-      real, intent(in), dimension(ib:ie,jb:je,kb:ke,numq) :: qa
-      real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: pi0,th0,th_in,ppa,rho
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: w3d
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke,numq) :: q3d
+      real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: pi0,th0,th3d,pp3d,rho
 
       integer :: np,iz,i,j,k,ir
       integer :: kflag
@@ -2386,13 +2386,13 @@
                qvsrc_tmp = qvsrc_tmp + dpten(i,j,k,2)
                rhovsrc_tmp = rhovsrc_tmp + dpten(i,j,k,2)*rho(i,j,k)
 
-               qt = qa(i,j,k,nqv) + dpten(i,j,k,7)/rho(i,j,k)  !Total mixing ratio of vapor + liquid
-               ta_tmp = (th0(i,j,k)+th_in(i,j,k))*(pi0(i,j,k)+ppa(i,j,k))
+               qt = q3d(i,j,k,nqv) + dpten(i,j,k,7)/rho(i,j,k)  !Total mixing ratio of vapor + liquid
+               ta_tmp = (th0(i,j,k)+th3d(i,j,k))*(pi0(i,j,k)+pp3d(i,j,k))
                lhv=lv1-lv2*ta_tmp
-               kmoist_tmp = kmoist_tmp + ta_tmp*(cp + qt*cpl) + lhv*qa(i,j,k,nqv)
-               mse_tmp = mse_tmp + ta_tmp*(cp + qt*cpl) + lhv*qa(i,j,k,nqv) + (1+qt)*g*dumzh(k)
-               winterp_tmp = winterp_tmp + 0.5*(wa(i,j,k)+wa(i,j,k+1))
-               wk_tmp = wk_tmp + (0.5*(wa(i,j,k)+wa(i,j,k+1)))*(ta_tmp*(cp + qt*cpl) + lhv*qa(i,j,k,nqv))
+               kmoist_tmp = kmoist_tmp + ta_tmp*(cp + qt*cpl) + lhv*q3d(i,j,k,nqv)
+               mse_tmp = mse_tmp + ta_tmp*(cp + qt*cpl) + lhv*q3d(i,j,k,nqv) + (1+qt)*g*dumzh(k)
+               winterp_tmp = winterp_tmp + 0.5*(w3d(i,j,k)+w3d(i,j,k+1))
+               wk_tmp = wk_tmp + (0.5*(w3d(i,j,k)+w3d(i,j,k+1)))*(ta_tmp*(cp + qt*cpl) + lhv*q3d(i,j,k,nqv))
             end do
          end do
          m1src(k) = m1src_tmp/real(nx*ny)

@@ -172,7 +172,6 @@
       use adv_routines, only : movesfc
       use misclibs
       use parcel_module, only : parcel_driver
-      use droplet_module, only : droplet_driver
       use pdcomp_module, only : pidcomp
       use lsnudge_module
       use ib_module
@@ -350,9 +349,6 @@
 #endif
       character(len=20) :: text1,text2
 
-      integer :: num_dropsub,i_dropsub
-      real :: dt_dropsub
-      double precision :: dbldt_dropsub,mtime_dropsub
 
 !--------------------------------------------------------------------
       !$acc declare present(rrw)
@@ -950,162 +946,6 @@
           enddo
 
         endif  prltrn
-
-        ifdroplet:  &
-        if (prcl_droplet.ge.1) then
-
-          num_dropsub = 1
-          mtime_dropsub = mtime
-          do i_dropsub = 1,num_dropsub
-          if (myid.eq.0) print *, 'DHR2: In dropsub loop, i_dropsub=',i_dropsub
-
-          dt_dropsub = dt/real(num_dropsub)
-          dbldt_dropsub = dbldt/dble(num_dropsub)
-          
-
-          !$acc parallel default(present) private(i,j,k)
-          !$acc loop gang vector collapse(3)
-          do k=kb,ke
-          do j=jb,je
-          do i=ib,ie
-            dpten(i,j,k,1) = 0.0
-            dpten(i,j,k,2) = 0.0
-            dpten(i,j,k,3) = 0.0
-            dpten(i,j,k,4) = 0.0
-            dpten(i,j,k,5) = 0.0
-            dpten(i,j,k,6) = 0.0
-            dpten(i,j,k,7) = 0.0
-          enddo
-          enddo
-          enddo
-          !$acc end parallel
-
-          call   droplet_driver(dt_dropsub,dbldt_dropsub,mtime_dropsub,xh,uh,ruh,xf,yh,vh,rvh,yf,zh,mh,rmh,zf,mf,zs, &
-                               sigma,sigmaf,zntmp,rho,rru,rrv,rrw,s10,pdata,              &
-                               tha,qa,th0,pi0,ppi,prs,dum1,                               &
-                               pw1,pw2,pe1,pe2,ps1,ps2,pn1,pn2,                           &
-                               nw1,nw2,ne1,ne2,sw1,sw2,se1,se2,reqs_p,                    &
-                               sw31,sw32,se31,se32,ss31,ss32,sn31,sn32,                   &
-                               n3w1,n3w2,n3e1,n3e2,s3w1,s3w2,s3e1,s3e2,reqs_s,            &
-                               dpten,pdata_locind,nstep)
-          if(timestats.ge.1) time_parcels=time_parcels+mytime()
-#ifdef MPI
-          call sync()
-          if(timestats.ge.1) time_lb=time_lb+mytime()
-          call comm_1s_tend_halo(dpten(ib,jb,kb,1))
-          call comm_1s_tend_halo(dpten(ib,jb,kb,2))
-          call comm_1u_tend_halo(dpten(ib,jb,kb,3))
-          call comm_1v_tend_halo(dpten(ib,jb,kb,4))
-          call comm_1s_tend_halo(dpten(ib,jb,kb,5))
-#else
-          call bcs_tend_halo(dpten(ib,jb,kb,1))
-          call bcs_tend_halo(dpten(ib,jb,kb,2))
-#endif
-#ifdef MPI
-          if(timestats.ge.1) time_dpc=time_dpc+mytime()
-#endif
-          if( nout3d.ge.6 )then
-            !$omp parallel do default(shared) private(i,j,k)
-            !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
-            do k=1,nk
-            do j=1,nj
-            do i=1,ni
-              ! for writeout of tendencies:
-              ! (see out1 and out2 in cm1out* files)
-              out3d(i,j,k,1) = dpten(i,j,k,1)
-              out3d(i,j,k,2) = dpten(i,j,k,2)
-              out3d(i,j,k,3) = dpten(i,j,k,3)
-              out3d(i,j,k,4) = dpten(i,j,k,4)
-              out3d(i,j,k,5) = dpten(i,j,k,5)
-              out3d(i,j,k,6) = dpten(i,j,k,6)
-            enddo
-            enddo
-            enddo
-          endif
-          IF( two_way_coupling.eq.1 )THEN
-            !$omp parallel do default(shared) private(i,j,k)
-            !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
-            do k=1,nk
-            do j=1,nj+1
-            do i=1,ni+1
-              th3d(i,j,k)=th3d(i,j,k)+dt_dropsub*dpten(i,j,k,1)
-              q3d(i,j,k,nqv)=q3d(i,j,k,nqv)+dt_dropsub*dpten(i,j,k,2)
-              u3d(i,j,k)=u3d(i,j,k)+dt_dropsub*dpten(i,j,k,3)
-              v3d(i,j,k)=v3d(i,j,k)+dt_dropsub*dpten(i,j,k,4)
-              w3d(i,j,k)=w3d(i,j,k)+dt_dropsub*dpten(i,j,k,5)
-          
-	      !For Pi chamber DNS with periodic sidewalls, need a vapor sink
-	      !if (testcase.eq.16 .and. nbc.eq.1 .and. ebc.eq.1 .and. sbc.eq.1 .and. wbc.eq.1) then
-	      if (testcase.eq.16) then
-                 !q3d(i,j,k,nqv)=q3d(i,j,k,nqv)-dt_dropsub*7.8e-5  For H = 0.2
-                 q3d(i,j,k,nqv)=q3d(i,j,k,nqv)-dt_dropsub*6.2e-6
-	      end if
-            enddo
-            enddo
-            enddo
-
-
-            if(timestats.ge.1) time_parcels=time_parcels+mytime()
-            call bcs(th3d)
-            call bcs(q3d(ib,jb,kb,nqv))
-            call bcu(u3d)
-            call bcv(v3d)
-            call bcw(w3d,1)
-#ifdef MPI
-            call sync()
-            if(timestats.ge.1) time_lb=time_lb+mytime()
-            !----
-            call comm_3s_start(th3d,rw31,rw32,re31,re32,   &
-                                    rs31,rs32,rn31,rn32,reqs_y)
-            call comm_3s_start(q3d(ib,jb,kb,nqv)  &
-                       ,qw31(1,1,1,nqv),qw32(1,1,1,nqv),qe31(1,1,1,nqv),qe32(1,1,1,nqv)     &
-                       ,qs31(1,1,1,nqv),qs32(1,1,1,nqv),qn31(1,1,1,nqv),qn32(1,1,1,nqv)     &
-                       ,reqs_q(1,nqv) )
-            call comm_3u_start(u3d,uw31,uw32,ue31,ue32,   &
-                                       us31,us32,un31,un32,reqs_u)
-            call comm_3v_start(v3d,vw31,vw32,ve31,ve32,   &
-                                       vs31,vs32,vn31,vn32,reqs_v)
-            call comm_3w_start(w3d,ww31,ww32,we31,we32,   &
-                                       ws31,ws32,wn31,wn32,reqs_w)
-            !----
-            call comm_3s_end(th3d,rw31,rw32,re31,re32,rs31,rs32,rn31,rn32,reqs_y)
-            call comm_3s_end(q3d(ib,jb,kb,nqv)  &
-                       ,qw31(1,1,1,nqv),qw32(1,1,1,nqv),qe31(1,1,1,nqv),qe32(1,1,1,nqv)     &
-                       ,qs31(1,1,1,nqv),qs32(1,1,1,nqv),qn31(1,1,1,nqv),qn32(1,1,1,nqv)     &
-                       ,reqs_q(1,nqv) )
-            call comm_3u_end(u3d,uw31,uw32,ue31,ue32,   &
-                                     us31,us32,un31,un32,reqs_u)
-            call comm_3v_end(v3d,vw31,vw32,ve31,ve32,   &
-                                     vs31,vs32,vn31,vn32,reqs_v)
-            call comm_3w_end(w3d,ww31,ww32,we31,we32,   &
-                                     ws31,ws32,wn31,wn32,reqs_w)
-            !----
-#endif
-            !$omp parallel do default(shared) private(i,j,k)
-            !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
-            do k=1,nk
-            do j=0,nj+2
-            do i=0,ni+2
-              tha(i,j,k)=th3d(i,j,k)
-              qa(i,j,k,nqv)=q3d(i,j,k,nqv)
-              ua(i,j,k)=u3d(i,j,k)
-              va(i,j,k)=v3d(i,j,k)
-              wa(i,j,k)=w3d(i,j,k)
-            enddo
-            enddo
-            enddo
-            if(timestats.ge.1) time_integ=time_integ+mytime()
-          ENDIF
-
-          mtime_dropsub = mtime_dropsub + dbldt_dropsub
-          enddo ! droplet sub-loop         
-
-        else  ifdroplet
-          stop 'solve3: before call to parcel_driver'
-          call     parcel_driver(dt,xh,uh,ruh,xf,yh,vh,rvh,yf,zh,mh,rmh,zf,mf,zs,    &
-                                 sigma,sigmaf,zntmp,rho,rru,rrv,rrw,pdata)
-
-        endif  ifdroplet
 
         if(timestats.ge.1) time_parcels=time_parcels+mytime()
       ENDIF
