@@ -984,8 +984,9 @@
           q3d(i,j,k,nqc) = sngl(dpten(i,j,k,7))
           if( dpten(i,j,k,6).gt.0.0d0 .and. dpten(i,j,k,7).gt.0.0d0 )then
             ! r_eff in metres, converted to microns for radiation scheme
-            effc(i,j,k) = 1.0e6 * ( 3.0*rho(i,j,k)*sngl(dpten(i,j,k,7)) /         &
-                                     (4.0*pi_sp*rhow*(sngl(dpten(i,j,k,6))/(dx*dy*dz))) &
+            ! dpten(:,:,:,6) is already in m^-3
+            effc(i,j,k) = 1.0e6 * ( 3.0*rho(i,j,k)*sngl(dpten(i,j,k,7)) /  &
+                                     (4.0*pi_sp*rhow*sngl(dpten(i,j,k,6)))   &
                                    )**( 1.0/3.0 )
           else
             effc(i,j,k) = 25.0   ! default 25 microns when no droplets present
@@ -1713,7 +1714,7 @@
                         axisymm,terrain_flag,ni,nj,nip1,nk,nkp1, &
                         zt,rzt,imoist,nqv,bbc,imove,umove,vmove, &
                         npvals,nparcelsLocal,prrp,prms,prmult, &
-                        pract,prt,viscosity,nparcelsLocalActive
+                        pract,prt,viscosity,nparcelsLocalActive,dx,dy,dz
       use constants
       use parcel_module
       implicit none
@@ -2059,9 +2060,9 @@
       !        + ta(i+1,j+1,k  )*w7 &
       !        + ta(i+1,j+1,k+1)*w8
 
-      ! diagnostic purposes only: number and liquid mixint ratio of drops in each grid cell
+      ! diagnostic purposes only: number concentration [m^-3] and liquid mixing ratio of drops in each grid cell
       !$acc atomic update
-      dpten(iflag,jflag,kflag,6) = dpten(iflag,jflag,kflag,6) + 1.0
+      dpten(iflag,jflag,kflag,6) = dpten(iflag,jflag,kflag,6) + 1.0/(dx*dy*dz)
 
       !$acc atomic update
       dpten(iflag,jflag,kflag,7) = dpten(iflag,jflag,kflag,7) + partmass/rhoval*pdata(np,prmult)/dV
