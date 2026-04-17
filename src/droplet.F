@@ -398,7 +398,6 @@
     !$acc reduction(+:numDepartN,numDepartS,numDepartE,numDepartW) &
     !$acc reduction(+:numDepartNW,numDepartSW,numDepartNE,numDepartSE) &
     !$acc reduction(+:num_destroyed,mass_destroyed,mass_evap,mass_dpten,eng_destroyed,m1_destroyed,m2_destroyed,mass_reentry,eng_reentry,m1_reentry,m2_reentry)
-#endif
     nploop:  &
     DO np=1,nparcelsLocalActive
 
