@@ -977,7 +977,7 @@
       !   dpten(:,:,:,7) = liquid water mixing ratio ql    [kg/kg]
       !
       !   Mean volume radius assuming spherical droplets:
-      !     r_eff = ( 3 * rho_air * ql / (4 * pi * rho_w * N) )^(1/3)  [m]
+      !     r_eff = ( 3 * rho_air * ql / (4 * pi * rhow * N) )^(1/3)  [m]
       !   Converted to microns for the radiation scheme.
       IF( ptype.eq.7 .and. nqc.gt.0 )THEN
         !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
