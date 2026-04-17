@@ -79,10 +79,12 @@
           mywest,myid,nparcelsLocal,nparcelsLocalActive, &
           time_phys_H2D,time_phys_D2H,drop_inject_elapse, &
           drop_inject_time,time_dropC1,time_dropC2,time_dropC3, &
-          time_dropC4,ngxy,dx,dy,dz,testcase,drop_traj
+          time_dropC4,ngxy,dx,dy,dz,testcase,drop_traj,two_way_coupling,time_dpc, &
+          time_parcels,time_lb
       use constants
       use comm_module
       use comm_droplet_module
+      use bc_module, only: bcs_tend_halo
       use parcel_module
 #ifdef MPI
       use mpi
@@ -232,6 +234,26 @@
       numDepartNE = 0
       numDepartSW = 0
       numDepartSE = 0
+
+!----------------------------------------------------------------------
+!  zero dpten:
+
+      !$acc parallel default(present) private(i,j,k)
+      !$acc loop gang vector collapse(3)
+      do k=kb,ke
+      do j=jb,je
+      do i=ib,ie
+        dpten(i,j,k,1) = 0.0
+        dpten(i,j,k,2) = 0.0
+        dpten(i,j,k,3) = 0.0
+        dpten(i,j,k,4) = 0.0
+        dpten(i,j,k,5) = 0.0
+        dpten(i,j,k,6) = 0.0
+        dpten(i,j,k,7) = 0.0
+      enddo
+      enddo
+      enddo
+      !$acc end parallel
 
 !----------------------------------------------------------------------
 !  apply bottom/top boundary conditions:
@@ -947,6 +969,42 @@
    end if  ! end of "if use_wall_bc" statement
 
    if(timestats.ge.1) time_droplet_inject=time_droplet_inject+mytime()
+
+!----------------------------------------------------------------------
+!  dpten halo exchange and two-way coupling:
+
+#ifdef MPI
+      call sync()
+      if(timestats.ge.1) time_lb=time_lb+mytime()
+      call comm_1s_tend_halo(dpten(ib,jb,kb,1))
+      call comm_1s_tend_halo(dpten(ib,jb,kb,2))
+      call comm_1u_tend_halo(dpten(ib,jb,kb,3))
+      call comm_1v_tend_halo(dpten(ib,jb,kb,4))
+      call comm_1s_tend_halo(dpten(ib,jb,kb,5))
+#else
+      call bcs_tend_halo(dpten(ib,jb,kb,1))
+      call bcs_tend_halo(dpten(ib,jb,kb,2))
+#endif
+      if(timestats.ge.1) time_dpc=time_dpc+mytime()
+
+      IF( two_way_coupling.eq.1 )THEN
+        !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
+        do k=1,nk
+        do j=1,nj+1
+        do i=1,ni+1
+          th3d(i,j,k) = th3d(i,j,k) + dt*dpten(i,j,k,1)
+          q3d(i,j,k,nqv) = q3d(i,j,k,nqv) + dt*dpten(i,j,k,2)
+          u3d(i,j,k) = u3d(i,j,k) + dt*dpten(i,j,k,3)
+          v3d(i,j,k) = v3d(i,j,k) + dt*dpten(i,j,k,4)
+          w3d(i,j,k) = w3d(i,j,k) + dt*dpten(i,j,k,5)
+          if (testcase.eq.16) then
+            q3d(i,j,k,nqv) = q3d(i,j,k,nqv) - dt*6.2e-6
+          end if
+        enddo
+        enddo
+        enddo
+        if(timestats.ge.1) time_parcels=time_parcels+mytime()
+      ENDIF
 
    end subroutine droplet_driver
 
