@@ -177,7 +177,7 @@
       !        every time it is called.  To use truly random perturbations 
       !        (ie, different sets of random perturbations every time CM1 
       !        is used), then change this varliable to .true.
-      logical, parameter :: use_truly_random_pert  =  .true.
+      logical, parameter :: use_truly_random_pert  =  .false.
 
       real :: tmpx, tmpy, tmpz
       real :: xrange, yrange, zrange

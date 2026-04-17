@@ -3530,7 +3530,6 @@
       integer :: ssgf_type  !1 for Andreas 1998, 2 for Ortiz-Suslow 2016
 
       double precision :: rmin10_ssgf,rmax10_ssgf
-      integer :: local_seed
       integer :: values(8)
 
 
@@ -3678,8 +3677,6 @@
                ! initialize a new random number generator for each
                ! injected droplet
 
-               !To get a repeatable sequence 
-               !particle_seed = floor(29.*mtime) + (97*myid) + (7*j)
                call new_RandomNumberSequence(randomNumbers, j*particle_seed)
 
                rand = getRandomReal(randomNumbers)
@@ -3821,7 +3818,6 @@
       
       integer :: iter,nbin,num_create,j,ierr
 
-      integer :: local_seed
       integer :: values(8)
 
 
@@ -3883,8 +3879,6 @@
                ! initialize a new random number generator for each
                ! injected droplet
 
-               !To get a repeatable sequence
-               !local_seed = floor(29.*mtime) + (97*myid) + (7*j)
                call new_RandomNumberSequence(randomNumbers, j*particle_seed)
 
                rad_init = 2.0e-7
