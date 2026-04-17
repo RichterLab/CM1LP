@@ -301,6 +301,20 @@
       enddo
       enddo
 
+      ! For ptype=7 (Lagrangian droplet scheme), ql is diagnostic --
+      ! initialise to zero so turbs is not fed uninitialised memory
+      ! before droplet_driver has run.
+      IF( ptype.eq.7 .and. nqc.gt.0 )THEN
+        do k=kbm,kem
+        do j=jbm,jem
+        do i=ibm,iem
+          qa(i,j,k,nqc)  = 0.0
+          q3d(i,j,k,nqc) = 0.0
+        enddo
+        enddo
+        enddo
+      ENDIF
+
 !---- This is here to ensure that certain idealized cases work ----
 
     pt1:  &

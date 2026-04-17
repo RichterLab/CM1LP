@@ -834,6 +834,7 @@
           IF( imoist.eq.1 )THEN
             ! moisture:
             do n=1,numq
+              if( ptype.eq.7 .and. n.eq.nqc ) cycle
               if( n.eq.nqv )then
                 call diff2s(rxh,arh1,arh2,uh,xf,arf1,arf2,uf,vh,vf,mh,mf,  &
                             dum1,dum2,dum3,dum4,qa(ib,jb,kb,n),qten(ib,jb,kb,n),rho,rr,rf,  &
@@ -1397,6 +1398,10 @@
         IF( imoist.eq.1 )THEN
           ! moisture:
           do n=1,numq
+            ! For ptype=7, ql (nqc) is diagnostic from droplet_driver --
+            ! skip turbulent diffusion to avoid corrupting it and to avoid
+            ! NaNs from uninitialised values on the first timestep.
+            if( ptype.eq.7 .and. n.eq.nqc ) cycle
             if( n.eq.nqv )then
               call turbs(1,dt,dosfcflx,xh,rxh,arh1,arh2,uh,xf,arf1,arf2,uf,vh,vf,qvflux,   &
                          rds,sigma,rdsf,sigmaf,mh,mf,gz,rgz,gzu,rgzu,gzv,rgzv,gx,gxu,gy,gyv, &
