@@ -1584,6 +1584,10 @@
     
     DO n=1,numq
 
+      ! For ptype=7, ql (nqc) is a diagnostic field overwritten by
+      ! droplet_driver each timestep -- skip advection entirely.
+      if( ptype.eq.7 .and. n.eq.nqc ) cycle
+
       ! t33 = dummy
 
       bflag=0
