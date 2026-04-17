@@ -987,7 +987,7 @@
           q3d(i,j,k,nqc) = sngl(dpten(i,j,k,7))
           if( dpten(i,j,k,6).gt.0.0d0 .and. dpten(i,j,k,7).gt.0.0d0 )then
             effc(i,j,k) = 1.0e6 * ( 3.0*rho(i,j,k)*sngl(dpten(i,j,k,7)) /  &
-                                     (4.0*pi_sp*rhow*sngl(dpten(i,j,k,6)))   &
+                                     (4.0*pi*rhow*sngl(dpten(i,j,k,6)))      &
                                    )**( 1.0/3.0 )
           else
             effc(i,j,k) = 25.0   ! default 25 microns where no droplets present
