@@ -79,7 +79,7 @@
           time_phys_H2D,time_phys_D2H,drop_inject_elapse, &
           drop_inject_time,time_dropC1,time_dropC2,time_dropC3, &
           time_dropC4,ngxy,dx,dy,dz,testcase,drop_traj,two_way_coupling,time_dpc, &
-          time_parcels,time_lb,nqc,ptype
+          time_parcels,time_lb,nqc,ptype,radopt
       use constants
       use comm_module
       use comm_droplet_module
@@ -985,16 +985,27 @@
         do j=1,nj
         do i=1,ni
           q3d(i,j,k,nqc) = sngl(dpten(i,j,k,7))
-          if( dpten(i,j,k,6).gt.0.0d0 .and. dpten(i,j,k,7).gt.0.0d0 )then
-            effc(i,j,k) = 1.0e6 * ( 3.0*rho(i,j,k)*sngl(dpten(i,j,k,7)) /  &
-                                     (4.0*pi*rhow*sngl(dpten(i,j,k,6)))      &
-                                   )**( 1.0/3.0 )
-          else
-            effc(i,j,k) = 25.0   ! default 25 microns where no droplets present
-          end if
         enddo
         enddo
         enddo
+        ! effc is only full-size when radiation is enabled (radopt>=1);
+        ! when radopt=0 it is allocated (1:1,1:1,1:1) so skip to avoid OOB write.
+        if( radopt.ge.1 )then
+          !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
+          do k=1,nk
+          do j=1,nj
+          do i=1,ni
+            if( dpten(i,j,k,6).gt.0.0d0 .and. dpten(i,j,k,7).gt.0.0d0 )then
+              effc(i,j,k) = 1.0e6 * ( 3.0*rho(i,j,k)*sngl(dpten(i,j,k,7)) /  &
+                                       (4.0*pi*rhow*sngl(dpten(i,j,k,6)))      &
+                                     )**( 1.0/3.0 )
+            else
+              effc(i,j,k) = 25.0   ! default 25 microns where no droplets present
+            end if
+          enddo
+          enddo
+          enddo
+        end if
       ENDIF
 
    end subroutine droplet_driver
