@@ -1,17 +1,10 @@
-#define _VERIFY 1
-#define _COUNTPREFIX 1
-#define TROUBLE 0
-#define PITER 1048576
-#ifdef _B4B
-#undef _B4B01F
-#endif
   MODULE droplet_module
 
   implicit none
 
   private
   public :: droplet_driver,droplet_diag,initialize_droplet_histograms, &
-            check_droplet_ownership,particle_seed,ngidx
+            check_droplet_ownership,particle_seed,ngidx,deterministic_seed
 
   !These are quantities which are needed in the droplet_diag output, so must be public
   real :: num100,num1000
@@ -46,6 +39,12 @@
 
   !For testing: set this parameter to ".false." to make droplet injection deterministic (not random)
   logical, parameter :: random_droplets = .true.
+
+  ! Seed control: .true.  = deterministic seed (int(mtime)*1000 + myid); results
+  !               are reproducible run-to-run with the same configuration.
+  !               .false. = wall-clock seed; more randomness, but results differ
+  !               between initial and restart runs.
+  logical, parameter :: deterministic_seed = .true.
 
   !$acc declare create (hist_restime,hist_radius,hist_radius10, &
   !$acc                 hist_fallrad,restime_min,restime_max, &
@@ -162,11 +161,7 @@
 
       logical, parameter :: debug = .false.
 
-      integer :: values(8),local_seed
-
       integer :: doinject  !Do a call to droplet_inject at this time step?
-
-      type(randomNumberSequence) :: randomNumbers
 
       integer :: num_fallout,idx                        !droplets which fell out of domain
       integer :: numDepart
@@ -202,27 +197,8 @@
 
       logical, parameter :: verbose=.false.
       integer :: errcode
-#ifdef _VERIFY_FIND_LOC
-      integer :: tmp_flag
-#endif
 
 
-
-      call date_and_time(values=values)
-      ! 1) To match the initial and restart runs for total droplet number,
-      !    use the following form to calculate the seed value so that it is 
-      !    deterministic but varies between different MPI ranks and time steps
-      ! 2) Otherwise, use David's original form with date and time to achieve
-      !    more randomness but unmatched results between initial and restart runs
-
-#ifdef MPI
-        particle_seed =  (myid+values(8)+values(7)+values(6))
-#else
-        particle_seed =  values(8)+values(7)+values(6)
-#endif
-
-      !particle_seed = int(mtime) * 1000 + myid      
-      call new_RandomNumberSequence(randomNumbers, particle_seed)
 
       num_fallout = 0  !Reset the number of droplets that have fallen out of physical domain
       errcode     = 0  ! Number of errors that occurred in the index search 
@@ -268,8 +244,6 @@
          pdata_neighbor(np) = undefined_index
       end do
       !$acc end parallel
-#else
-      !$acc data copyin (randomNumbers,randomNumbers%state)
 #endif
 
     IF(bbc.eq.1)THEN
@@ -419,12 +393,6 @@
     end if
 
 
-#ifdef _B4B01F
-    !$acc update &
-    !$acc host(pdata,xf,yf,zf,zh,sigma,sigmaf, &
-    !$acc      u3d,v3d,w3d,q3d,ta,rho,prs,znt,dpten,zs)
-#else
-    !JMD WARNING: Loop does not yet match CPU version.
     !$acc parallel default(present)
     !$acc loop gang vector reduction(+:num_fallout) reduction(max:errcode) &
     !$acc reduction(+:numDepartN,numDepartS,numDepartE,numDepartW) &
@@ -636,8 +604,6 @@
                  (pdata_locind(np,2) .eq. undefined_index)
      enddo
 
-#if (defined(_COUNTPREFIX) && defined(_OPENACC))
-
      !$acc data create(Cindx)
 
      !$acc parallel loop gang vector default(present)
@@ -650,43 +616,27 @@
      ! elements satisfy a particular condition.  For example consider
      ! locind = [1 2 3 4 undefined 5 6 7 undefined 8]
      ! C = COUNT_PREFIX(mask = (locind .eq. undefined), EXCLUSIVE=.true.)
-     ! would generate the array 
+     ! would generate the array
      ! C = [0 0 0 0 0 1 1 1 1 2]
      Cindx = count_prefix(mask=msk,exclusive=.true.)
 
      ! collect the location of the special values into a smaller array
      !$acc parallel loop gang vector default(present)
      do np = 1, nparcelsLocal-1
-        if ( Cindx(np) .ne. Cindx(np+1) ) then 
+        if ( Cindx(np) .ne. Cindx(np+1) ) then
            holes_ind(Cindx(np)+1) = np
         end if
      end do
      !$acc end parallel
 
      ! Special treatment for the last value in the array
-     !$acc kernels default(present) 
+     !$acc kernels default(present)
      if(msk(nparcelsLocal)) then
        holes_ind(Cindx(nparcelsLocal)+1) = nparcelsLocal
      endif
      !$acc end kernels
 
      !$acc end data
-
-#else
-     !CPU based calculations 
-     do np = 1, numHoles
-       holes_ind(np) = undefined_index
-     end do
-
-     i=0
-     do np = 1, nparcelsLocal
-       if (msk(np)) then 
-          i = i + 1
-          holes_ind(i) = np
-       end if
-     end do
-     !$acc update device(holes_ind)
-#endif
 
      if(timestats.ge.1) time_dropC1=time_dropC1+mytime()
 
@@ -860,13 +810,7 @@
 ! Requires inputting the current 10-meter wind speed
    if ( .not. use_wall_bc ) then  
       u10_ssgf = 0.0
-      ! If _VERIFY macro is enabled than perform the following sum on
-      ! the CPU 
-#ifdef _VERIFY
       !$acc update host(s10)
-#else
-      !$acc parallel loop gang vector reduction(+:u10_ssgf)
-#endif
       do j=1,nj
          do i=1,ni
             u10_ssgf = u10_ssgf + s10(i,j)
@@ -2949,11 +2893,6 @@
                                                                 ! the current parcel location
       ! local variable
       integer :: i
-#ifdef _VERIFY_FIND_LOC
-      integer :: ind_ori
-
-      ind_ori = ind
-#endif
 
       ! Sanity check:
       ! - If input x/y location is outside the x/y range, return directly
@@ -2984,22 +2923,6 @@
                end if
             end do
          end if
-#ifdef _VERIFY_FIND_LOC
-         ind_ori = ind
-         i = end_ind
-         do while( ind_ori .lt. 0 .and. i .gt. 1 )
-            i = i - 1
-            if ( loc .ge. dsize(i) .and. loc .le. dsize(i+1) ) then
-               ind_ori = i
-            end if
-         end do
-         if ( ind_ori .ne. ind ) then
-            print *, "original search scheme finds x/y index = ", ind_ori, ", new search scheme finds x/y index = ", ind 
-            stop "Failed verification test: x/y index is not the same..."
-         else
-            print *, "Pass the verification test for x/y index..."
-         end if
-#endif
       else ! Always search from the end when:
            !    - it is the first time step
            !    - a parcel enters a new or different MPI process
@@ -3032,11 +2955,6 @@
 
       ! Local variable
       integer :: i
-#ifdef _VERIFY_FIND_LOC
-      integer :: ind_ori
-
-      ind_ori = ind
-#endif
 
       ! Sanity check:
       ! - If input z location is outside the z range, return directly
@@ -3064,23 +2982,6 @@
             end do
          end if
          ind = i
-#ifdef _VERIFY_FIND_LOC
-         if ( is_ge ) then
-            do while( loc .ge. dsize(ind_ori+1) )
-               ind_ori = ind_ori + 1
-            end do
-         else
-            do while( loc .gt. dsize(ind_ori+1) )
-               ind_ori = ind_ori + 1
-            end do
-         end if
-         if ( ind_ori .ne. ind ) then
-            print *, "original search scheme finds z index = ", ind_ori, ", new search scheme finds z index = ", ind
-            stop "Failed verification test: z index is not the same..."
-         else
-            print *, "Pass the verification test for z index..."
-         end if
-#endif
       else ! Always search from the end when:
            !    - it is the first time step
            !    - a parcel enters a new or different MPI process
@@ -3757,19 +3658,16 @@
 
       if (tot_after_reintro .lt. nparcelsMax) then   !Only add particles if the total number injected
                                                      !does not make the global exceed nparcelsMax
-       call date_and_time(values=values)
+      if (deterministic_seed) then
+        particle_seed = int(mtime) * 1000 + myid
+      else
+        call date_and_time(values=values)
 #ifdef MPI
-        particle_seed =  (myid+values(8)+values(7)+values(6))
+        particle_seed = (myid+values(8)+values(7)+values(6))
 #else
-        particle_seed =  values(8)+values(7)+values(6)
+        particle_seed = values(8)+values(7)+values(6)
 #endif
-
-       call date_and_time(values=values)
-#ifdef MPI
-        particle_seed =  (myid+values(8)+values(7)+values(6))
-#else
-        particle_seed =  values(8)+values(7)+values(6)
-#endif
+      end if
 
          !$acc data copyin(dFssum,binsdata,binsdata10) create(randomNumbers,randomNumbers%state)
          !$acc update device(ngidx)
@@ -3965,12 +3863,16 @@
       if (tot_after_reintro .lt. nparcelsMax) then   !Only add particles if the total number injected
                                                      !does not make the global exceed nparcelsMax
 
-       call date_and_time(values=values)
+      if (deterministic_seed) then
+        particle_seed = int(mtime) * 1000 + myid
+      else
+        call date_and_time(values=values)
 #ifdef MPI
-        particle_seed =  (myid+values(8)+values(7)+values(6))
+        particle_seed = (myid+values(8)+values(7)+values(6))
 #else
-        particle_seed =  values(8)+values(7)+values(6)
+        particle_seed = values(8)+values(7)+values(6)
 #endif
+      end if
 
          !$acc data create(randomNumbers,randomNumbers%state)
          !$acc update device(ngidx)

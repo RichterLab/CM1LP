@@ -84,7 +84,7 @@
       use module_mp_nssl_2mom, only: ccn, lccn
       use poiss_module
       use parcel_module , only : getparcelzs
-      use droplet_module, only: initialize_droplet_histograms,particle_seed,ngidx
+      use droplet_module, only: initialize_droplet_histograms,particle_seed,ngidx,deterministic_seed
 #ifdef MPI
       use mpi
 #endif
@@ -415,16 +415,18 @@
         !     https://github.com/ESCOMP/CESM_share/blob/main/RandNum/src/mt19937/mersennetwister_mod.F90
         !
         ! The generated random number is independent of compilers and MPI ranks
-        call date_and_time(VALUES=values)
-        !To get repeatable sequence
-        !particle_seed =  max(1, int(nparcelsInit * write_frac_droplet))
-
-        !Randomize based on date/time
+        if (deterministic_seed) then
+          ! Seed based on problem size: reproducible run-to-run
+          particle_seed = max(1, int(nparcelsInit * write_frac_droplet))
+        else
+          ! Wall-clock seed: different every run
+          call date_and_time(VALUES=values)
 #ifdef MPI
-        particle_seed =  (myid+values(8)+values(7)+values(6))
+          particle_seed = (myid+values(8)+values(7)+values(6))
 #else
-        particle_seed =  values(8)+values(7)+values(6)
+          particle_seed = values(8)+values(7)+values(6)
 #endif
+        end if
         call new_RandomNumberSequence(randomNumbers, particle_seed)
 
 	ngidx = 0  !Set the global particle ID counter to 0 at the beginning
