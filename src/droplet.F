@@ -79,7 +79,7 @@
           time_phys_H2D,time_phys_D2H,drop_inject_elapse, &
           drop_inject_time,time_dropC1,time_dropC2,time_dropC3, &
           time_dropC4,ngxy,dx,dy,dz,testcase,drop_traj,two_way_coupling,time_dpc, &
-          time_parcels,time_lb
+          time_parcels,time_lb,nqc,ptype
       use constants
       use comm_module
       use comm_droplet_module
@@ -964,6 +964,20 @@
         enddo
         enddo
         if(timestats.ge.1) time_parcels=time_parcels+mytime()
+      ENDIF
+
+      ! For ptype=7 (Lagrangian droplet scheme), populate q3d(:,:,:,nqc)
+      ! with the Eulerian liquid water diagnosed from the droplet population.
+      ! dpten(:,:,:,7) carries bulk liquid water mixing ratio [kg/kg].
+      IF( ptype.eq.7 .and. nqc.gt.0 )THEN
+        !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
+        do k=1,nk
+        do j=1,nj
+        do i=1,ni
+          q3d(i,j,k,nqc) = sngl(dpten(i,j,k,7))
+        enddo
+        enddo
+        enddo
       ENDIF
 
    end subroutine droplet_driver

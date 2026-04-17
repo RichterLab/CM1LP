@@ -2547,6 +2547,7 @@
         if( ptype.eq.4  ) param_mp = 'Gilmore/Straka/Rasmussen version of LFO scheme'
         if( ptype.eq.5  ) param_mp = 'Morrison double moment'
         if( ptype.eq.6  ) param_mp = 'Rotunno-Emanuel water-only'
+        if( ptype.eq.7  ) param_mp = 'Lagrangian droplet scheme'
         if( ptype.eq.26 ) param_mp = 'NSSL 2-moment scheme (graupel-only, no hail)'
         if( ptype.eq.27 ) param_mp = 'NSSL 2-moment scheme (graupel and hail)'
         if( ptype.eq.28 ) param_mp = 'NSSL single-moment scheme (graupel-only)'
@@ -3359,6 +3360,43 @@
           if(dowr) write(outfile,*)
           if(dowr) write(outfile,*) ' ----------------------------------------------- '
           if(dowr) write(outfile,*) '  ... using Rotunno-Emanuel microphysics scheme ... '
+          if(dowr) write(outfile,*) '         numq   = ',numq
+          if(dowr) write(outfile,*) ' ----------------------------------------------- '
+          if(dowr) write(outfile,*)
+
+!-----------------------------------------------------------------------
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!-----------------------------------------------------------------------
+
+        ELSEIF(ptype.eq.7)THEN        ! Lagrangian droplet scheme
+
+          ! Liquid water (ql) is diagnosed from dpten(:,:,:,7) by
+          ! droplet_driver and written into q3d(:,:,:,nqc) each timestep.
+          ! mp_driver is a no-op for this ptype.
+
+          numq = 2    ! qv + ql
+
+          nqv  = 1    ! water vapour
+          nql1 = 2    ! first (and only) liquid variable
+          nql2 = 2    ! last  (and only) liquid variable
+
+          cloudvar(1) = .false.
+          cloudvar(2) = .true.
+
+          qname(1) = 'qv '
+          qname(2) = 'ql '
+
+          qunit(1) = 'kg/kg'
+          qunit(2) = 'kg/kg'
+
+          qmag( 1) = 1.0e-2
+          qmag( 2) = 1.0e-4
+
+          nbudget = 0
+
+          if(dowr) write(outfile,*)
+          if(dowr) write(outfile,*) ' ----------------------------------------------- '
+          if(dowr) write(outfile,*) '  ... using Lagrangian droplet microphysics ...   '
           if(dowr) write(outfile,*) '         numq   = ',numq
           if(dowr) write(outfile,*) ' ----------------------------------------------- '
           if(dowr) write(outfile,*)

@@ -1340,7 +1340,13 @@
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !  insert new microphysics schemes here
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-!        ELSEIF(ptype.eq.8)THEN
+
+        ELSEIF(ptype.eq.7)THEN
+
+          ! Lagrangian droplet scheme: all microphysics is handled by
+          ! droplet_driver.  q3d(:,:,:,nqc) and effc are populated there.
+          ! Nothing to do here.
+
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 ! otherwise, stop for undefined ptype
 
