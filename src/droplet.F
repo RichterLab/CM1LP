@@ -603,6 +603,7 @@
                  (pdata_locind(np,2) .eq. undefined_index)
      enddo
 
+#ifdef _OPENACC
      !$acc data create(Cindx)
 
      !$acc parallel loop gang vector default(present)
@@ -636,6 +637,22 @@
      !$acc end kernels
 
      !$acc end data
+
+#else
+     ! CPU fallback
+     do np = 1, numHoles
+       holes_ind(np) = undefined_index
+     end do
+
+     i=0
+     do np = 1, nparcelsLocal
+       if (msk(np)) then
+          i = i + 1
+          holes_ind(i) = np
+       end if
+     end do
+     !$acc update device(holes_ind)
+#endif
 
      if(timestats.ge.1) time_dropC1=time_dropC1+mytime()
 
