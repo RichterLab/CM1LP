@@ -3377,8 +3377,10 @@
           numq = 2    ! qv + ql
 
           nqv  = 1    ! water vapour
-          nql1 = 2    ! first (and only) liquid variable
-          nql2 = 2    ! last  (and only) liquid variable
+          ! nql1/nql2 intentionally left at default (-2): ql is excluded
+          ! from the buoyancy calculation in solve2 because droplet_driver
+          ! already accounts for liquid loading via dpten tendencies.
+          ! ql (nqc) exists only for radiation and diagnostics.
 
           cloudvar(1) = .false.
           cloudvar(2) = .true.
