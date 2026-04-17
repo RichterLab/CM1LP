@@ -65,7 +65,7 @@
                                  ne2,sw1,sw2,se1,se2,reqs_p,sw31,sw32, &
                                  se31,se32,ss31,ss32,sn31,sn32,n3w1, &
                                  n3w2,n3e1,n3e2,s3w1,s3w2,s3e1,s3e2, &
-                                 reqs_s,dpten,pdata_locind,nstep)
+                                 reqs_s,dpten,pdata_locind,nstep,effc)
 
       use input, only : ib,ie,jb,je,kb,ke,ibl,iel,jbl,jel,numq,ni,nj, &
           nk,imp,jmp,kmp,rmp,cmp,kmt,npvals,npvars,cgs1,cgs2,cgs3, &
@@ -119,6 +119,7 @@
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: pi0,th0,th3d,pp3d
       double precision, intent(inout), dimension(ib:ie,jb:je,kb:ke,7) :: dpten
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke,numq) :: q3d
+      real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: effc
       real, intent(inout), dimension(ib:ie+1,jb:je,kb:ke) :: u3d
       real, intent(inout), dimension(ib:ie,jb:je+1,kb:ke) :: v3d
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke+1) :: w3d
@@ -969,12 +970,26 @@
       ! For ptype=7 (Lagrangian droplet scheme), populate q3d(:,:,:,nqc)
       ! with the Eulerian liquid water diagnosed from the droplet population.
       ! dpten(:,:,:,7) carries bulk liquid water mixing ratio [kg/kg].
+      ! Also compute effc (effective radius, m) from droplet count and liquid
+      ! water for use by the radiation scheme.
+      !   dpten(:,:,:,6) = droplet count per grid cell  [-]
+      !   dpten(:,:,:,7) = liquid water mixing ratio     [kg/kg]
+      !   N = count / dV                                 [m^-3]
+      !   r_eff = ( 3*rho*ql / (4*pi*rhow*N) )^(1/3)   [m]
       IF( ptype.eq.7 .and. nqc.gt.0 )THEN
         !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
         do k=1,nk
         do j=1,nj
         do i=1,ni
           q3d(i,j,k,nqc) = sngl(dpten(i,j,k,7))
+          if( dpten(i,j,k,6).gt.0.0d0 .and. dpten(i,j,k,7).gt.0.0d0 )then
+            ! r_eff in metres, converted to microns for radiation scheme
+            effc(i,j,k) = 1.0e6 * ( 3.0*rho(i,j,k)*sngl(dpten(i,j,k,7)) /         &
+                                     (4.0*pi_sp*rhow*(sngl(dpten(i,j,k,6))/(dx*dy*dz))) &
+                                   )**( 1.0/3.0 )
+          else
+            effc(i,j,k) = 25.0   ! default 25 microns when no droplets present
+          end if
         enddo
         enddo
         enddo
