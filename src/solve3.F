@@ -464,7 +464,11 @@
             qpten(i,j,k)=(pp3d(i,j,k)-qpten(i,j,k))*rdt
             qtten(i,j,k)=(th3d(i,j,k)-qtten(i,j,k))*rdt
             qvten(i,j,k)=(q3d(i,j,k,nqv)-qvten(i,j,k))*rdt
-            qcten(i,j,k)=(q3d(i,j,k,nqc)-qcten(i,j,k))*rdt
+            ! ptype=7: ql is diagnostic from droplet_driver; don't
+            ! overwrite qcten with a meaningless ql-based tendency.
+            if( .not.(ptype.eq.7 .and. nqc.gt.0) )then
+              qcten(i,j,k)=(q3d(i,j,k,nqc)-qcten(i,j,k))*rdt
+            end if
           enddo
           enddo
           enddo

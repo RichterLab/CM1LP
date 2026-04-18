@@ -1705,8 +1705,12 @@
             qtten(i,j,k)=th3d(i,j,k)
             q3d(i,j,k,nqv)=q3d(i,j,k,nqv)-dt*qvten(i,j,k)
             qvten(i,j,k)=q3d(i,j,k,nqv)
-            q3d(i,j,k,nqc)=q3d(i,j,k,nqc)-dt*qcten(i,j,k)
-            qcten(i,j,k)=q3d(i,j,k,nqc)
+            ! ptype=7: ql is a diagnostic set by droplet_driver each step,
+            ! not a prognostic evolved here -- skip to avoid corrupting it.
+            if( .not.(ptype.eq.7 .and. nqc.gt.0) )then
+              q3d(i,j,k,nqc)=q3d(i,j,k,nqc)-dt*qcten(i,j,k)
+              qcten(i,j,k)=q3d(i,j,k,nqc)
+            end if
           enddo
           enddo
           enddo

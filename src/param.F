@@ -3394,7 +3394,12 @@
           qmag( 1) = 1.0e-2
           qmag( 2) = 1.0e-4
 
-          nbudget = 0
+          ! nbudget must be >= 10 because qbudget(8), qbudget(9), and
+          ! qbudget(10) are accessed unconditionally in turb.F, solve1.F
+          ! when surface fluxes or rterm are active -- a zero-length
+          ! qbudget causes heap corruption and a silent crash on the
+          ! first writeout step.
+          nbudget = 10
 
           if(dowr) write(outfile,*)
           if(dowr) write(outfile,*) ' ----------------------------------------------- '
