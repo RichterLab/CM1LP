@@ -587,7 +587,8 @@
 
 !----------
 
-      IF(imoist.eq.1 .and. stat_pcn.eq.1)THEN
+      ! ptype=7: budget output excluded from stats (see setup_stat_vars)
+      IF(imoist.eq.1 .and. stat_pcn.eq.1 .and. ptype.ne.7)THEN
       if(myid.eq.0)then
 100     format(2x,'stat:: ',a6,':',1x,e13.6)
         do n=1,nbudget
@@ -1418,7 +1419,11 @@
       unit_stat(stat_out) = 'kg m/s'
     endif
 
-    if(stat_pcn    .eq.1)then
+    ! ptype=7 (Lagrangian droplets): bulk microphysics budget terms 1-7
+    ! are always zero, and qsfc/esfc/erad (8-10) are available from
+    ! other diagnostics.  Skip here so stat_out matches the runtime
+    ! nstat accumulation in statpack() below.
+    if(stat_pcn    .eq.1 .and. ptype.ne.7)then
       do n=1,nbudget
         text1='        '
         text2='                              '
