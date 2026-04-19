@@ -3401,6 +3401,22 @@
           ! first writeout step.
           nbudget = 10
 
+          ! budname must be initialised for all nbudget entries so that
+          ! statpack can write a valid .ctl variable list.  Indices 1-7
+          ! are microphysics terms not applicable to ptype=7 (always 0);
+          ! indices 8-10 match the quantities actually written by the
+          ! surface-flux and rterm paths (same convention as other ptypes).
+          budname(1)  = 'unused'
+          budname(2)  = 'unused'
+          budname(3)  = 'unused'
+          budname(4)  = 'unused'
+          budname(5)  = 'unused'
+          budname(6)  = 'unused'
+          budname(7)  = 'unused'
+          budname(8)  = 'qsfc  '
+          budname(9)  = 'esfc  '
+          budname(10) = 'erad  '
+
           if(dowr) write(outfile,*)
           if(dowr) write(outfile,*) ' ----------------------------------------------- '
           if(dowr) write(outfile,*) '  ... using Lagrangian droplet microphysics ...   '
