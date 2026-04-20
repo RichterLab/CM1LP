@@ -2124,7 +2124,7 @@
         call stopcm1
       ENDIF
       !-----
-      IF( radopt.eq.2 .and. ( ptype.ne.3 .and. ptype.ne.5 )  )THEN
+      IF( radopt.eq.2 .and. ( ptype.ne.3 .and. ptype.ne.5 .and. ptype.ne.7 )  )THEN
         if(myid.eq.0)then
         print *
         print *,'  radopt   = ',radopt
