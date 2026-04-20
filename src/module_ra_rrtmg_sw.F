@@ -3399,10 +3399,20 @@
                  fac01(lay) * absb(ind1  ,ig) + &
                  fac11(lay) * absb(ind1+1,ig)) 
 !            ssa(lay,ig) = tauray/taug(lay,ig)
-            if (lay .eq. laysolfr) sfluxzen(ig) = sfluxref(ig) 
-            taur(lay,ig) = tauray  
+            if (lay .eq. laysolfr) sfluxzen(ig) = sfluxref(ig)
+            taur(lay,ig) = tauray
          enddo
       enddo
+
+! Shallow-domain guard: when laytrop==nlayers (all layers tropospheric,
+! e.g. ztop < ~10 km) the upper loop above is never entered and
+! sfluxzen(1:ng16) are left uninitialized.  Band 16 uses a 1-D sfluxref
+! (no species interpolation needed) so we can copy it directly.
+      if (laytrop .eq. nlayers) then
+         do ig = 1, ng16
+            sfluxzen(ig) = sfluxref(ig)
+         enddo
+      endif
 
       end subroutine taumol16
 
@@ -3522,6 +3532,23 @@
             taur(lay,ngs16+ig) = tauray
          enddo
       enddo
+
+! Shallow-domain guard: when laytrop==nlayers the upper loop above is
+! skipped and sfluxzen(ngs16+1:ngs16+ng17) are never set.  Replicate the
+! upper-loop species interpolation using the topmost layer (laysolfr would
+! equal nlayers) so the solar source function is properly initialised.
+      if (laytrop .eq. nlayers) then
+         speccomb = colh2o(nlayers) + strrat*colco2(nlayers)
+         specparm = colh2o(nlayers)/speccomb
+         if (specparm .ge. oneminus) specparm = oneminus
+         specmult = 4._rb*(specparm)
+         js = 1 + int(specmult)
+         fs = mod(specmult, 1._rb)
+         do ig = 1, ng17
+            sfluxzen(ngs16+ig) = sfluxref(ig,js) &
+               + fs * (sfluxref(ig,js+1) - sfluxref(ig,js))
+         enddo
+      endif
 
       end subroutine taumol17
 
