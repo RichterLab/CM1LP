@@ -4396,10 +4396,17 @@
                  fac01(lay) * absb(ind1,ig) + & 
                  fac11(lay) * absb(ind1+1,ig))
 !            ssa(lay,ngs26+ig) = tauray/taug(lay,ngs26+ig)
-            if (lay.eq.laysolfr) sfluxzen(ngs26+ig) = scalekur * sfluxref(ig) 
+            if (lay.eq.laysolfr) sfluxzen(ngs26+ig) = scalekur * sfluxref(ig)
             taur(lay,ngs26+ig) = tauray
          enddo
       enddo
+
+! Shallow-domain guard: band 27 sfluxref is 1-D; scalekur is a module constant.
+      if (laytrop .eq. nlayers) then
+         do ig = 1, ng27
+            sfluxzen(ngs26+ig) = scalekur * sfluxref(ig)
+         enddo
+      endif
 
       end subroutine taumol27
 
@@ -4506,6 +4513,20 @@
          enddo
       enddo
 
+! Shallow-domain guard: band 28 uses O3/O2 species interpolation (specmult=4).
+      if (laytrop .eq. nlayers) then
+         speccomb = colo3(nlayers) + strrat*colo2(nlayers)
+         specparm = colo3(nlayers)/speccomb
+         if (specparm .ge. oneminus) specparm = oneminus
+         specmult = 4._rb*(specparm)
+         js = 1 + int(specmult)
+         fs = mod(specmult, 1._rb)
+         do ig = 1, ng28
+            sfluxzen(ngs27+ig) = sfluxref(ig,js) &
+               + fs * (sfluxref(ig,js+1) - sfluxref(ig,js))
+         enddo
+      endif
+
       end subroutine taumol28
 
 !----------------------------------------------------------------------------
@@ -4579,10 +4600,17 @@
                  fac11(lay) * absb(ind1+1,ig)) &  
                  + colh2o(lay) * absh2o(ig) 
 !            ssa(lay,ngs28+ig) = tauray/taug(lay,ngs28+ig)
-            if (lay .eq. laysolfr) sfluxzen(ngs28+ig) = sfluxref(ig) 
+            if (lay .eq. laysolfr) sfluxzen(ngs28+ig) = sfluxref(ig)
             taur(lay,ngs28+ig) = tauray
          enddo
       enddo
+
+! Shallow-domain guard: band 29 sfluxref is 1-D.
+      if (laytrop .eq. nlayers) then
+         do ig = 1, ng29
+            sfluxzen(ngs28+ig) = sfluxref(ig)
+         enddo
+      endif
 
       end subroutine taumol29
 
