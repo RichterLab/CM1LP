@@ -4324,7 +4324,7 @@
 !-------   END:  modify stuff above here -------------------------------
 !-----------------------------------------------------------------------
 
-      IF( (radopt.eq.1.or.radopt.eq.2) .and. iice.ne.1 )THEN
+      IF( (radopt.eq.1.or.radopt.eq.2) .and. iice.ne.1 .and. ptype.ne.7 )THEN
         print *
         print *,'  radopt   = ',radopt
         print *,'  iice     = ',iice

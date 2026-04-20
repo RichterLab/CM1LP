@@ -357,11 +357,11 @@
           enddo
 
           f_qv = .true.
-          f_qc = .true.
-          f_qr = .true.
-          f_qi = .true.
-          f_qs = .true.
-          f_qg = .true.
+          f_qc = (nqc.ge.1)
+          f_qr = (nqr.ge.1)
+          f_qi = (nqi.ge.1)
+          f_qs = (nqs.ge.1)
+          f_qg = (nqg.ge.1)
           warm_rain = .false.
           is_CAMMGMP_used = .false.
 
@@ -409,6 +409,9 @@
 
      CALL radconst(XTIME,DECLIN,SOLCON,JULIAN,               &
                    DEGRAD,DPD                                )
+
+      ! LW-only mode: zero solar constant so RRTMG_SWRAD produces no tendency
+      SOLCON = 0.0
 
 !!!    print *,'  xtime,declin,solcon = ',xtime,declin,solcon
 !!!    print *,'  julian,degrad,dpd = ',julian,degrad,dpd
@@ -459,7 +462,27 @@
              enddo
              enddo
 
-      if( ptype.eq.8 .or. ptype.eq.50 .or. ptype.eq.51 .or. ptype.eq.52 )then
+      if( ptype.eq.7 )then
+          ! Lagrangian droplet scheme: zero dum7/dum8, use them for absent QI/QS
+          !$omp parallel do default(shared)   &
+          !$omp private(i,j)
+          do k=1,nk
+          do j=1,nj
+          do i=1,ni
+            dum7(i,j,k)=0.0
+            dum8(i,j,k)=0.0
+          enddo
+          enddo
+          enddo
+        CALL cal_cldfra1(CLDFRA=CLDFRA,                                             &
+                  QV=qa(ib,jb,kb,nqv),QC=qa(ib,jb,kb,nqc),                          &
+                  QI=dum7            ,QS=dum8,                                       &
+                   F_QV=F_QV,F_QC=F_QC,F_QI=F_QI,F_QS=F_QS,t_phy=dum3,p_phy=prs,    &
+                   mp_physics=mp_physics,cldfra1_flag=cldfra1_flag,                 &
+                  ids=1  ,ide=ni+1 , jds= 1 ,jde=nj+1 , kds=1  ,kde=nk+1 ,          &
+                  ims=ib ,ime=ie   , jms=jb ,jme=je   , kms=kb ,kme=ke ,            &
+                  its=1  ,ite=ni   , jts=1  ,jte=nj   , kts=1  ,kte=nk )
+      elseif( ptype.eq.8 .or. ptype.eq.50 .or. ptype.eq.51 .or. ptype.eq.52 )then
           !$omp parallel do default(shared)   &
           !$omp private(i,j)
           do k=1,nk
@@ -544,7 +567,37 @@
   !-----------------------------------------------------------------------------------------
 
              if(myid.eq.0) print *,'  rrtmg_lwrad '
-      if( ptype.eq.8 .or. ptype.eq.50 .or. ptype.eq.51 .or. ptype.eq.52 )then
+      if( ptype.eq.7 )then
+             ! Lagrangian droplet scheme: only qv+ql; pass dum7 (zeroed) for absent species
+             CALL RRTMG_LWRAD(                                      &
+                  RTHRATENLW=lwten,lwtenc=lwtenc,                   &
+                  LWUPT=LWUPT,LWUPTC=LWUPTC,                        &
+                  LWDNT=LWDNT,LWDNTC=LWDNTC,                        &
+                  LWUPB=LWUPB,LWUPBC=LWUPBC,                        &
+                  LWDNB=LWDNB,LWDNBC=LWDNBC,                        &
+                  GLW=GLW,OLR=dum6(ib,jb,1),LWCF=LWCF,              &
+                  EMISS=EMISS,                                      &
+                  P8W=dum1,P3D=prs,PI3D=dum4,DZ8W=dum5,TSK=tsk,T3D=dum3,    &
+                  T8W=dum2,RHO3D=rho,R=rd,G=G,                      &
+                  ICLOUD=icloud,WARM_RAIN=warm_rain,                &
+                  CLDFRA3D=CLDFRA,                                  &
+                  cldovrlp=cldovrlp,                                &
+                  IS_CAMMGMP_USED=is_cammgmp_used,                  &
+                  XLAND=XLAND,XICE=XICE,SNOW=XSNOW,                 &
+                  QV3D=qa(ib,jb,kb,nqv),QC3D=qa(ib,jb,kb,nqc),QR3D=dum7,   &
+                  QI3D=dum7            ,QS3D=dum7            ,QG3D=dum8,     &
+                  O3INPUT=O3INPUT,O33D=o30,                         &
+                  F_QV=F_QV,F_QC=F_QC,F_QR=F_QR,                    &
+                  F_QI=F_QI,F_QS=F_QS,F_QG=F_QG,                    &
+                  RE_CLOUD=effc,RE_ICE=effi,RE_SNOW=effs,            &
+                  has_reqc=has_reqc,has_reqi=has_reqi,has_reqs=has_reqs,     &
+                  YR=YR,JULIAN=JULIAN,                              &
+                  calc_clean_atm_diag=calc_clean_atm_diag,          &
+                  ids=1  ,ide=ni+1 , jds= 1 ,jde=nj+1 , kds=1  ,kde=nk+1 , &
+                  ims=ib ,ime=ie   , jms=jb ,jme=je   , kms=kb ,kme=ke ,    &
+                  its=1  ,ite=ni   , jts=1  ,jte=nj   , kts=1  ,kte=nk ,    &
+                  mp_physics=mp_physics,co2out=co2out               )
+      elseif( ptype.eq.8 .or. ptype.eq.50 .or. ptype.eq.51 .or. ptype.eq.52 )then
              CALL RRTMG_LWRAD(                                      &
                   RTHRATENLW=lwten,lwtenc=lwtenc,                   &
                   LWUPT=LWUPT,LWUPTC=LWUPTC,                        &
@@ -629,7 +682,48 @@
              radt_min = dtrad/60.0
 
              if(myid.eq.0) print *,'  rrtmg_swrad '
-      if( ptype.eq.8 .or. ptype.eq.50 .or. ptype.eq.51 .or. ptype.eq.52 )then
+      if( ptype.eq.7 )then
+             ! Lagrangian droplet scheme: only qv+ql; pass dum7 (zeroed) for absent species
+             CALL RRTMG_SWRAD(                                         &
+                     RTHRATENSW=swten,swtenc=swtenc,                   &
+                     SWUPT=SWUPT,SWUPTC=SWUPTC,                        &
+                     SWDNT=SWDNT,SWDNTC=SWDNTC,                        &
+                     SWUPB=SWUPB,SWUPBC=SWUPBC,                        &
+                     SWDNB=SWDNB,SWDNBC=SWDNBC,                        &
+                     SWCF=SWCF,GSW=GSW,                                &
+                     XTIME=XTIME,GMT=GMT,XLAT=XLAT,XLONG=XLONG,        &
+                     RADT=radt_min,DEGRAD=DEGRAD,DECLIN=DECLIN,        &
+                     COSZR=COSZR,JULDAY=JULDAY,SOLCON=SOLCON,          &
+                     ALBEDO=ALBD,t3d=dum3,t8w=dum2,TSK=TSK,            &
+                     p3d=prs,p8w=dum1,pi3d=dum4,rho3d=rho,             &
+                     dz8w=dum5,                                        &
+                     CLDFRA3D=CLDFRA,                                  &
+                     IS_CAMMGMP_USED=is_cammgmp_used,                  &
+                     R=rd,G=G,              &
+                     ICLOUD=icloud,WARM_RAIN=warm_rain,                &
+                     cldovrlp=cldovrlp,                                &
+                     XLAND=XLAND,XICE=XICE,SNOW=XSNOW,                 &
+                  QV3D=qa(ib,jb,kb,nqv),QC3D=qa(ib,jb,kb,nqc),QR3D=dum7,   &
+                  QI3D=dum7            ,QS3D=dum7            ,QG3D=dum8,     &
+                  O3INPUT=O3INPUT,O33D=o30,                         &
+                     AER_OPT=AER_OPT,               &
+                     no_src=no_src_types,  &
+                     SF_SURFACE_PHYSICS=sf_surface_physics,            &
+                     F_QV=f_qv,F_QC=f_qc,F_QR=f_qr,                    &
+                     F_QI=f_qi,F_QS=f_qs,F_QG=f_qg,                    &
+                     RE_CLOUD=effc,RE_ICE=effi,RE_SNOW=effs,            &
+                     has_reqc=has_reqc,has_reqi=has_reqi,has_reqs=has_reqs,  &
+                     calc_clean_atm_diag=calc_clean_atm_diag,          &
+                  ids=1  ,ide=ni+1 , jds= 1 ,jde=nj+1 , kds=1  ,kde=nk+1 , &
+                  ims=ib ,ime=ie   , jms=jb ,jme=je   , kms=kb ,kme=ke ,    &
+                  its=1  ,ite=ni   , jts=1  ,jte=nj   , kts=1  ,kte=nk ,    &
+                     tauaer3d_sw=tauaer_sw,                             &
+                     ssaaer3d_sw=ssaaer_sw,                             &
+                     asyaer3d_sw=asyaer_sw,                             &
+                     swddir=swddir,swddni=swddni,swddif=swddif,         &
+                     swdownc=swdownc, swddnic=swddnic, swddirc=swddirc, &
+                     xcoszen=coszen,yr=yr,julian=julian,mp_physics=mp_physics,co2out=co2out )
+      elseif( ptype.eq.8 .or. ptype.eq.50 .or. ptype.eq.51 .or. ptype.eq.52 )then
              CALL RRTMG_SWRAD(                                         &
                      RTHRATENSW=swten,swtenc=swtenc,                   &
                      SWUPT=SWUPT,SWUPTC=SWUPTC,                        &
@@ -721,9 +815,12 @@
           do j=1,nj
           do i=1,ni
             ! convert to cm1 temp tendency:
-            rcvm = cp/( cv+cvv*max(0.0,qa(i,j,k,nqv))                               &
-                          +cpl*max(0.0,(qa(i,j,k,nqc)+qa(i,j,k,nqr)))               &
-                          +cpi*max(0.0,(qa(i,j,k,nqi)+qa(i,j,k,nqs)+qa(i,j,k,nqg))) )
+            rcvm = cp/( cv+cvv*max(0.0,qa(i,j,k,nqv))                                        &
+                          +cpl*max(0.0,(qa(i,j,k,nqc)                                       &
+                                       +merge(qa(i,j,k,nqr),0.0,nqr.ge.1)))                 &
+                          +cpi*max(0.0,(merge(qa(i,j,k,nqi),0.0,nqi.ge.1)                   &
+                                       +merge(qa(i,j,k,nqs),0.0,nqs.ge.1)                   &
+                                       +merge(qa(i,j,k,nqg),0.0,nqg.ge.1))) )
             lwten(i,j,k) = lwten(i,j,k)*rcvm
             swten(i,j,k) = swten(i,j,k)*rcvm
             lwtenc(i,j,k) = lwtenc(i,j,k)*rcvm
