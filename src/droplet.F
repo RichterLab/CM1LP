@@ -79,7 +79,7 @@
           time_phys_H2D,time_phys_D2H,drop_inject_elapse, &
           drop_inject_time,time_dropC1,time_dropC2,time_dropC3, &
           time_dropC4,ngxy,dx,dy,dz,testcase,drop_traj,two_way_coupling,time_dpc, &
-          time_parcels,time_lb,nqc,ptype,radopt,drop_mult
+          time_parcels,time_lb,nqc,ptype,radopt
       use constants
       use comm_module
       use comm_droplet_module
@@ -972,8 +972,8 @@
       ! dpten(:,:,:,7) carries bulk liquid water mixing ratio [kg/kg].
       ! Also compute effc (effective radius) from droplet number concentration
       ! and liquid water mixing ratio for use by the radiation scheme.
-      !   dpten(:,:,:,6) = droplet number concentration N  [m^-3]
-      !                    (accumulated as 1/dV per droplet in project_feedback)
+      !   dpten(:,:,:,6) = physical droplet number concentration N  [m^-3]
+      !                    (accumulated as drop_mult/dV per super-particle)
       !   dpten(:,:,:,7) = liquid water mixing ratio ql    [kg/kg]
       !
       !   Mean volume radius assuming spherical droplets:
@@ -996,11 +996,10 @@
           do j=1,nj
           do i=1,ni
             if( dpten(i,j,k,6).gt.0.0d0 .and. dpten(i,j,k,7).gt.0.0d0 )then
-              ! dpten(6) = super-particle concentration [m^-3]; multiply by
-              ! drop_mult to get physical droplet concentration [m^-3].
-              ! dpten(7) = physical ql [kg/kg] (already includes drop_mult).
-              effc(i,j,k) = 1.0e6 * ( 3.0*rho(i,j,k)*sngl(dpten(i,j,k,7)) /         &
-                                       (4.0*pi*rhow*sngl(dpten(i,j,k,6))*drop_mult)   &
+              ! dpten(6) = physical droplet concentration N [m^-3]
+              ! dpten(7) = physical ql [kg/kg]; both include drop_mult.
+              effc(i,j,k) = 1.0e6 * ( 3.0*rho(i,j,k)*sngl(dpten(i,j,k,7)) /  &
+                                       (4.0*pi*rhow*sngl(dpten(i,j,k,6)))      &
                                      )**( 1.0/3.0 )
             else
               effc(i,j,k) = 25.0   ! default 25 microns where no droplets present
@@ -2075,9 +2074,10 @@
       !        + ta(i+1,j+1,k  )*w7 &
       !        + ta(i+1,j+1,k+1)*w8
 
-      ! diagnostic purposes only: number concentration [m^-3] and liquid mixing ratio of drops in each grid cell
+      ! diagnostic purposes only: physical number concentration [m^-3] and liquid mixing ratio of drops in each grid cell
+      ! pdata(np,prmult) = drop_mult: scales super-particle count to physical droplet count
       !$acc atomic update
-      dpten(iflag,jflag,kflag,6) = dpten(iflag,jflag,kflag,6) + 1.0/dV
+      dpten(iflag,jflag,kflag,6) = dpten(iflag,jflag,kflag,6) + pdata(np,prmult)/dV
 
       !$acc atomic update
       dpten(iflag,jflag,kflag,7) = dpten(iflag,jflag,kflag,7) + partmass/rhoval*pdata(np,prmult)/dV
