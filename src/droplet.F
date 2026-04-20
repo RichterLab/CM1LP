@@ -79,7 +79,7 @@
           time_phys_H2D,time_phys_D2H,drop_inject_elapse, &
           drop_inject_time,time_dropC1,time_dropC2,time_dropC3, &
           time_dropC4,ngxy,dx,dy,dz,testcase,drop_traj,two_way_coupling,time_dpc, &
-          time_parcels,time_lb,nqc,ptype,radopt
+          time_parcels,time_lb,nqc,ptype,radopt,drop_mult
       use constants
       use comm_module
       use comm_droplet_module
@@ -996,8 +996,11 @@
           do j=1,nj
           do i=1,ni
             if( dpten(i,j,k,6).gt.0.0d0 .and. dpten(i,j,k,7).gt.0.0d0 )then
-              effc(i,j,k) = 1.0e6 * ( 3.0*rho(i,j,k)*sngl(dpten(i,j,k,7)) /  &
-                                       (4.0*pi*rhow*sngl(dpten(i,j,k,6)))      &
+              ! dpten(6) = super-particle concentration [m^-3]; multiply by
+              ! drop_mult to get physical droplet concentration [m^-3].
+              ! dpten(7) = physical ql [kg/kg] (already includes drop_mult).
+              effc(i,j,k) = 1.0e6 * ( 3.0*rho(i,j,k)*sngl(dpten(i,j,k,7)) /         &
+                                       (4.0*pi*rhow*sngl(dpten(i,j,k,6))*drop_mult)   &
                                      )**( 1.0/3.0 )
             else
               effc(i,j,k) = 25.0   ! default 25 microns where no droplets present
