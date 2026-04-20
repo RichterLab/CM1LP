@@ -410,9 +410,6 @@
      CALL radconst(XTIME,DECLIN,SOLCON,JULIAN,               &
                    DEGRAD,DPD                                )
 
-      ! LW-only mode: zero solar constant so RRTMG_SWRAD produces no tendency
-      SOLCON = 0.0
-
 !!!    print *,'  xtime,declin,solcon = ',xtime,declin,solcon
 !!!    print *,'  julian,degrad,dpd = ',julian,degrad,dpd
 
