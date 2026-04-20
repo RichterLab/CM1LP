@@ -362,7 +362,7 @@
           f_qi = (nqi.ge.1)
           f_qs = (nqs.ge.1)
           f_qg = (nqg.ge.1)
-          warm_rain = .false.
+          warm_rain = (ptype.eq.7)   ! ptype=7 is liquid-only; skip ice repartitioning in SW
           is_CAMMGMP_used = .false.
 
           has_reqc = 0
