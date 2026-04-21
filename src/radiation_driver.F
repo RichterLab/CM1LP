@@ -369,6 +369,11 @@
           has_reqi = 0
           has_reqs = 0
 
+          if( ptype.eq.7 )then
+            ! Lagrangian droplet scheme: effc is computed from dpten and will
+            ! be converted to metres before the RRTMG calls below.
+            has_reqc = 1
+          endif
           if( ptype.eq.5 )then
             ! morrison scheme = 10
             ! use eff arrays from Morrison scheme:
@@ -562,6 +567,19 @@
         endif
 
   !-----------------------------------------------------------------------------------------
+
+          ! ptype=7: effc is stored in microns; RRTMG expects metres.
+          ! Scale in-place before the RRTMG calls; restore after.
+      if( ptype.eq.7 )then
+          !$omp parallel do default(shared) private(i,j,k)
+          do k=1,nk
+          do j=1,nj
+          do i=1,ni
+            effc(i,j,k) = effc(i,j,k) * 1.0e-6
+          enddo
+          enddo
+          enddo
+      endif
 
              if(myid.eq.0) print *,'  rrtmg_lwrad '
       if( ptype.eq.7 )then
@@ -803,6 +821,18 @@
       endif
 
             if( nstep.le.1 .and. myid.eq.0 ) print *,'  co2 = ',co2out
+
+          ! ptype=7: restore effc to microns after RRTMG calls
+      if( ptype.eq.7 )then
+          !$omp parallel do default(shared) private(i,j,k)
+          do k=1,nk
+          do j=1,nj
+          do i=1,ni
+            effc(i,j,k) = effc(i,j,k) * 1.0e6
+          enddo
+          enddo
+          enddo
+      endif
 
         IF( eqtset.eq.2 )THEN
           ! for Bryan-Fritsch equation set:
