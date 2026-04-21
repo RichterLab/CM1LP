@@ -1001,6 +1001,9 @@
               effc(i,j,k) = 1.0e6 * ( 3.0*rho(i,j,k)*sngl(dpten(i,j,k,7)) /  &
                                        (4.0*pi*rhow*sngl(dpten(i,j,k,6)))      &
                                      )**( 1.0/3.0 )
+              ! Clamp to RRTMG lookup-table bounds: LW requires [2.5,60] um,
+              ! SW requires [1.5,60] um; use the stricter LW lower bound.
+              effc(i,j,k) = min(60.0, max(2.5, effc(i,j,k)))
             else
               effc(i,j,k) = 25.0   ! default 25 microns where no droplets present
             end if
