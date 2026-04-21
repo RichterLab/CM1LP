@@ -369,11 +369,6 @@
           has_reqi = 0
           has_reqs = 0
 
-          if( ptype.eq.7 )then
-            ! Lagrangian droplet scheme: effc is computed from dpten(6)/(7)
-            ! in droplet_driver using the physical droplet concentration.
-            has_reqc = 1
-          endif
           if( ptype.eq.5 )then
             ! morrison scheme = 10
             ! use eff arrays from Morrison scheme:
