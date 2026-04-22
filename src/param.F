@@ -202,6 +202,7 @@
       read(20,nml=param1)
       read(20,nml=param2)
       read(20,nml=param3)
+      rad_horiz_homog = 0   ! default: full-3D RRTMG; 1 = single-column mean
       read(20,nml=param11)
       read(20,nml=param12)
       read(20,nml=param4)
@@ -502,6 +503,7 @@
       call bcast_int(prcl_droplet)
 
       call bcast_int(radopt)
+      call bcast_int(rad_horiz_homog)
       call bcast_real(dtrad)
       call bcast_real(ctrlat)
       call bcast_real(ctrlon)
@@ -2716,8 +2718,9 @@
       if(dowr) write(outfile,*) 'l_inf     =',l_inf
       if(dowr) write(outfile,*) 'ndcnst    =',ndcnst
       if(dowr) write(outfile,*)
-      if(dowr) write(outfile,*) 'radopt    =',radopt
-      if(dowr) write(outfile,*) 'dtrad     =',dtrad
+      if(dowr) write(outfile,*) 'radopt         =',radopt
+      if(dowr) write(outfile,*) 'rad_horiz_homog=',rad_horiz_homog
+      if(dowr) write(outfile,*) 'dtrad          =',dtrad
       if(dowr) write(outfile,*) 'ctrlat    =',ctrlat
       if(dowr) write(outfile,*) 'ctrlon    =',ctrlon
       if(dowr) write(outfile,*) 'year      =',year

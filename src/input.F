@@ -131,7 +131,7 @@
               stat_cloud,stat_sfcprs,stat_wsp,stat_cfl,stat_vort,             &
               stat_tmass,stat_tmois,stat_qmass,stat_tenerg,stat_mo,stat_tmf,  &
               stat_pcn,stat_qsrc,stat_out,prcl_out,                           &
-              radopt,year,month,day,hour,minute,second,jday,                  &
+              radopt,rad_horiz_homog,year,month,day,hour,minute,second,jday,   &
               isfcflx,sfcmodel,oceanmodel,ipbl,initsfc,lu0,season,            &
               cecd,pertflx,isftcflx,iz0tlnd,convinit,wnudge,maxk,             &
               set_znt,set_flx,set_ust,                                        &
@@ -322,7 +322,7 @@
               stat_tmass,stat_tmois,stat_qmass,stat_tenerg,stat_mo,stat_tmf,  &
               stat_pcn,stat_qsrc
       namelist /param11/                                                      &
-              radopt,dtrad,ctrlat,ctrlon,year,month,day,hour,minute,second
+              radopt,rad_horiz_homog,dtrad,ctrlat,ctrlon,year,month,day,hour,minute,second
       namelist /param12/                                                      &
               isfcflx,sfcmodel,oceanmodel,initsfc,                            &
               tsk0,tmn0,xland0,lu0,season,                                    &

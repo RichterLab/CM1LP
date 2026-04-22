@@ -100,6 +100,27 @@
       integer, parameter :: cldovrlp = 2
       integer, parameter :: calc_clean_atm_diag = 0
 
+      ! For rad_horiz_homog=1 single-column (horizontally-homogeneous) path:
+      integer :: nij_tot
+      real, allocatable, dimension(:,:,:) ::                              &
+              sc_p3d, sc_p8w, sc_t3d, sc_t8w, sc_pi3d, sc_dz8w,         &
+              sc_rho3d, sc_qv3d, sc_qc3d, sc_qr3d, sc_qi3d, sc_qs3d,    &
+              sc_qg3d, sc_effc3d, sc_effi3d, sc_effs3d, sc_cldfra3d,     &
+              sc_o33d,                                                    &
+              sc_lwten3d, sc_lwtenc3d, sc_swten3d, sc_swtenc3d,          &
+              sc_olr3d
+      real, allocatable, dimension(:,:) ::                               &
+              sc_tsk, sc_albd, sc_glw, sc_gsw, sc_emiss,                 &
+              sc_xland, sc_xice, sc_xsnow,                               &
+              sc_lwupt, sc_lwuptc, sc_lwdnt, sc_lwdntc,                  &
+              sc_lwupb, sc_lwupbc, sc_lwdnb, sc_lwdnbc,                  &
+              sc_swupt, sc_swuptc, sc_swdnt, sc_swdntc,                  &
+              sc_swupb, sc_swupbc, sc_swdnb, sc_swdnbc,                  &
+              sc_lwcf, sc_swcf, sc_coszr, sc_coszen,                     &
+              sc_xlat, sc_xlong,                                         &
+              sc_swddir, sc_swddni, sc_swddif,                           &
+              sc_swdownc, sc_swddnic, sc_swddirc
+
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !cc   begin radiation  ccccccccccccccccccccccccccccccccccccccccccccccccc
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -582,6 +603,299 @@
       endif
 
              if(myid.eq.0) print *,'  rrtmg_lwrad '
+
+      if( rad_horiz_homog.eq.1 )then
+
+        ! ===================================================================
+        ! Single-column approximation: compute domain-mean vertical profiles,
+        ! call RRTMG_LWRAD and RRTMG_SWRAD once on a 1x1 column, then
+        ! broadcast the resulting tendencies to the full 3-D arrays.
+        ! Appropriate for horizontally-homogeneous fog/stratocumulus LES.
+        ! ===================================================================
+
+        nij_tot = ni * nj
+
+        allocate(                                                         &
+          sc_p3d    (1,1,nk  ), sc_p8w    (1,1,nk+1),                    &
+          sc_t3d    (1,1,nk  ), sc_t8w    (1,1,nk+1),                    &
+          sc_pi3d   (1,1,nk  ), sc_dz8w   (1,1,nk+1),                    &
+          sc_rho3d  (1,1,nk  ),                                           &
+          sc_qv3d   (1,1,nk  ), sc_qc3d   (1,1,nk  ),                    &
+          sc_qr3d   (1,1,nk  ), sc_qi3d   (1,1,nk  ),                    &
+          sc_qs3d   (1,1,nk  ), sc_qg3d   (1,1,nk  ),                    &
+          sc_effc3d (1,1,nk  ), sc_effi3d (1,1,nk  ), sc_effs3d(1,1,nk), &
+          sc_cldfra3d(1,1,nk ), sc_o33d   (1,1,nk  ),                    &
+          sc_lwten3d (1,1,nk ), sc_lwtenc3d(1,1,nk ),                    &
+          sc_swten3d (1,1,nk ), sc_swtenc3d(1,1,nk ),                    &
+          sc_olr3d  (1,1,1   )  )
+        allocate(                                                         &
+          sc_tsk   (1,1), sc_albd  (1,1), sc_glw  (1,1), sc_gsw  (1,1), &
+          sc_emiss (1,1), sc_xland (1,1), sc_xice (1,1), sc_xsnow(1,1), &
+          sc_lwupt (1,1), sc_lwuptc(1,1), sc_lwdnt (1,1), sc_lwdntc(1,1), &
+          sc_lwupb (1,1), sc_lwupbc(1,1), sc_lwdnb (1,1), sc_lwdnbc(1,1), &
+          sc_swupt (1,1), sc_swuptc(1,1), sc_swdnt (1,1), sc_swdntc(1,1), &
+          sc_swupb (1,1), sc_swupbc(1,1), sc_swdnb (1,1), sc_swdnbc(1,1), &
+          sc_lwcf  (1,1), sc_swcf  (1,1), sc_coszr (1,1), sc_coszen(1,1), &
+          sc_xlat  (1,1), sc_xlong (1,1),                                 &
+          sc_swddir(1,1), sc_swddni(1,1), sc_swddif(1,1),                &
+          sc_swdownc(1,1), sc_swddnic(1,1), sc_swddirc(1,1)  )
+
+        ! ---- Horizontal mean of 3D scalar-level fields (k=1..nk) ----
+        sc_p3d    = 0.0;  sc_t3d    = 0.0;  sc_pi3d   = 0.0
+        sc_rho3d  = 0.0;  sc_qv3d   = 0.0;  sc_qc3d   = 0.0
+        sc_qr3d   = 0.0;  sc_qi3d   = 0.0;  sc_qs3d   = 0.0
+        sc_qg3d   = 0.0;  sc_effc3d = 0.0;  sc_effi3d = 0.0
+        sc_effs3d = 0.0;  sc_cldfra3d = 0.0;  sc_o33d = 0.0
+        do k=1,nk
+          do j=1,nj
+          do i=1,ni
+            sc_p3d    (1,1,k) = sc_p3d    (1,1,k) + prs (i,j,k)
+            sc_t3d    (1,1,k) = sc_t3d    (1,1,k) + dum3(i,j,k)
+            sc_pi3d   (1,1,k) = sc_pi3d   (1,1,k) + dum4(i,j,k)
+            sc_rho3d  (1,1,k) = sc_rho3d  (1,1,k) + rho (i,j,k)
+            sc_qv3d   (1,1,k) = sc_qv3d   (1,1,k) + qa(i,j,k,nqv)
+            sc_qc3d   (1,1,k) = sc_qc3d   (1,1,k) + qa(i,j,k,nqc)
+            sc_effc3d (1,1,k) = sc_effc3d (1,1,k) + effc(i,j,k)
+            sc_effi3d (1,1,k) = sc_effi3d (1,1,k) + effi(i,j,k)
+            sc_effs3d (1,1,k) = sc_effs3d (1,1,k) + effs(i,j,k)
+            sc_cldfra3d(1,1,k)= sc_cldfra3d(1,1,k) + CLDFRA(i,j,k)
+            sc_o33d   (1,1,k) = sc_o33d   (1,1,k) + o30 (i,j,k)
+          enddo
+          enddo
+          sc_p3d    (1,1,k) = sc_p3d    (1,1,k) / nij_tot
+          sc_t3d    (1,1,k) = sc_t3d    (1,1,k) / nij_tot
+          sc_pi3d   (1,1,k) = sc_pi3d   (1,1,k) / nij_tot
+          sc_rho3d  (1,1,k) = sc_rho3d  (1,1,k) / nij_tot
+          sc_qv3d   (1,1,k) = sc_qv3d   (1,1,k) / nij_tot
+          sc_qc3d   (1,1,k) = sc_qc3d   (1,1,k) / nij_tot
+          sc_effc3d (1,1,k) = sc_effc3d (1,1,k) / nij_tot
+          sc_effi3d (1,1,k) = sc_effi3d (1,1,k) / nij_tot
+          sc_effs3d (1,1,k) = sc_effs3d (1,1,k) / nij_tot
+          sc_cldfra3d(1,1,k)= sc_cldfra3d(1,1,k) / nij_tot
+          sc_o33d   (1,1,k) = sc_o33d   (1,1,k) / nij_tot
+        enddo
+
+        ! Average species that are present (qr, qi, qs, qg)
+        if( nqr.ge.1 )then
+          do k=1,nk; do j=1,nj; do i=1,ni
+            sc_qr3d(1,1,k) = sc_qr3d(1,1,k) + qa(i,j,k,nqr)
+          enddo; enddo; enddo
+          sc_qr3d = sc_qr3d / nij_tot
+        endif
+        if( nqi.ge.1 )then
+          do k=1,nk; do j=1,nj; do i=1,ni
+            sc_qi3d(1,1,k) = sc_qi3d(1,1,k) + qa(i,j,k,nqi)
+          enddo; enddo; enddo
+          sc_qi3d = sc_qi3d / nij_tot
+        endif
+        if( nqs.ge.1 )then
+          do k=1,nk; do j=1,nj; do i=1,ni
+            sc_qs3d(1,1,k) = sc_qs3d(1,1,k) + qa(i,j,k,nqs)
+          enddo; enddo; enddo
+          sc_qs3d = sc_qs3d / nij_tot
+        endif
+        if( nqg.ge.1 )then
+          do k=1,nk; do j=1,nj; do i=1,ni
+            sc_qg3d(1,1,k) = sc_qg3d(1,1,k) + qa(i,j,k,nqg)
+          enddo; enddo; enddo
+          sc_qg3d = sc_qg3d / nij_tot
+        endif
+
+        ! ---- Horizontal mean of interface (w-face) fields (k=1..nk+1) ----
+        sc_p8w = 0.0;  sc_t8w = 0.0;  sc_dz8w = 0.0
+        do k=1,nk+1
+          do j=1,nj
+          do i=1,ni
+            sc_p8w (1,1,k) = sc_p8w (1,1,k) + dum1(i,j,k)
+            sc_t8w (1,1,k) = sc_t8w (1,1,k) + dum2(i,j,k)
+            sc_dz8w(1,1,k) = sc_dz8w(1,1,k) + dum5(i,j,k)
+          enddo
+          enddo
+          sc_p8w (1,1,k) = sc_p8w (1,1,k) / nij_tot
+          sc_t8w (1,1,k) = sc_t8w (1,1,k) / nij_tot
+          sc_dz8w(1,1,k) = sc_dz8w(1,1,k) / nij_tot
+        enddo
+
+        ! ---- Horizontal mean of 2D surface fields ----
+        sc_tsk   (1,1) = 0.0;  sc_emiss (1,1) = 0.0
+        sc_albd  (1,1) = 0.0;  sc_xland (1,1) = 0.0
+        sc_xice  (1,1) = 0.0;  sc_xsnow (1,1) = 0.0
+        sc_coszr (1,1) = 0.0;  sc_coszen(1,1) = 0.0
+        sc_xlat  (1,1) = 0.0;  sc_xlong (1,1) = 0.0
+        do j=1,nj
+        do i=1,ni
+          sc_tsk   (1,1) = sc_tsk   (1,1) + tsk  (i,j)
+          sc_emiss (1,1) = sc_emiss (1,1) + emiss(i,j)
+          sc_albd  (1,1) = sc_albd  (1,1) + albd (i,j)
+          sc_xland (1,1) = sc_xland (1,1) + XLAND(i,j)
+          sc_xice  (1,1) = sc_xice  (1,1) + XICE (i,j)
+          sc_xsnow (1,1) = sc_xsnow (1,1) + XSNOW(i,j)
+          sc_coszr (1,1) = sc_coszr (1,1) + COSZR(i,j)
+          sc_coszen(1,1) = sc_coszen(1,1) + coszen(i,j)
+          sc_xlat  (1,1) = sc_xlat  (1,1) + XLAT (i,j)
+          sc_xlong (1,1) = sc_xlong (1,1) + XLONG(i,j)
+        enddo
+        enddo
+        sc_tsk   (1,1) = sc_tsk   (1,1) / nij_tot
+        sc_emiss (1,1) = sc_emiss (1,1) / nij_tot
+        sc_albd  (1,1) = sc_albd  (1,1) / nij_tot
+        sc_xland (1,1) = sc_xland (1,1) / nij_tot
+        sc_xice  (1,1) = sc_xice  (1,1) / nij_tot
+        sc_xsnow (1,1) = sc_xsnow (1,1) / nij_tot
+        sc_coszr (1,1) = sc_coszr (1,1) / nij_tot
+        sc_coszen(1,1) = sc_coszen(1,1) / nij_tot
+        sc_xlat  (1,1) = sc_xlat  (1,1) / nij_tot
+        sc_xlong (1,1) = sc_xlong (1,1) / nij_tot
+
+        ! ---- Initialize output arrays ----
+        sc_lwten3d = 0.0;  sc_lwtenc3d = 0.0
+        sc_swten3d = 0.0;  sc_swtenc3d = 0.0
+        sc_glw = 0.0;  sc_gsw = 0.0;  sc_olr3d = 0.0
+        sc_lwupt = 0.0;  sc_lwuptc = 0.0;  sc_lwdnt = 0.0;  sc_lwdntc = 0.0
+        sc_lwupb = 0.0;  sc_lwupbc = 0.0;  sc_lwdnb = 0.0;  sc_lwdnbc = 0.0
+        sc_swupt = 0.0;  sc_swuptc = 0.0;  sc_swdnt = 0.0;  sc_swdntc = 0.0
+        sc_swupb = 0.0;  sc_swupbc = 0.0;  sc_swdnb = 0.0;  sc_swdnbc = 0.0
+        sc_lwcf = 0.0;  sc_swcf = 0.0
+        sc_swddir = 0.0;  sc_swddni = 0.0;  sc_swddif = 0.0
+        sc_swdownc = 0.0;  sc_swddnic = 0.0;  sc_swddirc = 0.0
+
+        ! ---- Single-column LW call ----
+             CALL RRTMG_LWRAD(                                           &
+                  RTHRATENLW=sc_lwten3d,lwtenc=sc_lwtenc3d,              &
+                  LWUPT=sc_lwupt,LWUPTC=sc_lwuptc,                       &
+                  LWDNT=sc_lwdnt,LWDNTC=sc_lwdntc,                       &
+                  LWUPB=sc_lwupb,LWUPBC=sc_lwupbc,                       &
+                  LWDNB=sc_lwdnb,LWDNBC=sc_lwdnbc,                       &
+                  GLW=sc_glw,OLR=sc_olr3d(1,1,1),LWCF=sc_lwcf,          &
+                  EMISS=sc_emiss,                                        &
+                  P8W=sc_p8w,P3D=sc_p3d,PI3D=sc_pi3d,DZ8W=sc_dz8w,     &
+                  TSK=sc_tsk,T3D=sc_t3d,T8W=sc_t8w,RHO3D=sc_rho3d,     &
+                  R=rd,G=G,                                              &
+                  ICLOUD=icloud,WARM_RAIN=warm_rain,                     &
+                  CLDFRA3D=sc_cldfra3d,                                  &
+                  cldovrlp=cldovrlp,                                     &
+                  IS_CAMMGMP_USED=is_cammgmp_used,                       &
+                  XLAND=sc_xland,XICE=sc_xice,SNOW=sc_xsnow,            &
+                  QV3D=sc_qv3d,QC3D=sc_qc3d,QR3D=sc_qr3d,              &
+                  QI3D=sc_qi3d,QS3D=sc_qs3d,QG3D=sc_qg3d,              &
+                  O3INPUT=O3INPUT,O33D=sc_o33d,                          &
+                  F_QV=F_QV,F_QC=F_QC,F_QR=F_QR,                        &
+                  F_QI=F_QI,F_QS=F_QS,F_QG=F_QG,                        &
+                  RE_CLOUD=sc_effc3d,RE_ICE=sc_effi3d,RE_SNOW=sc_effs3d, &
+                  has_reqc=has_reqc,has_reqi=has_reqi,has_reqs=has_reqs, &
+                  YR=YR,JULIAN=JULIAN,                                   &
+                  calc_clean_atm_diag=calc_clean_atm_diag,               &
+                  ids=1,ide=2,jds=1,jde=2,kds=1,kde=nk+1,               &
+                  ims=1,ime=1,jms=1,jme=1,kms=1,kme=nk+1,               &
+                  its=1,ite=1,jts=1,jte=1,kts=1,kte=nk,                 &
+                  mp_physics=mp_physics,co2out=co2out                    )
+
+            if( nstep.le.1 .and. myid.eq.0 ) print *,'  co2 = ',co2out
+
+             no_src_types = 6
+             sf_surface_physics = 1
+             aer_opt = 0
+             radt_min = dtrad/60.0
+
+             if(myid.eq.0) print *,'  rrtmg_swrad '
+
+        ! ---- Single-column SW call ----
+             CALL RRTMG_SWRAD(                                           &
+                     RTHRATENSW=sc_swten3d,swtenc=sc_swtenc3d,           &
+                     SWUPT=sc_swupt,SWUPTC=sc_swuptc,                    &
+                     SWDNT=sc_swdnt,SWDNTC=sc_swdntc,                    &
+                     SWUPB=sc_swupb,SWUPBC=sc_swupbc,                    &
+                     SWDNB=sc_swdnb,SWDNBC=sc_swdnbc,                    &
+                     SWCF=sc_swcf,GSW=sc_gsw,                            &
+                     XTIME=XTIME,GMT=GMT,XLAT=sc_xlat,XLONG=sc_xlong,   &
+                     RADT=radt_min,DEGRAD=DEGRAD,DECLIN=DECLIN,          &
+                     COSZR=sc_coszr,JULDAY=JULDAY,SOLCON=SOLCON,         &
+                     ALBEDO=sc_albd,t3d=sc_t3d,t8w=sc_t8w,TSK=sc_tsk,  &
+                     p3d=sc_p3d,p8w=sc_p8w,pi3d=sc_pi3d,rho3d=sc_rho3d, &
+                     dz8w=sc_dz8w,                                       &
+                     CLDFRA3D=sc_cldfra3d,                               &
+                     IS_CAMMGMP_USED=is_cammgmp_used,                    &
+                     R=rd,G=G,                                           &
+                     ICLOUD=icloud,WARM_RAIN=warm_rain,                  &
+                     cldovrlp=cldovrlp,                                  &
+                     XLAND=sc_xland,XICE=sc_xice,SNOW=sc_xsnow,         &
+                     QV3D=sc_qv3d,QC3D=sc_qc3d,QR3D=sc_qr3d,           &
+                     QI3D=sc_qi3d,QS3D=sc_qs3d,QG3D=sc_qg3d,           &
+                     O3INPUT=O3INPUT,O33D=sc_o33d,                       &
+                     AER_OPT=AER_OPT,                                    &
+                     no_src=no_src_types,                                &
+                     SF_SURFACE_PHYSICS=sf_surface_physics,              &
+                     F_QV=f_qv,F_QC=f_qc,F_QR=f_qr,                     &
+                     F_QI=f_qi,F_QS=f_qs,F_QG=f_qg,                     &
+                     RE_CLOUD=sc_effc3d,RE_ICE=sc_effi3d,RE_SNOW=sc_effs3d, &
+                     has_reqc=has_reqc,has_reqi=has_reqi,has_reqs=has_reqs,  &
+                     calc_clean_atm_diag=calc_clean_atm_diag,            &
+                     ids=1,ide=2,jds=1,jde=2,kds=1,kde=nk+1,            &
+                     ims=1,ime=1,jms=1,jme=1,kms=1,kme=nk+1,            &
+                     its=1,ite=1,jts=1,jte=1,kts=1,kte=nk,              &
+                     tauaer3d_sw=tauaer_sw,                              &
+                     ssaaer3d_sw=ssaaer_sw,                              &
+                     asyaer3d_sw=asyaer_sw,                              &
+                     swddir=sc_swddir,swddni=sc_swddni,swddif=sc_swddif, &
+                     swdownc=sc_swdownc,swddnic=sc_swddnic,swddirc=sc_swddirc, &
+                     xcoszen=sc_coszen,yr=yr,julian=julian,              &
+                     mp_physics=mp_physics,co2out=co2out                 )
+
+        ! ---- Broadcast single-column tendencies to full 3D arrays ----
+            !$omp parallel do default(shared) private(i,j,k)
+            do k=1,nk
+            do j=1,nj
+            do i=1,ni
+              lwten  (i,j,k) = sc_lwten3d (1,1,k)
+              lwtenc (i,j,k) = sc_lwtenc3d(1,1,k)
+              swten  (i,j,k) = sc_swten3d (1,1,k)
+              swtenc (i,j,k) = sc_swtenc3d(1,1,k)
+            enddo
+            enddo
+            enddo
+
+        ! ---- Broadcast 2D surface flux outputs ----
+            !$omp parallel do default(shared) private(i,j)
+            do j=1,nj
+            do i=1,ni
+              GLW   (i,j) = sc_glw  (1,1)
+              GSW   (i,j) = sc_gsw  (1,1)
+              OLR   (i,j) = sc_olr3d(1,1,1)
+              LWUPT (i,j) = sc_lwupt(1,1);  LWUPTC(i,j) = sc_lwuptc(1,1)
+              LWDNT (i,j) = sc_lwdnt(1,1);  LWDNTC(i,j) = sc_lwdntc(1,1)
+              LWUPB (i,j) = sc_lwupb(1,1);  LWUPBC(i,j) = sc_lwupbc(1,1)
+              LWDNB (i,j) = sc_lwdnb(1,1);  LWDNBC(i,j) = sc_lwdnbc(1,1)
+              SWUPT (i,j) = sc_swupt(1,1);  SWUPTC(i,j) = sc_swuptc(1,1)
+              SWDNT (i,j) = sc_swdnt(1,1);  SWDNTC(i,j) = sc_swdntc(1,1)
+              SWUPB (i,j) = sc_swupb(1,1);  SWUPBC(i,j) = sc_swupbc(1,1)
+              SWDNB (i,j) = sc_swdnb(1,1);  SWDNBC(i,j) = sc_swdnbc(1,1)
+              LWCF  (i,j) = sc_lwcf (1,1);  SWCF  (i,j) = sc_swcf  (1,1)
+              COSZR (i,j) = sc_coszr(1,1)
+              swddir(i,j) = sc_swddir(1,1);  swddni(i,j) = sc_swddni(1,1)
+              swddif(i,j) = sc_swddif(1,1)
+            enddo
+            enddo
+
+        deallocate(                                                       &
+          sc_p3d, sc_p8w, sc_t3d, sc_t8w, sc_pi3d, sc_dz8w,             &
+          sc_rho3d, sc_qv3d, sc_qc3d, sc_qr3d, sc_qi3d, sc_qs3d,        &
+          sc_qg3d, sc_effc3d, sc_effi3d, sc_effs3d, sc_cldfra3d,        &
+          sc_o33d, sc_lwten3d, sc_lwtenc3d, sc_swten3d, sc_swtenc3d,     &
+          sc_olr3d  )
+        deallocate(                                                       &
+          sc_tsk, sc_albd, sc_glw, sc_gsw, sc_emiss,                     &
+          sc_xland, sc_xice, sc_xsnow,                                   &
+          sc_lwupt, sc_lwuptc, sc_lwdnt, sc_lwdntc,                      &
+          sc_lwupb, sc_lwupbc, sc_lwdnb, sc_lwdnbc,                      &
+          sc_swupt, sc_swuptc, sc_swdnt, sc_swdntc,                      &
+          sc_swupb, sc_swupbc, sc_swdnb, sc_swdnbc,                      &
+          sc_lwcf, sc_swcf, sc_coszr, sc_coszen,                         &
+          sc_xlat, sc_xlong,                                             &
+          sc_swddir, sc_swddni, sc_swddif,                               &
+          sc_swdownc, sc_swddnic, sc_swddirc  )
+
+      else  ! rad_horiz_homog.eq.0 : full 3-D column-by-column RRTMG
+
       if( ptype.eq.7 )then
              ! Lagrangian droplet scheme: only qv+ql; pass dum7 (zeroed) for absent species
              CALL RRTMG_LWRAD(                                      &
@@ -819,6 +1133,8 @@
                      swdownc=swdownc, swddnic=swddnic, swddirc=swddirc, &
                      xcoszen=coszen,yr=yr,julian=julian,mp_physics=mp_physics,co2out=co2out ) ! jararias 2013/08/14
       endif
+
+      endif  ! rad_horiz_homog
 
             if( nstep.le.1 .and. myid.eq.0 ) print *,'  co2 = ',co2out
 
