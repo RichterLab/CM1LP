@@ -3239,6 +3239,8 @@ end module cuda_rt
                              dpten,pdata_locind,nstep,effc)
       ENDIF
 
+        if(mtime.gt.13000.0d0) write(*,'(a,i5,a,f10.1)') 'post-drop rank=',myid,' t=',mtime
+        if(mtime.gt.13000.0d0) flush(6)
         if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'pre-solve3  t=',mtime
         if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
 #ifdef _NVTX
