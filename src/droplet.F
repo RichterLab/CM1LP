@@ -442,8 +442,16 @@
 #endif
 
       kflag = 1
-      if( .not. terrain_flag )then
-        !JS-KLUDGE: Somehow I have to use the zf_tmp variable 
+      if( iflag.eq.undefined_index .or. jflag.eq.undefined_index )then
+        ! Particle is outside the local domain (find_horizontal_location_index
+        ! returned without a valid index).  Skip the vertical search and all
+        ! physics for this particle; BE_integration / check_droplet_ownership
+        ! will mark it for MPI transfer to the correct neighbour.
+        ! Accessing zf(undefined_index,...) would be an out-of-bounds read
+        ! that silently corrupts the interpolated velocities and can eventually
+        ! produce NaN positions, leading to an MPI hang via a non-collective stop.
+      else if( .not. terrain_flag )then
+        !JS-KLUDGE: Somehow I have to use the zf_tmp variable
         !           for the find_vertical* subroutine,
         !           otherwise the GPU code breaks for nparcels > ~2000
 !        !$acc loop seq
@@ -537,8 +545,11 @@
 
     END DO nploop
     !$acc end parallel
-    if (errcode .gt. 0) then 
-       stop 'FATAL error occurred in the index search BE_integration'
+    if (errcode .gt. 0) then
+       write(*,'(a,i8,a,i6,a,f12.1)') &
+         'FATAL: errcode=',errcode,' in BE_integration on rank',myid,' mtime=',mtime
+       flush(6)
+       call stopcm1
     end if
 
 
