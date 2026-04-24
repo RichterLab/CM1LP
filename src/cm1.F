@@ -3038,6 +3038,8 @@ end module cuda_rt
 #endif
         ! solve1: pre-RK terms
         ! (tendencies held fixed during Runge-Kutta integration and acoustic sub-stepping)
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'pre-solve1  t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call     solve1(nstep,rbufsz,num_soil_layers,                  &
                    dt,dtlast,mtime,dbldt,mass1,mass2,                 &
                    dosfcflx,cloudvar,rhovar,qmag,bud,bud2,qbudget,asq,bsq, &
@@ -3195,6 +3197,8 @@ end module cuda_rt
 
         ! microphysics:
 
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'pre-mp      t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         ! cm1r20:  move calls to microphysics scheme into mp_driver.F
 #ifdef _NVTX
         call nvtxStartRange("mp_driver",id=2)
@@ -3223,6 +3227,8 @@ end module cuda_rt
 
       ! Lagrangian droplet microphysics:
       IF( iprcl.eq.1 .and. prcl_droplet.ge.1 )THEN
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'pre-drop    t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call   droplet_driver(dt,dbldt,mtime,xh,uh,ruh,xf,yh,vh,rvh,yf,zh,mh,rmh,zf,mf,zs, &
                              sigma,sigmaf,zntmp,rho,u3d,v3d,w3d,s10,pdata,              &
                              th3d,q3d,th0,pi0,pp3d,prs,dum1,                            &
@@ -3233,7 +3239,8 @@ end module cuda_rt
                              dpten,pdata_locind,nstep,effc)
       ENDIF
 
-
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'pre-solve3  t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
 #ifdef _NVTX
         call nvtxStartRange("solve3",id=3)
 #endif
@@ -3367,6 +3374,8 @@ end module cuda_rt
 
       IF( radopt.ge.1 .and. dorad )THEN
 
+        if(myid.eq.0) write(*,'(a,f10.1)') 'pre-rad     t=',mtime
+        if(myid.eq.0) flush(6)
 #ifdef _OPENACC
         stop 'ERROR radiation_driver not support under OPENACC'
 #endif
