@@ -443,13 +443,24 @@
 
       kflag = 1
       if( iflag.eq.undefined_index .or. jflag.eq.undefined_index )then
-        ! Particle is outside the local domain (find_horizontal_location_index
-        ! returned without a valid index).  Skip the vertical search and all
-        ! physics for this particle; BE_integration / check_droplet_ownership
-        ! will mark it for MPI transfer to the correct neighbour.
-        ! Accessing zf(undefined_index,...) would be an out-of-bounds read
-        ! that silently corrupts the interpolated velocities and can eventually
-        ! produce NaN positions, leading to an MPI hang via a non-collective stop.
+        ! TEMPORARY DIAGNOSTIC ASSERTION:
+        ! A particle in 1:nparcelsLocalActive must always be within the local domain.
+        ! If iflag or jflag is undefined_index, the invariant is violated — this is
+        ! a bug (e.g. a neg_huge hole leaking into the active range, a received
+        ! particle with a bad position, or a physics blow-up).  Print full state
+        ! and abort so we can identify the root cause.
+        write(*,'(a)') 'ASSERT FAIL: particle outside local domain at start of nploop'
+        write(*,'(a,i8,a,i6,a,f12.1)') '  np=',np,' rank=',myid,' mtime=',mtime
+        write(*,'(a,3f16.6)') '  x3d,y3d,z3d   =',x3d,y3d,z3d
+        write(*,'(a,3i8)')    '  pdata_locind   =',pdata_locind(np,1),pdata_locind(np,2),pdata_locind(np,3)
+        write(*,'(a,2i8)')    '  iflag,jflag    =',iflag,jflag
+        write(*,'(a,2f16.6)') '  xf(1),xf(ni+1)=',xf(1),xf(ni+1)
+        write(*,'(a,2f16.6)') '  yf(1),yf(nj+1)=',yf(1),yf(nj+1)
+        write(*,'(a,2f16.6)') '  xf(ib),xf(ie+1)=',xf(ib),xf(ie+1)
+        write(*,'(a,2f16.6)') '  yf(jb),yf(je+1)=',yf(jb),yf(je+1)
+        write(*,'(a,i8)')     '  nparcelsLocalActive=',nparcelsLocalActive
+        flush(6)
+        call stopcm1
       else if( .not. terrain_flag )then
         !JS-KLUDGE: Somehow I have to use the zf_tmp variable
         !           for the find_vertical* subroutine,
