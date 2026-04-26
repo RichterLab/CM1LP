@@ -360,6 +360,8 @@
           call bcs(pp3d)
           call bcs(th3d)
 #ifdef MPI
+          if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-sync1  t=',mtime
+          if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
           call sync()
           if(timestats.ge.1) time_lb=time_lb+mytime()
           call comm_1s_start(pp3d,vw1,vw2,ve1,ve2,vs1,vs2,vn1,vn2,reqs_x)
@@ -382,6 +384,8 @@
 
       call bcs(rho)
 #ifdef MPI
+      if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-sync2  t=',mtime
+      if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
       call sync()
       if(timestats.ge.1) time_lb=time_lb+mytime()
       call comm_1s_start(rho,pw1,pw2,pe1,pe2,ps1,ps2,pn1,pn2,reqs_s)
@@ -404,6 +408,8 @@
       call bcs(rr)
       call bcs(rf)
 #ifdef MPI
+      if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-sync3  t=',mtime
+      if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
       call sync()
       if(timestats.ge.1) time_lb=time_lb+mytime()
       call comm_1s_start(rr,p2w1,p2w2,p2e1,p2e2,p2s1,p2s2,p2n1,p2n2,reqs_p2)
@@ -441,6 +447,8 @@
         endif
         call bcs(ppx)
 #ifdef MPI
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-sync4  t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call sync()
         if(timestats.ge.1) time_lb=time_lb+mytime()
         call comm_1s_start(ppx,zw1,zw2,ze1,ze2,zs1,zs2,zn1,zn2,reqs_z)
@@ -556,6 +564,8 @@
       !call maxmin2dhalo(ni,nj,w3d(ib,jb,13),text1,text2)
 
 #ifdef MPI
+      if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-sync5  t=',mtime
+      if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
       call sync()
       if(timestats.ge.1) time_lb=time_lb+mytime()
       call comm_3u_end(u3d,uw31,uw32,ue31,ue32,   &
@@ -664,6 +674,8 @@
         call bcv(rrv)
         call bcw(rrw,1)
 #ifdef MPI
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-sync6  t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call sync()
         if(timestats.ge.1) time_lb=time_lb+mytime()
         call comm_3u_start(rru,uw31,uw32,ue31,ue32,us31,us32,un31,un32,reqs_u)
@@ -731,6 +743,8 @@
 
       if( cm1setup.eq.1 .and. iusetke )then
 #ifdef MPI
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-sync7  t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call sync()
         if(timestats.ge.1) time_lb=time_lb+mytime()
         call comm_3t_end(tke3d,tkw1,tkw2,tke1,tke2,   &
@@ -778,6 +792,8 @@
 !----------
 
 #ifdef MPI
+      if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-sync8  t=',mtime
+      if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
       call sync()
       if(timestats.ge.1) time_lb=time_lb+mytime()
       call comm_1s_end(pp3d,vw1,vw2,ve1,ve2,vs1,vs2,vn1,vn2,reqs_x)
@@ -825,6 +841,8 @@
 
 #ifdef MPI
         !-----
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-sync9  t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call sync()
         if(timestats.ge.1) time_lb=time_lb+mytime()
         call comm_1s_end(rho,pw1,pw2,pe1,pe2,ps1,ps2,pn1,pn2,reqs_s)
