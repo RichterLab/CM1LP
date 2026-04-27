@@ -3321,7 +3321,8 @@ end module cuda_rt
 #ifdef _NVTX
         call nvtxEndRange
 #endif
-
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'post-solve3 t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
 
         !--------------------------------
         ! Step model time forward one dt

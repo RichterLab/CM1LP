@@ -845,15 +845,27 @@
         if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call sync()
         if(timestats.ge.1) time_lb=time_lb+mytime()
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-A rho  t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call comm_1s_end(rho,pw1,pw2,pe1,pe2,ps1,ps2,pn1,pn2,reqs_s)
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-B rho  t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call getcorner(rho,nw1(1),nw2(1),ne1(1),ne2(1),sw1(1),sw2(1),se1(1),se2(1))
         call bcs2(rho)
         !-----
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-A rr   t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call comm_1s_end(rr,p2w1,p2w2,p2e1,p2e2,p2s1,p2s2,p2n1,p2n2,reqs_p2)
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-B rr   t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call getcorner(rr,nw1(1),nw2(1),ne1(1),ne2(1),sw1(1),sw2(1),se1(1),se2(1))
         call bcs2(rr)
         !-----
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-A rf   t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call comm_1s_end(rf,p3w1,p3w2,p3e1,p3e2,p3s1,p3s2,p3n1,p3n2,reqs_p3)
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-B rf   t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call getcorner(rf,nw1(1),nw2(1),ne1(1),ne2(1),sw1(1),sw2(1),se1(1),se2(1))
         call bcs2(rf)
         !-----
@@ -886,14 +898,28 @@
         !  get corner info, ghost zone data, etc:
         !  (may not parallelize correctly if this is not done)
 #ifdef MPI
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-A rru  t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call comm_3u_end( rru,uw31,uw32,ue31,ue32,us31,us32,un31,un32,reqs_u)
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-B rru  t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call comm_3v_end( rrv,vw31,vw32,ve31,ve32,vs31,vs32,vn31,vn32,reqs_v)
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-B rrv  t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call comm_3w_end( rrw,ww31,ww32,we31,we32,ws31,ws32,wn31,wn32,reqs_w)
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-B rrw  t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call getcorneru3(rru,n3w1(1,1,1),n3w2(1,1,1),n3e1(1,1,1),n3e2(1,1,1),  &
                              s3w1(1,1,1),s3w2(1,1,1),s3e1(1,1,1),s3e2(1,1,1))
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-B gcu3 t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call getcornerv3(rrv,n3w1(1,1,1),n3w2(1,1,1),n3e1(1,1,1),n3e2(1,1,1),  &
                              s3w1(1,1,1),s3w2(1,1,1),s3e1(1,1,1),s3e2(1,1,1))
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-B gcv3 t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call getcornerw3(rrw,n3w1,n3w2,n3e1,n3e2,s3w1,s3w2,s3e1,s3e2)
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-B gcw3 t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call bcu2(rru)
         call bcv2(rrv)
         call bcw2(rrw)
@@ -1383,6 +1409,8 @@ print *,'Here 28 -- Not being executed'
 
 !--------------------------------------------------------------------
       ! all done
+      if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'slv3-done   t=',mtime
+      if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
 
       end subroutine solve3
 
