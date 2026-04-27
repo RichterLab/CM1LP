@@ -1460,7 +1460,9 @@
                          avgsfcu,avgsfcv,avgsfcs,                                              &
                          sw31,sw32,se31,se32,ss31,ss32,sn31,sn32,reqs_s)
           else
-            stop 54321
+            write(*,*) 'FATAL: dot2p=T but sgsmodel not 3 or 4 (stop 54321)'
+            flush(6)
+            call stopcm1
           endif
 
         endif  rstrt
@@ -4878,7 +4880,7 @@
       enddo
       enddo
       enddo
-      stop 'calcnm: point #2'
+      ! (ice case complete — fall through to ENDIF and common boundary code)
 
     ELSE  icecheck
 
@@ -5193,7 +5195,9 @@
         enddo
         enddo
       ELSE
-        stop 87632
+        write(*,*) 'FATAL: k.ne.2 in kloops94 (stop 87632), k=',k
+        flush(6)
+        call stopcm1
       ENDIF
 
 #ifdef MPI
@@ -5230,7 +5234,9 @@
         enddo
         enddo
       ELSE
-        stop 32987
+        write(*,*) 'FATAL: k.ne.2 in second block (stop 32987), k=',k
+        flush(6)
+        call stopcm1
       ENDIF
 
         do j=1,nj
