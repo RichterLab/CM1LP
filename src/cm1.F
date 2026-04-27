@@ -3432,6 +3432,8 @@ end module cuda_rt
 #ifdef _NVTX
         call nvtxStartRange("srf_and_turb",id=5)
 #endif
+      if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'pre-sfcturb t=',mtime
+      if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
       call sfc_and_turb(getsfc,getpbl,nstep,dt,dosfcflx,cloudvar,qbudget, &
                    avgsfcu,avgsfcv,avgsfcs,avgsfct,avgsfcq,              &
                    xh,rxh,arh1,arh2,uh,ruh,xf,rxf,arf1,arf2,uf,ruf,  &
@@ -3486,6 +3488,8 @@ end module cuda_rt
 #ifdef _NVTX
       call nvtxEndRange()
 #endif
+      if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'post-sfcturb t=',mtime
+      if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
 
       IF( (idiff.ge.1).and.(difforder.eq.2) )THEN
         !  get stress terms for explicit diffusion scheme:
@@ -3560,6 +3564,8 @@ end module cuda_rt
           enddo
           enddo
         ENDIF
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'pre-stat    t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call     statpack(mtime,nrec,ndt,dt,dtlast,rtime,adt,acfl,cloudvar,   &
                           qname,budname,qbudget,asq,bsq,                      &
                           name_stat,desc_stat,unit_stat,                      &
@@ -3583,8 +3589,14 @@ end module cuda_rt
         !     The second method is expected to avoid the creation of an
         !     array with size "nparcels*npvals" (saving memory space) 
         !     and thus implemented below 
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'post-stat   t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         if ( iprcl.eq.1 .and. prcl_droplet.eq.1 ) then
+           if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'pre-ddiag   t=',mtime
+           if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
            call droplet_diag(rtime,nrec,zh,zf,pdata,pdata_locind,dpten,wa,qa,tha,th0,pi0,ppi,rho)
+           if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'post-ddiag  t=',mtime
+           if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         end if
 
         nrec = nrec + 1
@@ -3631,6 +3643,8 @@ end module cuda_rt
 
 
       if( dowriteout )then
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'pre-wout    t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
 #ifdef _NVTX
         call nvtxStartRange("writeout",id=6)
 #endif
