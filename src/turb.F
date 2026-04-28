@@ -1098,6 +1098,8 @@
     call bc2d(s1)
     call bc2d(znt)
 #ifdef MPI
+    if(myid.eq.0 .and. rtime.gt.13000.0) write(*,'(a,f10.1)') 'turb-sync1  t=',rtime
+    if(myid.eq.0 .and. rtime.gt.13000.0) flush(6)
     call sync()
     if(timestats.ge.1) time_lb=time_lb+mytime()
     call comm_1s2d_start(ust,uw31(1,1,1),uw32(1,1,1),ue31(1,1,1),ue32(1,1,1),  &
@@ -1190,6 +1192,8 @@
     call bc2d(vt)
     call bc2d(st)
 #ifdef MPI
+    if(myid.eq.0 .and. rtime.gt.13000.0) write(*,'(a,f10.1)') 'turb-sync2  t=',rtime
+    if(myid.eq.0 .and. rtime.gt.13000.0) flush(6)
     call sync()
     if(timestats.ge.1) time_lb=time_lb+mytime()
     call comm_1s2d_start(ustt,uw31(1,1,1),uw32(1,1,1),ue31(1,1,1),ue32(1,1,1),  &
@@ -1536,6 +1540,8 @@
 
       if( do_ib )then
 #ifdef MPI
+        if(myid.eq.0 .and. rtime.gt.13000.0) write(*,'(a,f10.1)') 'turb-sync3  t=',rtime
+        if(myid.eq.0 .and. rtime.gt.13000.0) flush(6)
         call sync()
         if(timestats.ge.1) time_lb=time_lb+mytime()
         call getcorneru(ua,nw1(1),nw2(1),ne1(1),ne2(1),sw1(1),sw2(1),se1(1),se2(1))
@@ -2297,6 +2303,8 @@
         call bcs(upten)
         call bcs(vpten)
 #ifdef MPI
+        if(myid.eq.0 .and. rtime.gt.13000.0) write(*,'(a,f10.1)') 'turb-sync4  t=',rtime
+        if(myid.eq.0 .and. rtime.gt.13000.0) flush(6)
         call sync()
         if(timestats.ge.1) time_lb=time_lb+mytime()
         call comm_1s_start(upten,pw1,pw2,pe1,pe2,ps1,ps2,pn1,pn2,reqs_s)
@@ -2529,6 +2537,8 @@
       call bcw(khh,1)
       call bcw(khv,1)
 #ifdef MPI
+      if(myid.eq.0 .and. rtime.gt.13000.0) write(*,'(a,f10.1)') 'turb-sync5  t=',rtime
+      if(myid.eq.0 .and. rtime.gt.13000.0) flush(6)
       call sync()
       if(timestats.ge.1) time_lb=time_lb+mytime()
       call comm_1t_start(kmh,khcw1,khcw2,khce1,khce2,   &
@@ -2631,6 +2641,8 @@
         call bc2d(tkea(ibt,jbt,1))
         call bc2d(kmh(ibc,jbc,1))
 #ifdef MPI
+        if(myid.eq.0 .and. rtime.gt.13000.0) write(*,'(a,f10.1)') 'turb-sync6  t=',rtime
+        if(myid.eq.0 .and. rtime.gt.13000.0) flush(6)
         call sync()
         if(timestats.ge.1) time_lb=time_lb+mytime()
         call comm_1s2d_start(tkea(ibt,jbt,1),kvcw1(1,1),kvcw2(1,1),kvce1(1,1),kvce2(1,1),   &
@@ -2685,6 +2697,8 @@
         call bc2d(tkea(ibt,jbt,nk+1))
         call bc2d(kmh(ibc,jbc,nk+1))
 #ifdef MPI
+        if(myid.eq.0 .and. rtime.gt.13000.0) write(*,'(a,f10.1)') 'turb-sync7  t=',rtime
+        if(myid.eq.0 .and. rtime.gt.13000.0) flush(6)
         call sync()
         if(timestats.ge.1) time_lb=time_lb+mytime()
         call comm_1s2d_start(tkea(ibt,jbt,nk+1),kvcw1(1,1),kvcw2(1,1),kvce1(1,1),kvce2(1,1),   &
