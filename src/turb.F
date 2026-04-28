@@ -2541,6 +2541,10 @@
 #ifdef MPI
       if(myid.eq.0 .and. rtime.gt.13000.0) write(*,'(a,f10.1)') 'turb-sync5  t=',rtime
       if(myid.eq.0 .and. rtime.gt.13000.0) flush(6)
+      if(rtime.gt.14000.0) then
+        write(*,'(a,i6,a,f10.1)') 'pre-sync5 rank=',myid,' t=',rtime
+        flush(6)
+      endif
       call sync()
       if(timestats.ge.1) time_lb=time_lb+mytime()
       call comm_1t_start(kmh,khcw1,khcw2,khce1,khce2,   &
