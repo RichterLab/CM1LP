@@ -1335,6 +1335,8 @@
                    kw1(1,1,4),kw2(1,1,4),ke1(1,1,4),ke2(1,1,4),       &
                    ks1(1,1,4),ks2(1,1,4),kn1(1,1,4),kn2(1,1,4))
 
+        if(myid.eq.0 .and. rtime.gt.13000.0) write(*,'(a,f10.1)') 'post-tkekm  t=',rtime
+        if(myid.eq.0 .and. rtime.gt.13000.0) flush(6)
 
         if( do_ib )then
           !$acc parallel loop gang vector collapse(2) default(present) private(i,j)
@@ -2554,6 +2556,8 @@
 !--------------------------------------------------------------
 !  Finish comms:
 #ifdef MPI
+      if(myid.eq.0 .and. rtime.gt.13000.0) write(*,'(a,f10.1)') 'tkekm-c1end t=',rtime
+      if(myid.eq.0 .and. rtime.gt.13000.0) flush(6)
       call comm_1t_end(kmh,khcw1,khcw2,khce1,khce2,   &
                            khcs1,khcs2,khcn1,khcn2,reqs_khc)
       call comm_1t_end(kmv,kvcw1,kvcw2,kvce1,kvce2,   &
@@ -2562,6 +2566,8 @@
                            khds1,khds2,khdn1,khdn2,reqs_khd)
       call comm_1t_end(khv,kvdw1,kvdw2,kvde1,kvde2,   &
                            kvds1,kvds2,kvdn1,kvdn2,reqs_kvd)
+      if(myid.eq.0 .and. rtime.gt.13000.0) write(*,'(a,f10.1)') 'tkekm-c1don t=',rtime
+      if(myid.eq.0 .and. rtime.gt.13000.0) flush(6)
       call bct2(kmh)
       call bct2(kmv)
       call getcornert(kmh,nw1,nw2,ne1,ne2,sw1,sw2,se1,se2)
@@ -2641,8 +2647,7 @@
         call bc2d(tkea(ibt,jbt,1))
         call bc2d(kmh(ibc,jbc,1))
 #ifdef MPI
-        if(myid.eq.0) write(*,'(a)') 'turb-sync6'
-        if(myid.eq.0) flush(6)
+        if(myid.eq.0) write(*,'(a)') 'turb-sync6'; if(myid.eq.0) flush(6)
         call sync()
         if(timestats.ge.1) time_lb=time_lb+mytime()
         call comm_1s2d_start(tkea(ibt,jbt,1),kvcw1(1,1),kvcw2(1,1),kvce1(1,1),kvce2(1,1),   &
