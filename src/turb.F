@@ -2583,7 +2583,7 @@
                        kvcw1,kvcw2,kvce1,kvce2,kvcs1,kvcs2,kvcn1,kvcn2)
       use input, only : ib,ie,jb,je,kb,ke,imp,jmp,kmt,ibc,iec,jbc,jec,kbc,kec, &
           ibt,iet,jbt,jet,kbt,ket,ib3d,ie3d,jb3d,je3d,kb3d,ke3d,nout3d,ni,nj,nk, &
-          dx,dy,dz,myid,timestats,time_turb,time_lb,mytime,tbc,bbc
+          dx,dy,dz,myid,timestats,time_turb,time_lb,mytime,tbc,bbc,mtime
       use constants
       use bc_module, only: bc2d, bcs2_2d
       use comm_module
@@ -2641,8 +2641,8 @@
         call bc2d(tkea(ibt,jbt,1))
         call bc2d(kmh(ibc,jbc,1))
 #ifdef MPI
-        if(myid.eq.0 .and. rtime.gt.13000.0) write(*,'(a,f10.1)') 'turb-sync6  t=',rtime
-        if(myid.eq.0 .and. rtime.gt.13000.0) flush(6)
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'turb-sync6  t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call sync()
         if(timestats.ge.1) time_lb=time_lb+mytime()
         call comm_1s2d_start(tkea(ibt,jbt,1),kvcw1(1,1),kvcw2(1,1),kvce1(1,1),kvce2(1,1),   &
@@ -2697,8 +2697,8 @@
         call bc2d(tkea(ibt,jbt,nk+1))
         call bc2d(kmh(ibc,jbc,nk+1))
 #ifdef MPI
-        if(myid.eq.0 .and. rtime.gt.13000.0) write(*,'(a,f10.1)') 'turb-sync7  t=',rtime
-        if(myid.eq.0 .and. rtime.gt.13000.0) flush(6)
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'turb-sync7  t=',mtime
+        if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call sync()
         if(timestats.ge.1) time_lb=time_lb+mytime()
         call comm_1s2d_start(tkea(ibt,jbt,nk+1),kvcw1(1,1),kvcw2(1,1),kvce1(1,1),kvce2(1,1),   &
