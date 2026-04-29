@@ -3283,7 +3283,7 @@
       subroutine calcksquick(dt,uh,vh,mf,kmh,kmv,khh,khv,reqk)
       use input, only : ib,ie,jb,je,kb,ke,ibc,iec,jbc,jec,kbc,kec,&
           ni,nj,nk,nx,ny,rdx,rdy,axisymm,ksmax,ierr,stopit,timestats, &
-          time_stat,mytime
+          time_stat,mytime,myid
       use constants
 #ifdef MPI
       use mpi
@@ -3352,7 +3352,9 @@
         enddo
         !$acc end parallel
       elseif(axisymm.eq.0.and.ny.gt.1)then
-        stop 1112
+        write(*,*) 'FATAL: calcksquick reached impossible ny>1/axisymm branch (stop 1112)'
+        flush(6)
+        call stopcm1
       endif
 
       fmax=-99999999.
@@ -3370,9 +3372,11 @@
       call MPI_IALLREDUCE(MPI_IN_PLACE,ksmax,1,MPI_REAL,MPI_MAX,MPI_COMM_WORLD,reqk,ierr)
 #endif
 
-      if(ksmax.ge.0.50) then 
+      if(ksmax.ge.0.50) then
          stopit=.true.
-         stop 'calcksquick: end of subroutine'
+         write(*,*) 'FATAL: local ksmax >= 0.50 in calcksquick (diffusion CFL exceeded), rank=',myid,' ksmax=',ksmax
+         flush(6)
+         call stopcm1
       endif
 
       if(timestats.ge.1) time_stat=time_stat+mytime()
