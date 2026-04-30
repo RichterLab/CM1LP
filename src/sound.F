@@ -122,7 +122,7 @@
         dts=dt/nsound
       endif
     ELSE
-      stop 97392
+      call stopcm1
     ENDIF
 
 !!!      print *,'  nloop,dts,dttmp = ',nloop,dts,nloop*dts

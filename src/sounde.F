@@ -100,7 +100,7 @@
         dts=dt/nsound
       endif
     ELSE
-      stop 97393
+      call stopcm1
     ENDIF
 
     !JMD print *,'  nloop,dts,dttmp = ',nloop,dts,nloop*dts

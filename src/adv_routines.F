@@ -6973,7 +6973,7 @@
 
     ELSE
 
-      stop 23598
+      call stopcm1
 
     ENDIF
 
@@ -7506,7 +7506,7 @@
 
     else
 
-      stop 9389
+      call stopcm1
 
     endif
 
@@ -7726,7 +7726,7 @@
       ENDDO
       !$acc end parallel
     else
-      stop 34788
+      call stopcm1
     endif
 
 
@@ -8289,7 +8289,7 @@
       enddo
       ENDDO
     else
-      stop 34789
+      call stopcm1
     endif
 
     ! Near boundaries ...
@@ -8770,7 +8770,7 @@
       enddo
       ENDDO
     else
-      stop 34790
+      call stopcm1
     endif
 
     ! Near boundaries ...
@@ -9282,7 +9282,7 @@
       enddo
       ENDDO
     else
-      stop 34791
+      call stopcm1
     endif
 
     ! Near boundaries ...

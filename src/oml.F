@@ -317,7 +317,7 @@ CONTAINS
 !!!        WRITE(message,*)'Initializing OML with real HML0, h(1,1) = ', h0ml(1,1)
 !!!        CALL wrf_debug (0, TRIM(message))
 !!!        write(outfile,*) 'Initializing OML with real HML0, h(1,1) = ', h0ml(1,1)
-        stop 34543
+        call stopcm1
         DO J=jts,jtf
         DO I=its,itf
           HML(I,J)=H0ML(I,J)

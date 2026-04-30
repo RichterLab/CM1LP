@@ -942,7 +942,7 @@
 
     if( td_hadv.ge.1 .and. td_vadv.ge.1 )then
 
-      stop 111
+      call stopcm1
 
         diffit = 0
         bfoo = 0.0

@@ -5910,7 +5910,7 @@
 
     ELSE
       ! with terrain:
-      stop 45454
+      call stopcm1
     ENDIF
 
 !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -6135,7 +6135,7 @@
 
   ELSE
 
-    stop 23232
+    call stopcm1
 
   ENDIF    acheck
 

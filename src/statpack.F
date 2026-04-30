@@ -83,6 +83,14 @@
 
 !-----------------------------------------------------------------------
 #ifdef MPI
+      ! Diagnostic: verify ALL ranks reach statpack before the first MPI_REDUCE.
+      ! If ANY rank died between turb-sync6 and here, this barrier will hang
+      ! instead of the MPI_REDUCE — and the all-ranks print above tells us who is missing.
+      if( rtime.gt.13000.0 )then
+        write(*,'(a,i6,a,f10.1)') 'stat-entry rank=',myid,' t=',rtime
+        flush(6)
+      endif
+      call MPI_BARRIER(MPI_COMM_WORLD,ierr)
       cfoo = 0.0
       call MPI_REDUCE(qbudget,cfoo,nbudget,MPI_DOUBLE_PRECISION,MPI_SUM,0,  &
                       MPI_COMM_WORLD,ierr)

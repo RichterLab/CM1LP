@@ -273,7 +273,7 @@
       open(unit=50,file=fname,form='unformatted',status='unknown')
     ENDIF
   ELSE
-    stop 12388
+    call stopcm1
   ENDIF
 
 #ifdef NETCDF
@@ -860,7 +860,7 @@
           write(text1(4:6),183) n
 183       format(i3.3)
         else
-          stop 11611
+          call stopcm1
         endif
         call writer(ni,nj,1,1,nx,ny,dum1(ib,jb,1),text1,             &
                     ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
@@ -1272,7 +1272,7 @@
             write(text1(5:6),172) n
 172         format(i2.2)
           else
-            stop 22122
+            call stopcm1
           endif
           call writer(ni,nj,1,1,nx,ny,tslb(ib,jb,n),text1,             &
                       ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
@@ -1655,7 +1655,7 @@
             write(text1(3:4),162) n
 162         format(i2.2)
           else
-            stop 11512
+            call stopcm1
           endif
           call writer(ni,nj,1,nk,nx,ny,pta(ib,jb,1,n),text1,           &
                       ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
@@ -2385,7 +2385,7 @@
       open(unit=50,file=fname,form='unformatted',status='old')
     ENDIF
   ELSE
-    stop 12389
+    call stopcm1
   ENDIF
 
 #ifdef NETCDF
@@ -2955,7 +2955,7 @@
           write(text1(4:6),183) n
 183       format(i3.3)
         else
-          stop 11611
+          call stopcm1
         endif
         call  readr(ni,nj,1,1,nx,ny,dum1(ib,jb,1),text1,             &
                     ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
@@ -3300,7 +3300,7 @@
             write(text1(5:6),172) n
 172         format(i2.2)
           else
-            stop 22122
+            call stopcm1
           endif
         call  readr(ni,nj,1,1,nx,ny,tslb(ib,jb,n),text1,             &
                     ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
@@ -3639,7 +3639,7 @@
                 write(text1(3:4),162) n
 162             format(i2.2)
               else
-                stop 11512
+                call stopcm1
               endif
               call  readr(ni,nj,1,nk,nx,ny,pta(ib,jb,1,n),text1,           &
                           ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
@@ -3658,7 +3658,7 @@
                 text1 = 'ptXX    '
                 write(text1(3:4),162) n
               else
-                stop 11513
+                call stopcm1
               endif
               call  readr(ni,nj,1,nk,nx,ny,dum1(ib,jb,1),text1,            &
                           ni,nj,ngxy,myid,numprocs,nodex,nodey,orecs,51,   &
@@ -4255,7 +4255,7 @@
       open(unit=50,file=fname,form='unformatted',status='old')
     ENDIF
   ELSE
-    stop 12389
+    call stopcm1
   ENDIF
 
 #ifdef NETCDF

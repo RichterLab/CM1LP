@@ -4087,7 +4087,7 @@ end module cuda_rt
 #ifdef MPI
           call MPI_BARRIER (MPI_COMM_WORLD,ierr)
 #endif
-          stop 55556
+          call stopcm1
         ENDIF
         nrst = nrst+1
         if(timestats.ge.1) time_restart=time_restart+mytime()
@@ -4140,7 +4140,7 @@ end module cuda_rt
 #ifdef MPI
             call MPI_BARRIER (MPI_COMM_WORLD,ierr)
 #endif
-            stop 55555
+            call stopcm1
           endif
         endif
 

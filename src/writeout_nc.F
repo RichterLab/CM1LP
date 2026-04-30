@@ -637,7 +637,7 @@
 100 format(i6.6)
   ELSE
     print *,'  invalid value for restart_filetype '
-    stop 33443
+    call stopcm1
   ENDIF
 
     if(myid.eq.0) print *,'  string = ',string
@@ -1014,7 +1014,7 @@
           write(text1(4:6),183) n
 183       format(i3.3)
         else
-          stop 11611
+          call stopcm1
         endif
         call disp_err( nf90_def_var(ncid,text1     ,nf90_float,(/niid,njid,timeid/),varid) , .true. )
       enddo
@@ -1160,7 +1160,7 @@
             write(text1(5:6),172) n
 172         format(i2.2)
           else
-            stop 22122
+            call stopcm1
           endif
           call disp_err( nf90_def_var(ncid,text1     ,nf90_float,(/niid,njid,timeid/),varid) , .true. )
         enddo
@@ -1191,7 +1191,7 @@
           write(text1(3:5),163) n
 163       format(i3.3)
         else
-          stop 11511
+          call stopcm1
         endif
         call disp_err( nf90_def_var(ncid,text1,nf90_float,(/niid,njid,nkid,timeid/),varid) , .true. )
       enddo
@@ -1930,7 +1930,7 @@
         call disp_err( nf90_close(ncid) , .true. )
 
       else
-        stop 32123
+        call stopcm1
       endif
 
       end subroutine writehifrq_nc
@@ -2011,7 +2011,7 @@
             print *,'    n,varname,w = ',n,trim(varname(n))
             call disp_err( nf90_def_var(ncid,trim(varname(n)),nf90_float,(/xhid,yhid,zfid,timeid/),varid) , .true. )
           else
-            stop 23987
+            call stopcm1
           endif
           call disp_err( nf90_put_att(ncid,varid,"long_name",trim(vardesc(n))) , .true. )
           call disp_err( nf90_put_att(ncid,varid,"units",trim(varunit(n))) , .true. )
@@ -2054,7 +2054,7 @@
         call disp_err( nf90_close(ncid) , .true. )
 
       else
-        stop 32123
+        call stopcm1
       endif
 
 
@@ -2137,7 +2137,7 @@
             print *,'    n,varname,w = ',n,trim(varname(n))
             call disp_err( nf90_def_var(ncid,trim(varname(n)),nf90_float,(/xhid,yhid,zfid,timeid/),varid) , .true. )
           else
-            stop 23987
+            call stopcm1
           endif
           call disp_err( nf90_put_att(ncid,varid,"long_name",trim(vardesc(n))) , .true. )
           call disp_err( nf90_put_att(ncid,varid,"units",trim(varunit(n))) , .true. )
@@ -2183,7 +2183,7 @@
         call disp_err( nf90_close(ncid) , .true. )
 
       else
-        stop 32123
+        call stopcm1
       endif
 
 

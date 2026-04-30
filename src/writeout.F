@@ -8263,6 +8263,11 @@
 !!!#endif
       if( myid.eq.0 ) print *,'  ... leaving writeout '
 #ifdef MPI
+      ! Diagnostic: verify all ranks reach writeout barrier
+      if( rtime.gt.13000.0 )then
+        write(*,'(a,i6,a,f10.1)') 'wout-barr rank=',myid,' t=',rtime
+        flush(6)
+      endif
       if(timestats.ge.1)then
         ! this is needed for proper accounting of timing:
       call MPI_BARRIER (MPI_COMM_WORLD,ierr)

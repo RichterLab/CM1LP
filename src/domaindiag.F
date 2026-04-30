@@ -1182,6 +1182,12 @@
         !$acc end parallel
 
 #ifdef MPI
+      ! Diagnostic: verify all ranks reach domaindiag before first MPI_ALLREDUCE
+      if( mtime.gt.13000.0d0 )then
+        write(*,'(a,i6,a,f10.1)') 'ddom-r0  rank=',myid,' t=',mtime
+        flush(6)
+      endif
+      call MPI_BARRIER(MPI_COMM_WORLD,ierr)
       call MPI_ALLREDUCE(mpi_in_place,zimin,1,MPI_REAL,MPI_MIN,MPI_COMM_WORLD,ierr)
       call MPI_ALLREDUCE(mpi_in_place,zimax,1,MPI_REAL,MPI_MAX,MPI_COMM_WORLD,ierr)
 #endif
