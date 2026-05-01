@@ -747,8 +747,18 @@
         if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call sync()
         if(timestats.ge.1) time_lb=time_lb+mytime()
+        ! Diagnostic: all-ranks check entering comm_3t_end
+        if( mtime.gt.14100.0d0 )then
+          write(*,'(a,i6,a,f10.1)') 'pre-tke  rank=',myid,' t=',mtime
+          flush(6)
+        endif
         call comm_3t_end(tke3d,tkw1,tkw2,tke1,tke2,   &
                                tks1,tks2,tkn1,tkn2,reqs_tk)
+        ! Diagnostic: all-ranks check after comm_3t_end
+        if( mtime.gt.14100.0d0 )then
+          write(*,'(a,i6,a,f10.1)') 'post-tke rank=',myid,' t=',mtime
+          flush(6)
+        endif
 #endif
         !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k) 
         !$omp parallel do default(shared)  &
