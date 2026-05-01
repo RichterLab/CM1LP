@@ -3038,6 +3038,14 @@ end module cuda_rt
 #endif
         ! solve1: pre-RK terms
         ! (tendencies held fixed during Runge-Kutta integration and acoustic sub-stepping)
+#ifdef MPI
+        ! Diagnostic: all-ranks check at top of each solver iteration
+        if( mtime.gt.14100.0d0 )then
+          write(*,'(a,i6,a,f10.1)') 'pre-slv1 rank=',myid,' t=',mtime
+          flush(6)
+          call MPI_BARRIER(MPI_COMM_WORLD,ierr)
+        endif
+#endif
         if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'pre-solve1  t=',mtime
         if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
         call     solve1(nstep,rbufsz,num_soil_layers,                  &
@@ -3490,6 +3498,14 @@ end module cuda_rt
 #endif
       if(myid.eq.0 .and. mtime.gt.13000.0d0) write(*,'(a,f10.1)') 'post-sfcturb t=',mtime
       if(myid.eq.0 .and. mtime.gt.13000.0d0) flush(6)
+#ifdef MPI
+      ! Diagnostic: all-ranks check that everyone exits sfc_and_turb
+      if( mtime.gt.14100.0d0 )then
+        write(*,'(a,i6,a,f10.1)') 'post-sfc rank=',myid,' t=',mtime
+        flush(6)
+        call MPI_BARRIER(MPI_COMM_WORLD,ierr)
+      endif
+#endif
 
       IF( (idiff.ge.1).and.(difforder.eq.2) )THEN
         !  get stress terms for explicit diffusion scheme:
