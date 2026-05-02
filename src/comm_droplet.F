@@ -258,22 +258,25 @@ contains
      ! Allocate once on first call at maximum possible size (nparcelsLocal).
      ! Reusing fixed buffers avoids heap bloat from repeated varying-size alloc/dealloc.
      if ( .not. allocated(droplet_n1) ) then
-       allocate(droplet_n1(nparcelsLocal,npvals))
-       allocate(droplet_s1(nparcelsLocal,npvals))
-       allocate(droplet_w1(nparcelsLocal,npvals))
-       allocate(droplet_e1(nparcelsLocal,npvals))
-       allocate(droplet_nw1(nparcelsLocal,npvals))
-       allocate(droplet_ne1(nparcelsLocal,npvals))
-       allocate(droplet_sw1(nparcelsLocal,npvals))
-       allocate(droplet_se1(nparcelsLocal,npvals))
-       allocate(droplet_n2(nparcelsLocal,npvals))
-       allocate(droplet_s2(nparcelsLocal,npvals))
-       allocate(droplet_w2(nparcelsLocal,npvals))
-       allocate(droplet_e2(nparcelsLocal,npvals))
-       allocate(droplet_nw2(nparcelsLocal,npvals))
-       allocate(droplet_ne2(nparcelsLocal,npvals))
-       allocate(droplet_sw2(nparcelsLocal,npvals))
-       allocate(droplet_se2(nparcelsLocal,npvals))
+       ! Shape is (npvals,nparcelsLocal): property index first so that the first
+       ! Depart*npvals contiguous elements in memory carry all properties for all
+       ! departing droplets, matching what mpi_isend/mpi_irecv count expects.
+       allocate(droplet_n1(npvals,nparcelsLocal))
+       allocate(droplet_s1(npvals,nparcelsLocal))
+       allocate(droplet_w1(npvals,nparcelsLocal))
+       allocate(droplet_e1(npvals,nparcelsLocal))
+       allocate(droplet_nw1(npvals,nparcelsLocal))
+       allocate(droplet_ne1(npvals,nparcelsLocal))
+       allocate(droplet_sw1(npvals,nparcelsLocal))
+       allocate(droplet_se1(npvals,nparcelsLocal))
+       allocate(droplet_n2(npvals,nparcelsLocal))
+       allocate(droplet_s2(npvals,nparcelsLocal))
+       allocate(droplet_w2(npvals,nparcelsLocal))
+       allocate(droplet_e2(npvals,nparcelsLocal))
+       allocate(droplet_nw2(npvals,nparcelsLocal))
+       allocate(droplet_ne2(npvals,nparcelsLocal))
+       allocate(droplet_sw2(npvals,nparcelsLocal))
+       allocate(droplet_se2(npvals,nparcelsLocal))
        !$acc enter data create(droplet_n1,droplet_s1,droplet_w1,droplet_e1,     &
        !$acc                   droplet_nw1,droplet_ne1,droplet_sw1,droplet_se1, &
        !$acc                   droplet_n2,droplet_s2,droplet_w2,droplet_e2,     &
@@ -607,7 +610,7 @@ contains
      do i=1,numDepart
        do iv=1,npvals
          np = Depart_ind(iptr+i-1)
-         droplet_buffer(i,iv) = pdata(np,iv)
+         droplet_buffer(iv,i) = pdata(np,iv)
          pdata(np,iv) = neg_huge
        enddo
      enddo
@@ -834,7 +837,7 @@ contains
      do i = 1, numArrive
        do iv=1,npvals
          iptr = holes_ind(ptr+i-1)
-         pdata(iptr,iv) = droplet_buffer(i,iv)
+         pdata(iptr,iv) = droplet_buffer(iv,i)
        end do
      end do
 
