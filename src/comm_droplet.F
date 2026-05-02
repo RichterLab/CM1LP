@@ -218,11 +218,12 @@ contains
     real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata        ! droplet information
 
     ! Local variables
-
-    real, dimension(:,:), allocatable :: droplet_n1, droplet_s1, droplet_w1, &     ! information of droplets that will leave the 
-                                         droplet_e1, droplet_nw1, droplet_ne1, &   ! current MPI region and enter the nearest neighbor;
-                                         droplet_sw1, droplet_se1, &               ! 1 means sending array;
-                                         droplet_n2, droplet_s2, droplet_w2, &     ! 2 means receiving array
+    ! Pre-allocated once at nparcelsLocal size and reused every call to avoid
+    ! repeated alloc/dealloc of varying-sized buffers which causes heap bloat.
+    real, dimension(:,:), allocatable, save :: droplet_n1, droplet_s1, droplet_w1, &
+                                         droplet_e1, droplet_nw1, droplet_ne1, &
+                                         droplet_sw1, droplet_se1, &
+                                         droplet_n2, droplet_s2, droplet_w2, &
                                          droplet_e2, droplet_nw2, droplet_ne2, &
                                          droplet_sw2, droplet_se2
 
@@ -254,32 +255,30 @@ contains
     numDepart = sum(Depart)
     numArrive = sum(Arrive)
 
-     ! allocate spaces to store the droplets that will leave the current MPI region
-
-     if ( Depart(inorth) .ne. 0 ) allocate(droplet_n1(Depart(inorth),npvals))
-     if ( Depart(isouth) .ne. 0 ) allocate(droplet_s1(Depart(isouth),npvals))
-     if ( Depart(iwest) .ne. 0 ) allocate(droplet_w1(Depart(iwest),npvals))
-     if ( Depart(ieast) .ne. 0 ) allocate(droplet_e1(Depart(ieast),npvals))
-     if ( Depart(inw) .ne. 0 ) allocate(droplet_nw1(Depart(inw),npvals))
-     if ( Depart(ine) .ne. 0 ) allocate(droplet_ne1(Depart(ine),npvals))
-     if ( Depart(isw) .ne. 0 ) allocate(droplet_sw1(Depart(isw),npvals))
-     if ( Depart(ise) .ne. 0 ) allocate(droplet_se1(Depart(ise),npvals))
-
-     ! allocate temporary arrays if there are new droplets from the nearest neighbor
-
-     if ( Arrive(inorth) .ne. 0 ) allocate(droplet_n2(Arrive(inorth),npvals))
-     if ( Arrive(isouth) .ne. 0 ) allocate(droplet_s2(Arrive(isouth),npvals))
-     if ( Arrive(iwest) .ne. 0 ) allocate(droplet_w2(Arrive(iwest),npvals))
-     if ( Arrive(ieast) .ne. 0 ) allocate(droplet_e2(Arrive(ieast),npvals))
-     if ( Arrive(inw) .ne. 0 ) allocate(droplet_nw2(Arrive(inw),npvals))
-     if ( Arrive(ine) .ne. 0 ) allocate(droplet_ne2(Arrive(ine),npvals))
-     if ( Arrive(isw) .ne. 0 ) allocate(droplet_sw2(Arrive(isw),npvals))
-     if ( Arrive(ise) .ne. 0 ) allocate(droplet_se2(Arrive(ise),npvals))
-
-     !$acc data create(droplet_n1,droplet_s1,droplet_w1,droplet_e1,     &
-     !$acc             droplet_nw1,droplet_ne1,droplet_sw1,droplet_se1, &
-     !$acc             droplet_n2,droplet_s2,droplet_w2,droplet_e2,     &
-     !$acc             droplet_nw2,droplet_ne2,droplet_sw2,droplet_se2)
+     ! Allocate once on first call at maximum possible size (nparcelsLocal).
+     ! Reusing fixed buffers avoids heap bloat from repeated varying-size alloc/dealloc.
+     if ( .not. allocated(droplet_n1) ) then
+       allocate(droplet_n1(nparcelsLocal,npvals))
+       allocate(droplet_s1(nparcelsLocal,npvals))
+       allocate(droplet_w1(nparcelsLocal,npvals))
+       allocate(droplet_e1(nparcelsLocal,npvals))
+       allocate(droplet_nw1(nparcelsLocal,npvals))
+       allocate(droplet_ne1(nparcelsLocal,npvals))
+       allocate(droplet_sw1(nparcelsLocal,npvals))
+       allocate(droplet_se1(nparcelsLocal,npvals))
+       allocate(droplet_n2(nparcelsLocal,npvals))
+       allocate(droplet_s2(nparcelsLocal,npvals))
+       allocate(droplet_w2(nparcelsLocal,npvals))
+       allocate(droplet_e2(nparcelsLocal,npvals))
+       allocate(droplet_nw2(nparcelsLocal,npvals))
+       allocate(droplet_ne2(nparcelsLocal,npvals))
+       allocate(droplet_sw2(nparcelsLocal,npvals))
+       allocate(droplet_se2(nparcelsLocal,npvals))
+       !$acc enter data create(droplet_n1,droplet_s1,droplet_w1,droplet_e1,     &
+       !$acc                   droplet_nw1,droplet_ne1,droplet_sw1,droplet_se1, &
+       !$acc                   droplet_n2,droplet_s2,droplet_w2,droplet_e2,     &
+       !$acc                   droplet_nw2,droplet_ne2,droplet_sw2,droplet_se2)
+     endif
 
      if(timestats.ge.1) time_dropC4a=time_dropC4a+mytime()
 
@@ -500,25 +499,7 @@ contains
 
      if(timestats.ge.1) time_dropC4e=time_dropC4e+mytime()
 
-     ! free up the memory for temporary variables
-     !$acc end data
-
-     if (allocated(droplet_n1))  deallocate(droplet_n1)
-     if (allocated(droplet_n2))  deallocate(droplet_n2)
-     if (allocated(droplet_s1))  deallocate(droplet_s1)
-     if (allocated(droplet_s2))  deallocate(droplet_s2)
-     if (allocated(droplet_w1))  deallocate(droplet_w1)
-     if (allocated(droplet_w2))  deallocate(droplet_w2)
-     if (allocated(droplet_e1))  deallocate(droplet_e1)
-     if (allocated(droplet_e2))  deallocate(droplet_e2)
-     if (allocated(droplet_ne1)) deallocate(droplet_ne1)
-     if (allocated(droplet_ne2)) deallocate(droplet_ne2)
-     if (allocated(droplet_nw1)) deallocate(droplet_nw1)
-     if (allocated(droplet_nw2)) deallocate(droplet_nw2)
-     if (allocated(droplet_se1)) deallocate(droplet_se1)
-     if (allocated(droplet_se2)) deallocate(droplet_se2)
-     if (allocated(droplet_sw1)) deallocate(droplet_sw1)
-     if (allocated(droplet_sw2)) deallocate(droplet_sw2)
+     ! Buffers are persistent (save attribute); no deallocation needed here.
 
      if(timestats.ge.1) time_dropC4f=time_dropC4f+mytime()
 
