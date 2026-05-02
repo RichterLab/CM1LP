@@ -171,8 +171,8 @@
       integer, dimension(:), allocatable :: holes_fallout_ind  !their location index in pdata prior to removal
 
 #ifdef MPI 
-      integer, dimension(:), allocatable :: holes_ind      ! location index in "pdata" that can add a new droplet
-      integer, dimension(:), allocatable :: Depart_ind     ! Index location in "pdata" of a point that is departing
+      integer, dimension(:), allocatable, save :: holes_ind   ! location index in "pdata" that can add a new droplet
+      integer, dimension(:), allocatable, save :: Depart_ind  ! Index location in "pdata" of a point that is departing
       integer :: Depart(num_nn)                            ! Number of droplets that will enter each nearest 
                                                            ! neighbor at different directions
       integer :: Arrive(num_nn)                            ! Number of droplets that will enter the current
@@ -187,8 +187,8 @@
       integer :: numHoles                                  ! total number of empty holes in pdata 
       integer :: numBackfill                               ! total number of droplets to backfill into "pdata" array holes
 
-      integer, dimension(:), allocatable :: backfill_ind   ! indicies of valid droplets to backfill into 
-                                                           ! holes  in "pdata" array created by droplet 
+      integer, dimension(:), allocatable, save :: backfill_ind ! indicies of valid droplets to backfill into
+                                                           ! holes  in "pdata" array created by droplet
                                                            ! fall-out or departure
 #ifdef _OPENACC
       ! arrays used by count_prefix operator
@@ -601,8 +601,15 @@
     Depart(ise)    = numDepartSE
 
     numDepart=SUM(Depart)
-    if(numDepart .gt. 0) allocate(Depart_ind(numDepart))
-    !$acc enter data create(Depart_ind)
+
+    ! Allocate index scratch arrays once at maximum possible size.
+    ! Reusing fixed-size buffers avoids heap bloat from varying-size alloc/dealloc.
+    if ( .not. allocated(holes_ind) ) then
+      allocate(holes_ind(nparcelsLocal))
+      allocate(Depart_ind(nparcelsLocal))
+      allocate(backfill_ind(nparcelsLocal))
+      !$acc enter data create(holes_ind, Depart_ind, backfill_ind)
+    endif
 
     numHoles = numDepart + num_fallout + (nparcelsLocal-nparcelsLocalActive)
 
@@ -614,11 +621,9 @@
      !     all the calculations below are done on CPU
 
      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-     ! Step 1: Allocate and assign the "hole" index array and initialize it !
+     ! Step 1: Assign the "hole" index array and initialize it              !
      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-     allocate(holes_ind(numHoles))
-     !$acc enter data create(holes_ind)
 
      !$acc parallel loop gang vector default(present) 
      do np=1,nparcelsLocal
@@ -712,9 +717,7 @@
     numBackfill = sum(Depart) + num_fallout - sum(Arrive) 
      ! Determine which droplets to relocated from the end of 
      ! the "pdata" array to the remaining holes
-     if (numBackfill .gt. 0) then 
-       allocate(backfill_ind(numBackfill))
-       !$acc enter data create(backfill_ind)
+     if (numBackfill .gt. 0) then
        if ((nparcelsLocalActive - numBackfill) .eq. 0) then
           ! Set backfill_ind to 1 to handle an exception case, 
           ! where all the active droplets fall out or leave
@@ -811,20 +814,7 @@
 #endif
 !$acc end data ! (pdata_neighbr,msk)
 
-    ! free up the memory for temporary variables
-
-     !$acc exit data delete(holes_ind)
-     deallocate(holes_ind)
-
-     if(allocated(Depart_ind)) then 
-        !$acc exit data delete(Depart_ind)
-        deallocate(Depart_ind)
-     endif
-
-     if(allocated(backfill_ind)) then 
-        !$acc exit data delete(backfill_ind)
-        deallocate(backfill_ind)
-     endif
+     ! Index scratch arrays are persistent (save attribute); no deallocation needed here.
 
 !----------------------------------------------------------------------
 !  get height ASL:
