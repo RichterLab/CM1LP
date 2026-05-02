@@ -2248,12 +2248,6 @@
       droplet_diag0(32) = radmax
       droplet_diag0(33) = Tpmax
 
-      ! Diagnostic: verify ALL ranks reach droplet_diag before the first MPI_REDUCE.
-      if ( rtime.gt.13000.0 ) then
-        write(*,'(a,i6,a,f10.1)') 'ddiag-r0 rank=',myid,' t=',rtime
-        flush(6)
-      end if
-      call mpi_barrier(MPI_COMM_WORLD,ierr)
       ! The root rank will collect the diagnostic from different MPI ranks
       if ( myid == 0 ) then
          call mpi_reduce(MPI_IN_PLACE,droplet_diag0(1),num0-4,MPI_DOUBLE_PRECISION, &
@@ -2546,12 +2540,6 @@
          droplet_diag1(iz,30) = rhovsrc(iz)
       end do
 
-      ! Diagnostic: verify ALL ranks reach second mpi_reduce in droplet_diag
-      if ( rtime.gt.13000.0 ) then
-        write(*,'(a,i6,a,f10.1)') 'ddiag-r1 rank=',myid,' t=',rtime
-        flush(6)
-      end if
-      call mpi_barrier(MPI_COMM_WORLD,ierr)
       ! The root rank will collect the diagnostic from different MPI ranks
       if ( myid == 0 ) then
          call mpi_reduce(MPI_IN_PLACE,droplet_diag1,nk*num1,MPI_DOUBLE_PRECISION, &
@@ -2724,12 +2712,6 @@
 
       !$acc update host (partnumrz,multnumrz,vp3meanrz)
 
-      ! Diagnostic: verify ALL ranks reach the radius-bin reduce in droplet_diag
-      if ( rtime.gt.13000.0 ) then
-        write(*,'(a,i6,a,f10.1)') 'ddiag-rz rank=',myid,' t=',rtime
-        flush(6)
-      end if
-      call mpi_barrier(MPI_COMM_WORLD,ierr)
 #ifdef MPI
        !Sum up the histograms across MPI processes
        if (myid == 0) then
@@ -2813,12 +2795,6 @@
 
       !$acc update host (hist_radius,hist_radius10,hist_restime,hist_fallrad,tnumpart_r)
 
-      ! Diagnostic: verify ALL ranks reach the histogram reduce in droplet_diag
-      if ( rtime.gt.13000.0 ) then
-        write(*,'(a,i6,a,f10.1)') 'ddiag-rh rank=',myid,' t=',rtime
-        flush(6)
-      end if
-      call mpi_barrier(MPI_COMM_WORLD,ierr)
 #ifdef MPI
        !Sum up the histograms across MPI processes
        if (myid == 0) then

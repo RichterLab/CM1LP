@@ -914,19 +914,27 @@ contains
      integer :: i,n,np,iv,tag
      integer :: beg_loc,end_loc
      integer(i8) :: tmp
-     real, dimension(:,:), allocatable :: tmp_buf
+     ! Pre-allocated once at nparcelsLocal (maximum possible) to avoid heap bloat
+     ! from repeated varying-size alloc/dealloc at each output interval.
+     real, dimension(:,:), allocatable, save :: tmp_buf
+
+     ! Allocate once at maximum possible size (nparcelsLocal rows, npvals columns).
+     if ( .not. allocated(tmp_buf) ) then
+        allocate( tmp_buf(nparcelsLocal,npvals) )
+     end if
 
      ! Collect the information of active droplets from each MPI rank
      if ( myid .eq. 0 ) then
         end_loc = min(nparcelsout,nparcelsLocalActive)
         do iv = 1, npvals
-           do np = 1, end_loc 
+           do np = 1, end_loc
               rbuf(np,iv) = pdata(np,iv)
            end do
         end do
-        tmp = 1 
+        tmp = 1
         do i = 2, numprocs
-           allocate( tmp_buf(nparcels_per_mpi(i),npvals) )
+           ! Receive into first nparcels_per_mpi(i) rows of persistent buffer.
+           ! nparcels_per_mpi(i) <= nparcelsLocal always, so buffer is large enough.
            tag = 98765 + i - 1
            call mpi_recv(tmp_buf,nparcels_per_mpi(i)*npvals, &
                          MPI_REAL,i-1,tag,MPI_COMM_WORLD, &
@@ -937,17 +945,16 @@ contains
               beg_loc = tmp
               end_loc = min( beg_loc+nparcels_per_mpi(i)-1, nparcelsout )
               do iv = 1, npvals
-                 do np = beg_loc, end_loc 
+                 do np = beg_loc, end_loc
                     n = np - beg_loc + 1
                     rbuf(np,iv) = tmp_buf(n,iv)
                  end do
               end do
            end if
-           deallocate(tmp_buf)
         end do
      else
         tag = 98765 + myid
-        allocate( tmp_buf(nparcelsLocalActive,npvals) )
+        ! Pack active droplets into first nparcelsLocalActive rows of persistent buffer.
         do iv = 1, npvals
            do np = 1, nparcelsLocalActive
               tmp_buf(np,iv) = pdata(np,iv)
@@ -955,7 +962,6 @@ contains
         end do
         call mpi_send(tmp_buf,nparcelsLocalActive*npvals, &
                       MPI_REAL,0,tag,MPI_COMM_WORLD,ierr)
-        deallocate(tmp_buf)
      end if
 
      end subroutine CollectDropInfo
