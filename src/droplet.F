@@ -881,6 +881,11 @@
                call droplet_injection_pi(pdata,xf,yf,max(drop_inject_elapse,dt),mtime,my_reintro)
 	    end if
 
+            ! Re-inject droplets that fell out the top/bottom of the local
+            ! domain so the active count stays approximately constant.
+            ! Comment this block out to disable re-injection.
+            call droplet_injection_reinject(pdata,xf,yf,mtime,num_topbot_fallout)
+            my_reintro = my_reintro + num_topbot_fallout
 
             !This loop isn't strictly necessary, but populate the interpolated values to the newly injected particles
             !Doesn't affect solution at all! Since interpolation happens at start of droplet_driver 
@@ -932,11 +937,6 @@
                pdata(np,prrho) = rhoval
             end do
       end if    !doinject
-
-      ! Re-inject droplets that fell out top/bottom this timestep so the
-      ! population stays approximately constant.  Comment this call out
-      ! to disable re-injection.
-      call droplet_injection_reinject(pdata,xf,yf,mtime,num_topbot_fallout)
 
 #ifdef MPI
       call mpi_allreduce(nparcelsLocalActive,np_tmp,1,mpi_integer8, &
