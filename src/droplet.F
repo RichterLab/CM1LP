@@ -165,7 +165,6 @@
       integer :: doinject  !Do a call to droplet_inject at this time step?
 
       integer :: num_fallout,idx                        !droplets which fell out of domain
-      integer :: num_topbot_fallout                       !subset that fell out top/bottom only (used for re-injection)
       integer :: numDepart
       integer :: numDepartN, numDepartS, numDepartE, numDepartW, &
                  numDepartSW,numDepartSE,numDepartNE,numDepartNW
@@ -203,7 +202,6 @@
 
 
       num_fallout = 0  !Reset the number of droplets that have fallen out of physical domain
-      num_topbot_fallout = 0  !Reset top/bottom-only fallout counter (for re-injection)
       errcode     = 0  ! Number of errors that occurred in the index search 
       numDepartN  = 0
       numDepartS  = 0
@@ -397,7 +395,7 @@
 
 
     !$acc parallel default(present)
-    !$acc loop gang vector reduction(+:num_fallout,num_topbot_fallout) reduction(max:errcode) &
+    !$acc loop gang vector reduction(+:num_fallout) reduction(max:errcode) &
     !$acc reduction(+:numDepartN,numDepartS,numDepartE,numDepartW) &
     !$acc reduction(+:numDepartNW,numDepartSW,numDepartNE,numDepartSE) &
     !$acc reduction(+:num_destroyed,mass_destroyed,mass_evap,mass_dpten,eng_destroyed,m1_destroyed,m2_destroyed,mass_reentry,eng_reentry,m1_reentry,m2_reentry)
@@ -503,7 +501,7 @@
                            x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
                            rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                            part_grav1,part_grav2,part_grav3,debug, &
-                           neighbor,num_fallout,num_topbot_fallout,errcode)
+                           neighbor,num_fallout,errcode)
 
 #ifdef MPI
       if(neighbor .eq. mynorth) then 
@@ -881,11 +879,12 @@
                call droplet_injection_pi(pdata,xf,yf,max(drop_inject_elapse,dt),mtime,my_reintro)
 	    end if
 
-            ! Re-inject droplets that fell out the top/bottom of the local
-            ! domain so the active count stays approximately constant.
+            ! Re-inject all droplets that fell out of the local domain so
+            ! the active count stays approximately constant.  num_fallout
+            ! covers top/bottom and any side-wall (BC=4) losses.
             ! Comment this block out to disable re-injection.
-            call droplet_injection_reinject(pdata,xf,yf,mtime,num_topbot_fallout)
-            my_reintro = my_reintro + num_topbot_fallout
+            call droplet_injection_reinject(pdata,xf,yf,mtime,num_fallout)
+            my_reintro = my_reintro + num_fallout
 
             !This loop isn't strictly necessary, but populate the interpolated values to the newly injected particles
             !Doesn't affect solution at all! Since interpolation happens at start of droplet_driver 
@@ -1040,7 +1039,7 @@
                              x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
                              rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                              part_grav1,part_grav2,part_grav3,debug, &
-                             neighbor,num_fallout,num_topbot_fallout,errcode)
+                             neighbor,num_fallout,errcode)
 
       !$acc routine seq
 
@@ -1072,7 +1071,6 @@
       integer, intent(out) :: neighbor  ! indicate which MPI region a droplet 
                                         ! stays after this time step 
       integer, intent(inout) :: num_fallout
-      integer, intent(inout) :: num_topbot_fallout
       integer, intent(inout) :: errcode
 
       real :: dt2
@@ -1231,7 +1229,6 @@
          y3d = pdata(np,pry)
          z3d = pdata(np,prz)
          pdata(np,pract) = -1.0  !Signal this as no longer alive
-         num_topbot_fallout = num_topbot_fallout + 1   !track for re-injection
       end if
 
       if (x3d.gt.east .and. ebc.eq.4) then
