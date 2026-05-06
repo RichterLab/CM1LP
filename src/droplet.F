@@ -165,6 +165,7 @@
       integer :: doinject  !Do a call to droplet_inject at this time step?
 
       integer :: num_fallout,idx                        !droplets which fell out of domain
+      integer :: num_topbot_fallout                       !subset that fell out top/bottom only (used for re-injection)
       integer :: numDepart
       integer :: numDepartN, numDepartS, numDepartE, numDepartW, &
                  numDepartSW,numDepartSE,numDepartNE,numDepartNW
@@ -202,6 +203,7 @@
 
 
       num_fallout = 0  !Reset the number of droplets that have fallen out of physical domain
+      num_topbot_fallout = 0  !Reset top/bottom-only fallout counter (for re-injection)
       errcode     = 0  ! Number of errors that occurred in the index search 
       numDepartN  = 0
       numDepartS  = 0
@@ -395,7 +397,7 @@
 
 
     !$acc parallel default(present)
-    !$acc loop gang vector reduction(+:num_fallout) reduction(max:errcode) &
+    !$acc loop gang vector reduction(+:num_fallout,num_topbot_fallout) reduction(max:errcode) &
     !$acc reduction(+:numDepartN,numDepartS,numDepartE,numDepartW) &
     !$acc reduction(+:numDepartNW,numDepartSW,numDepartNE,numDepartSE) &
     !$acc reduction(+:num_destroyed,mass_destroyed,mass_evap,mass_dpten,eng_destroyed,m1_destroyed,m2_destroyed,mass_reentry,eng_reentry,m1_reentry,m2_reentry)
@@ -501,7 +503,7 @@
                            x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
                            rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                            part_grav1,part_grav2,part_grav3,debug, &
-                           neighbor,num_fallout,errcode)
+                           neighbor,num_fallout,num_topbot_fallout,errcode)
 
 #ifdef MPI
       if(neighbor .eq. mynorth) then 
@@ -931,6 +933,11 @@
             end do
       end if    !doinject
 
+      ! Re-inject droplets that fell out top/bottom this timestep so the
+      ! population stays approximately constant.  Comment this call out
+      ! to disable re-injection.
+      call droplet_injection_reinject(pdata,xf,yf,mtime,num_topbot_fallout)
+
 #ifdef MPI
       call mpi_allreduce(nparcelsLocalActive,np_tmp,1,mpi_integer8, &
                          mpi_sum,mpi_comm_world,ierr)
@@ -1033,7 +1040,7 @@
                              x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
                              rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                              part_grav1,part_grav2,part_grav3,debug, &
-                             neighbor,num_fallout,errcode)
+                             neighbor,num_fallout,num_topbot_fallout,errcode)
 
       !$acc routine seq
 
@@ -1065,6 +1072,7 @@
       integer, intent(out) :: neighbor  ! indicate which MPI region a droplet 
                                         ! stays after this time step 
       integer, intent(inout) :: num_fallout
+      integer, intent(inout) :: num_topbot_fallout
       integer, intent(inout) :: errcode
 
       real :: dt2
@@ -1223,6 +1231,7 @@
          y3d = pdata(np,pry)
          z3d = pdata(np,prz)
          pdata(np,pract) = -1.0  !Signal this as no longer alive
+         num_topbot_fallout = num_topbot_fallout + 1   !track for re-injection
       end if
 
       if (x3d.gt.east .and. ebc.eq.4) then
@@ -4018,6 +4027,123 @@
       end if
 
     end subroutine droplet_injection_pi
+
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+
+    subroutine droplet_injection_reinject(pdata,xf,yf,mtime,num_to_inject)
+      ! Re-inject droplets that fell out the top or bottom of the local
+      ! domain this timestep, keeping the active count approximately
+      ! constant.  Local-rank only (no MPI allreduce).  Particle
+      ! properties match the initial-condition setup in init3d.F:
+      !   radius = 2.0e-6 m, salinity = 0.066, temperature = 290 K,
+      !   zero velocity, drop_mult multiplicity.
+      ! New (x,y,z) is drawn uniformly within the local domain.
+      use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
+                        prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
+                        prrp,prrp0,prtp,prms,pract,prtime, &
+                        prmult,prt,prrho,prprs,prqv,prpidx,prprocidx, &
+                        nparcelsLocalActive, &
+                        drop_mult,maxz
+      use constants, only : rhow,pi
+      use MersenneTwister_mod
+#ifdef MPI
+      use mpi
+#endif
+
+      real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
+      real, intent(in), dimension(ib:ie+1) :: xf
+      real, intent(in), dimension(jb:je+1) :: yf
+      double precision, intent(in) :: mtime
+      integer, intent(in) :: num_to_inject
+
+      integer :: j,np,idx_tmp
+      integer :: values(8)
+      real :: xrange,yrange,zrange
+      real :: rand
+      real, parameter :: rad_init = 2.0e-6
+      real, parameter :: salinity = 0.066
+      type(randomNumberSequence) :: randomNumbers
+
+      if ( num_to_inject .le. 0 ) return
+
+      ! Refuse to overrun the local pdata buffer.
+      if ( nparcelsLocalActive + num_to_inject .gt. nparcelsLocal ) then
+         if (myid == 0) write(*,*) &
+           'WARNING: droplet_injection_reinject: skipping; would exceed nparcelsLocal'
+         return
+      end if
+
+      xrange = xf(ni+1) - xf(1)
+      yrange = yf(nj+1) - yf(1)
+      zrange = maxz
+
+      if (deterministic_seed) then
+        particle_seed = int(mtime) * 1000 + myid
+      else
+        call date_and_time(values=values)
+#ifdef MPI
+        particle_seed = (myid+values(8)+values(7)+values(6))
+#else
+        particle_seed = values(8)+values(7)+values(6)
+#endif
+      end if
+
+      !$acc parallel loop gang vector default(present) private(randomNumbers)
+      do j = 1, num_to_inject
+         np = nparcelsLocalActive + j
+
+         ! Per-particle reseed for GPU-safe parallel draws (matches the
+         ! pattern in droplet_injection).  Offset by myid*1009 to keep
+         ! ranks decorrelated when deterministic_seed is on.
+         call new_RandomNumberSequence(randomNumbers, j*particle_seed + myid*1009)
+
+         rand = getRandomReal(randomNumbers)
+         pdata(np,prx) = xf(1) + rand*xrange
+         rand = getRandomReal(randomNumbers)
+         pdata(np,pry) = yf(1) + rand*yrange
+         rand = getRandomReal(randomNumbers)
+         pdata(np,prz) = rand*zrange
+
+         pdata(np,prvpx) = 0.0
+         pdata(np,prvpy) = 0.0
+         pdata(np,prvpz) = 0.0
+
+         pdata(np,prrp)  = rad_init
+         pdata(np,prrp0) = rad_init
+         pdata(np,prms)  = salinity*rhow*4.0/3.0*pi*pdata(np,prrp)**3
+         pdata(np,prtp)  = 290.0
+         pdata(np,prmult) = drop_mult
+         pdata(np,pract)  = 1.0
+
+         pdata(np,pru)  = 0.0
+         pdata(np,prv)  = 0.0
+         pdata(np,prw)  = 0.0
+         pdata(np,prt)  = 290.0
+         pdata(np,prqv) = 0.01
+         pdata(np,prprs) = 101325.0
+         pdata(np,prrho) = 1.0
+         pdata(np,prtime) = 0.0
+
+         !$acc atomic capture
+         idx_tmp = ngidx
+         ngidx = ngidx + 1
+         !$acc end atomic
+
+         pdata(np,prpidx)    = transfer(idx_tmp,0.0)
+         pdata(np,prprocidx) = transfer(myid,0.0)
+
+         call finalize_randomNumberSequence(randomNumbers)
+      end do
+
+      nparcelsLocalActive = nparcelsLocalActive + num_to_inject
+
+    end subroutine droplet_injection_reinject
+
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 
     subroutine initialize_droplet_histograms
 
