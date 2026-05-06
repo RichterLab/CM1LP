@@ -84,7 +84,8 @@
       use module_mp_nssl_2mom, only: ccn, lccn
       use poiss_module
       use parcel_module , only : getparcelzs
-      use droplet_module, only: initialize_droplet_histograms,particle_seed,ngidx,deterministic_seed
+      use droplet_module, only: initialize_droplet_histograms,particle_seed,ngidx,deterministic_seed, &
+                                lognormal_kohler_init
 #ifdef MPI
       use mpi
 #endif
@@ -171,6 +172,7 @@
       logical :: doit
 
       real :: salinity
+      real :: rad_init_wet, m_dry
       integer :: values(8)
 
       ! Note:  By default, CM1 uses the same set of psuedorandom numbers 
@@ -477,14 +479,16 @@
              pdata(i,prvpy) = 0.0
              pdata(i,prvpz) = 0.0
      
-             !Droplet size (radius)
-             pdata(i,prrp) = 2.0e-6
-             pdata(i,prrp0) = 2.0e-6
-     
-             !Droplet solute mass
-             salinity = 0.066
-             pdata(i,prms) = salinity*rhow*4.0/3.0*pi*pdata(i,prrp)**3
-     
+             !Droplet size & solute mass: sample dry radius from a
+             !lognormal aerosol distribution, rehydrate to 95% RH via
+             !kappa-Kohler.  Returns wet equilibrium radius (m) and dry
+             !solute mass (kg).
+             call lognormal_kohler_init(randomNumbers, -1.7570, 0.350, 290.0, &
+                                        rad_init_wet, m_dry)
+             pdata(i,prrp)  = rad_init_wet
+             pdata(i,prrp0) = rad_init_wet  !"original" radius is the wet hydrated value
+             pdata(i,prms)  = m_dry
+
              !Droplet temperature
              pdata(i,prtp) = 290.0
      

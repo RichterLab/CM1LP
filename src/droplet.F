@@ -4,7 +4,8 @@
 
   private
   public :: droplet_driver,droplet_diag,initialize_droplet_histograms, &
-            check_droplet_ownership,particle_seed,ngidx,deterministic_seed
+            check_droplet_ownership,particle_seed,ngidx,deterministic_seed, &
+            lognormal_kohler_init
 
   !These are quantities which are needed in the droplet_diag output, so must be public
   real :: num100,num1000
@@ -1380,6 +1381,67 @@
       end if
 
       end subroutine BE_integration
+
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+
+   subroutine lognormal_kohler_init(rng, M, S, T, rad_init, m_s)
+      !$acc routine seq
+      ! Sample a dry aerosol diameter from a lognormal distribution and
+      ! return the equilibrium wet radius (m) at RH=95% along with the
+      ! solute mass (kg).
+      !
+      !   M = median of log(daerosol/microns)
+      !   S = geometric standard deviation in log space
+      !   T = initial droplet temperature (K)
+      !
+      ! Uses Box-Muller for the lognormal draw and Newton-Raphson for
+      ! the kappa-Kohler cubic.  Equation solved (RH=0.95):
+      !   log(RH)*r^3 + a3*r^2 + a1 = 0
+      ! with a3 = -2*Mw*sigma/(R*rhow*T), a1 = kappa_s*r_dry^3.
+      use constants, only : pi, mw, surften, ru, rhow, rhos, kappa_s
+      use MersenneTwister_mod
+      implicit none
+
+      type(randomNumberSequence), intent(inout) :: rng
+      real, intent(in)  :: M, S, T
+      real, intent(out) :: rad_init, m_s
+
+      double precision, parameter :: log_RH = -5.129329438755058d-2  ! log(0.95)
+      double precision :: u1, u2, z, daerosol
+      double precision :: a1, a3, r, f, fp, dr
+      double precision :: pi_d
+      integer :: iter
+
+      pi_d = dble(pi)
+
+      ! --- Lognormal aerosol diameter via Box-Muller (microns -> metres)
+      u1 = max(dble(getRandomReal(rng)), 1.0d-30)
+      u2 = dble(getRandomReal(rng))
+      z  = sqrt(-2.0d0*log(u1)) * cos(2.0d0*pi_d*u2)
+      daerosol = exp(dble(M) + dble(S)*z) * 1.0d-6
+
+      ! --- Dry solute mass: (4/3) pi r^3 rho_s
+      m_s = real( (4.0d0/3.0d0)*pi_d*(0.5d0*daerosol)**3 * rhos )
+
+      ! --- Kappa-Kohler cubic at equilibrium (RH = 0.95)
+      a3 = -2.0d0*mw*surften / (ru*dble(rhow)*dble(T))
+      a1 = kappa_s*dble(m_s) / ((4.0d0/3.0d0)*pi_d*rhos)   ! = kappa * r_dry^3
+
+      ! Initial guess: Raoult limit (curvature negligible)
+      r = (-a1/log_RH)**(1.0d0/3.0d0)
+
+      do iter = 1, 30
+         f  = log_RH*r**3 + a3*r**2 + a1
+         fp = 3.0d0*log_RH*r**2 + 2.0d0*a3*r
+         dr = -f/fp
+         r  = r + dr
+         if (abs(dr) .lt. 1.0d-14) exit
+      end do
+
+      rad_init = real(r)
+   end subroutine lognormal_kohler_init
 
       subroutine interpolate_to_parcel(np,iflag,jflag,kflag,x3d,y3d,z3d,sig3d,uval,vval,wval,tval,qval,rhoval,prsval,xh,xf,yh,yf,zh,zf,zs,znt,sigma,sigmaf,u3d,v3d,w3d,ta,q3d,rho,prs,sigdot)
       !$acc routine seq
@@ -4030,20 +4092,20 @@
 !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 
     subroutine droplet_injection_reinject(pdata,xf,yf,mtime,num_to_inject)
-      ! Re-inject droplets that fell out the top or bottom of the local
-      ! domain this timestep, keeping the active count approximately
-      ! constant.  Local-rank only (no MPI allreduce).  Particle
-      ! properties match the initial-condition setup in init3d.F:
-      !   radius = 2.0e-6 m, salinity = 0.066, temperature = 290 K,
-      !   zero velocity, drop_mult multiplicity.
-      ! New (x,y,z) is drawn uniformly within the local domain.
+      ! Re-inject droplets that fell out of the local domain this
+      ! timestep, keeping the active count approximately constant.
+      ! Local-rank only (no MPI allreduce).  Initial radius and solute
+      ! mass come from a lognormal aerosol distribution rehydrated to
+      ! 95% RH via kappa-Kohler (see lognormal_kohler_init).  Other
+      ! particle properties match the initial-condition setup in
+      ! init3d.F: temperature T_init, zero velocity, drop_mult
+      ! multiplicity.  New (x,y,z) drawn uniformly within local domain.
       use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
                         prrp,prrp0,prtp,prms,pract,prtime, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx, &
                         nparcelsLocalActive, &
                         drop_mult,maxz
-      use constants, only : rhow,pi
       use MersenneTwister_mod
 #ifdef MPI
       use mpi
@@ -4059,8 +4121,10 @@
       integer :: values(8)
       real :: xrange,yrange,zrange
       real :: rand
-      real, parameter :: rad_init = 2.0e-6
-      real, parameter :: salinity = 0.066
+      real :: rad_wet, m_dry
+      real, parameter :: M_lognorm = -1.7570
+      real, parameter :: S_lognorm =  0.350
+      real, parameter :: T_init    =  290.0
       type(randomNumberSequence) :: randomNumbers
 
       if ( num_to_inject .le. 0 ) return
@@ -4107,17 +4171,20 @@
          pdata(np,prvpy) = 0.0
          pdata(np,prvpz) = 0.0
 
-         pdata(np,prrp)  = rad_init
-         pdata(np,prrp0) = rad_init
-         pdata(np,prms)  = salinity*rhow*4.0/3.0*pi*pdata(np,prrp)**3
-         pdata(np,prtp)  = 290.0
+         ! Sample dry radius from lognormal, rehydrate to RH=95%
+         call lognormal_kohler_init(randomNumbers, M_lognorm, S_lognorm, T_init, &
+                                    rad_wet, m_dry)
+         pdata(np,prrp)  = rad_wet
+         pdata(np,prrp0) = rad_wet     ! "original" radius is the wet hydrated value
+         pdata(np,prms)  = m_dry
+         pdata(np,prtp)  = T_init
          pdata(np,prmult) = drop_mult
          pdata(np,pract)  = 1.0
 
          pdata(np,pru)  = 0.0
          pdata(np,prv)  = 0.0
          pdata(np,prw)  = 0.0
-         pdata(np,prt)  = 290.0
+         pdata(np,prt)  = T_init
          pdata(np,prqv) = 0.01
          pdata(np,prprs) = 101325.0
          pdata(np,prrho) = 1.0

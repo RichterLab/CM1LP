@@ -8,9 +8,11 @@
             cpdcv,rovcp,rddcp,rddcv,rddrv,cvdrd,cpdrd,eps,reps,repsm1,       &
             cpt,cvt,pnum,xlv,lathv,xls,lvdcp,condc,cpl,cpi,lv1,lv2,ls1,ls2,  &
             rhow,c_e1,c_e2,c_s,rcs,earth_radius,govtwo
-    double precision :: rhow_dp,cp_dp,cpl_dp,mw,ms,surften,ion,os,ru,lv1_dp,lv2_dp
+    double precision :: rhow_dp,cp_dp,cpl_dp,mw,ms,surften,ion,os,ru,lv1_dp,lv2_dp, &
+                        kappa_s,rhos
 
-    !$acc declare create (ru,mw,surften,rhow,rhow_dp,ion,os,ms,lv1,lv1_dp,lv2,lv2_dp,cpl,cpl_dp,cp,cp_dp,eps)
+    !$acc declare create (ru,mw,surften,rhow,rhow_dp,ion,os,ms,kappa_s,rhos, &
+    !$acc                 lv1,lv1_dp,lv2,lv2_dp,cpl,cpl_dp,cp,cp_dp,eps)
 
       !----------------
 
@@ -203,6 +205,8 @@
       !os     = 1.093d0     !Droplet osmotic coefficient
       os     = 1.0d0     !Droplet osmotic coefficient
       ru     = 8.3144d0    !J/mol-K Universal gas constant
+      kappa_s = 0.6d0      !Hygroscopicity parameter (kappa-Kohler), NaCl ~= 0.6
+      rhos   = 2000.0d0    !Solute (NaCl) density [kg/m^3]
 
 
 
@@ -221,7 +225,8 @@
       c_s = ( c_m * c_m * c_m / ( c_e1 + c_e2 ) )**0.25   ! Smagorinsky constant
       rcs = 1.0/c_s
 
-      !$acc update device (ru,mw,surften,rhow,rhow_dp,ion,os,ms,lv1,lv1_dp,lv2,lv2_dp,cpl,cpl_dp,cp,cp_dp,eps)
+      !$acc update device (ru,mw,surften,rhow,rhow_dp,ion,os,ms,kappa_s,rhos, &
+      !$acc                lv1,lv1_dp,lv2,lv2_dp,cpl,cpl_dp,cp,cp_dp,eps)
 
       end subroutine set_constants
 
