@@ -1847,6 +1847,11 @@
 #endif
         IF(imoist.eq.1)THEN
           do n=1,numq
+            ! ptype=7: ql is diagnostic; advection loop above skips n=nqc and
+            ! therefore also skips the matching comm_3s_end. We must skip the
+            ! comm_3s_start here too, otherwise the MPI request handle
+            ! reqs_q(1,nqc) is never MPI_Wait'd and leaks each timestep.
+            if( ptype.eq.7 .and. n.eq.nqc ) cycle
             call bcs(q3d(ib,jb,kb,n))
 #ifdef MPI
             call comm_3s_start(q3d(ib,jb,kb,n)  &

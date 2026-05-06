@@ -369,6 +369,9 @@
 
       IF( imoist.eq.1 )THEN
           DO n=1,numq
+            ! ptype=7: ql is diagnostic; skip nqc to keep start/end pairs
+            ! balanced (matching cycle skip in the comm_3s_end loop below).
+            if( ptype.eq.7 .and. n.eq.nqc ) cycle
             call bcs(q3d(ib,jb,kb,n))
 #ifdef MPI
             call comm_3s_start(q3d(ib,jb,kb,n)  &
@@ -801,6 +804,7 @@
       if(imoist.eq.1)then
 #ifdef MPI
         DO n=1,numq
+          if( ptype.eq.7 .and. n.eq.nqc ) cycle
           call comm_3s_end(q3d(ib,jb,kb,n)  &
                      ,qw31(1,1,1,n),qw32(1,1,1,n),qe31(1,1,1,n),qe32(1,1,1,n)     &
                      ,qs31(1,1,1,n),qs32(1,1,1,n),qn31(1,1,1,n),qn32(1,1,1,n)     &
