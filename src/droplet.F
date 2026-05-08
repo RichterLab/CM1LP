@@ -10,6 +10,7 @@
   !These are quantities which are needed in the droplet_diag output, so must be public
   real :: num100,num1000
   integer, parameter :: nbins = 130  !Bins for the droplet histograms
+  double precision, parameter :: rh_init = 0.8d0  ! RH used to hydrate lognormal particles at initialization
   real,dimension(nbins) :: bins_restime  !Bins for droplet residence time
   real,dimension(nbins,nbins) :: hist_restime  !Droplet residence time joint pdf (with size)
   real,dimension(nbins) :: bins_radius,hist_radius,hist_radius10,hist_fallrad  !Histograms for droplet radius
@@ -1400,7 +1401,7 @@
       ! the kappa-Kohler cubic.  Equation solved at rh_init:
       !   log(RH)*r^3 + a3*r^2 + a1 = 0
       ! with a3 = -2*Mw*sigma/(R*rhow*T), a1 = kappa_s*r_dry^3.
-      use constants, only : pi, mw, surften, ru, rhow, rho_solute, kappa_s, rh_init
+      use constants, only : pi, mw, surften, ru, rhow, rho_solute, kappa_s
       use MersenneTwister_mod
       implicit none
 
