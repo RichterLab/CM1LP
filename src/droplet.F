@@ -1399,8 +1399,8 @@
       ! Uses Box-Muller for the lognormal draw and Newton-Raphson for
       ! the kappa-Kohler cubic.  Equation solved (RH=0.95):
       !   log(RH)*r^3 + a3*r^2 + a1 = 0
-      ! with a3 = -2*Mw*sigma/(R*rhow*T), a1 = kappa_s*r_dry^3.
-      use constants, only : pi, mw, surften, ru, rhow, rho_solute, kappa_s
+      ! with a3 = -2*Mw*sigma/(R*rhow*T), a1 = kappa_init*r_dry^3.
+      use constants, only : pi, mw, surften, ru, rhow, rho_solute, kappa_init
       use MersenneTwister_mod
       implicit none
 
@@ -1427,7 +1427,7 @@
 
       ! --- Kappa-Kohler cubic at equilibrium (RH = 0.95)
       a3 = -2.0d0*mw*surften / (ru*dble(rhow)*dble(T))
-      a1 = kappa_s*dble(m_s) / ((4.0d0/3.0d0)*pi_d*rho_solute)   ! = kappa * r_dry^3
+      a1 = kappa_init*dble(m_s) / ((4.0d0/3.0d0)*pi_d*rho_solute)   ! = kappa * r_dry^3
 
       ! Initial guess: Raoult limit (curvature negligible)
       r = (-a1/log_RH)**(1.0d0/3.0d0)
