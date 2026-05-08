@@ -1092,10 +1092,7 @@
       double precision :: guess
       double precision :: rt_zeros(2),rt_start(2)
       logical :: is_local
-      logical :: solver_diag
-      integer :: mflag,flag,flag_gn
-      integer, save :: gn_solver_diag_count = 0
-      integer, save :: lv_solver_diag_count = 0
+      integer :: mflag,flag
 
 
       !Store interpolated quantities for the sake of statistics
@@ -1176,45 +1173,11 @@
 
       !Start using the standard Gauss-Newton algorithm
       call gauss_newton_2d(dble(diffnorm),dt_nondim,taup_scale,rt_start,rt_zeros,flag,dble(prsval),dble(rhoval),dble(tval),dble(qval),dble(pdata(np,prtp)),dble(pdata(np,prms)),dble(pdata(np,prrp)),np)
-      flag_gn = flag
-
-      solver_diag = (gn_solver_diag_count.lt.40) .or. flag_gn.eq.1 .or. &
-                    rt_start(1).ne.rt_start(1) .or. rt_start(2).ne.rt_start(2) .or. &
-                    rt_zeros(1).ne.rt_zeros(1) .or. rt_zeros(2).ne.rt_zeros(2) .or. &
-                    rt_start(1).le.0.0d0 .or. rt_start(2).le.0.0d0 .or. &
-                    rt_zeros(1).le.0.0d0 .or. rt_zeros(2).le.0.0d0 .or. &
-                    rt_zeros(1).lt.0.05d0 .or. rt_zeros(1).gt.10.0d0 .or. &
-                    rt_zeros(2).lt.0.5d0 .or. rt_zeros(2).gt.1.5d0
-      if (solver_diag .and. gn_solver_diag_count.lt.400) then
-         gn_solver_diag_count = gn_solver_diag_count + 1
-         write(*,'(a,3i8,1p,15e16.8)') 'SOLVER_DIAG_GN = ', &
-                                      np, mflag, flag_gn, guess, dble(pdata(np,prrp)), &
-                                      rt_start(1), rt_start(2), rt_zeros(1), rt_zeros(2), &
-                                      dble(prsval), dble(tval), dble(qval), dble(rhoval), &
-                                      dble(diffnorm), dt_nondim, taup_scale, &
-                                      dble(pdata(np,prms)), dble(pdata(np,prtp))
-      end if
 
       !If Gauss-Newton failed to converge, flag is set to 1 and try Levenberg-Marquardt algorithm
       if (flag==1) then
          num100 = num100+1.0
          call LV_solver(dble(diffnorm),dt_nondim,taup_scale,rt_start,rt_zeros,flag,dble(prsval),dble(rhoval),dble(tval),dble(qval),dble(pdata(np,prtp)),dble(pdata(np,prms)),dble(pdata(np,prrp)),np)
-
-         solver_diag = (lv_solver_diag_count.lt.400) .and. &
-                       (flag.eq.1 .or. rt_zeros(1).ne.rt_zeros(1) .or. &
-                        rt_zeros(2).ne.rt_zeros(2) .or. rt_zeros(1).le.0.0d0 .or. &
-                        rt_zeros(2).le.0.0d0 .or. rt_zeros(1).lt.0.05d0 .or. &
-                        rt_zeros(1).gt.10.0d0 .or. rt_zeros(2).lt.0.5d0 .or. &
-                        rt_zeros(2).gt.1.5d0)
-         if (solver_diag) then
-            lv_solver_diag_count = lv_solver_diag_count + 1
-            write(*,'(a,4i8,1p,15e16.8)') 'SOLVER_DIAG_LV = ', &
-                                         np, mflag, flag_gn, flag, guess, dble(pdata(np,prrp)), &
-                                         rt_start(1), rt_start(2), rt_zeros(1), rt_zeros(2), &
-                                         dble(prsval), dble(tval), dble(qval), dble(rhoval), &
-                                         dble(diffnorm), dt_nondim, taup_scale, &
-                                         dble(pdata(np,prms)), dble(pdata(np,prtp))
-         end if
       end if
 
       !In rare cases both nonlinear solvers fail to converge
@@ -3183,7 +3146,7 @@
       subroutine rad_solver2(guess,mflag,prsval,rhoval,tval,qval,Tp,m_s,radius,np)
       !$acc routine seq
       use input , only : pi_dp
-      use constants , only : rhow_dp,mw,surften,ru,ion,os,ms,kappa_s,rho_solute
+      use constants , only : rhow_dp,mw,surften,ru,kappa_s,rho_solute
       use cm1libs , only : deslf
       implicit none
 
@@ -3191,11 +3154,7 @@
       integer, intent(out) :: mflag
       real, intent(in) :: prsval,rhoval,tval,qval,Tp,m_s,radius
       integer, intent(in) :: np
-      double precision :: a, c, c_old, esa, Q, R, M, theta, S, T, rhval
-      double precision :: Q_old, R_old, M_old, theta_old, S_old, T_old
-      double precision :: guess_old, resid, resid_old, ratio, ratio_old
-      integer :: branch, branch_old
-      integer, save :: cardano_diag_count = 0
+      double precision :: a, c, esa, Q, R, M, theta, S, T, rhval
 
       mflag = 0
       esa = deslf(dble(prsval),dble(tval))  !Saturation vapor pressure at droplet temperature
@@ -3207,7 +3166,7 @@
 
       if (rhval .lt. 0.999d0) then
          a = -(2.0d0*mw*surften)/(ru*rhow_dp*tval)/LOG(rhval)
-         c = (ion*os*m_s*(mw/ms))/((4.0d0/3.0d0)*pi_dp*rhow_dp)/LOG(rhval)
+         c = (kappa_s*m_s/rho_solute)/((4.0d0/3.0d0)*pi_dp)/LOG(rhval)
      
          !Use Cardano's method for cubic solution
          Q = (a*a)/9.0d0
@@ -3216,7 +3175,6 @@
 
 
          if (M<0.0d0) then
-           branch = 1
            theta = acos(R/sqrt(Q*Q*Q))
            guess = -(2.0d0*sqrt(Q)*cos((theta-pi_dp*2.0d0)/3.0d0))-a/3.0d0
 
@@ -3225,59 +3183,10 @@
            end if
 
          else
-           branch = 2
-           theta = 0.0d0
            S = -(R/abs(R))*(abs(R)+sqrt(M))**(1.0d0/3.0d0)
            T = Q/S
            guess = S + T - a/3.0d0
 
-         end if
-
-         c_old = (ion*os*m_s*(mw/ms))/((4.0d0/3.0d0)*pi_dp*rhow_dp)/LOG(rhval)
-         Q_old = (a*a)/9.0d0
-         R_old = (2.0d0*a*a*a+27.0d0*c_old)/54.0d0
-         M_old = R_old*R_old-Q_old*Q_old*Q_old
-
-         if (M_old<0.0d0) then
-           branch_old = 1
-           theta_old = acos(R_old/sqrt(Q_old*Q_old*Q_old))
-           S_old = 0.0d0
-           T_old = 0.0d0
-           guess_old = -(2.0d0*sqrt(Q_old)*cos((theta_old-pi_dp*2.0d0)/3.0d0))-a/3.0d0
-
-           if (guess_old < 0.0d0) then
-           guess_old = -(2.0d0*sqrt(Q_old)*cos((theta_old+pi_dp*2.0d0)/3.0d0))-a/3.0d0
-           end if
-
-         else
-           branch_old = 2
-           theta_old = 0.0d0
-           S_old = -(R_old/abs(R_old))*(abs(R_old)+sqrt(M_old))**(1.0d0/3.0d0)
-           T_old = Q_old/S_old
-           guess_old = S_old + T_old - a/3.0d0
-
-         end if
-
-         resid = guess**3 + a*guess**2 + c
-         resid_old = guess_old**3 + a*guess_old**2 + c_old
-         ratio = 0.0d0
-         ratio_old = 0.0d0
-         if (radius.gt.0.0d0) then
-           ratio = guess/dble(radius)
-           ratio_old = guess_old/dble(radius)
-         end if
-
-         if ( cardano_diag_count.lt.40 .or. branch.ne.branch_old .or. &
-              guess.ne.guess .or. guess_old.ne.guess_old .or. &
-              guess.le.0.0d0 .or. guess_old.le.0.0d0 .or. &
-              ratio.gt.10.0d0 .or. ratio_old.gt.10.0d0 .or. &
-              ratio.lt.0.1d0 .or. ratio_old.lt.0.1d0 .or. &
-              abs(guess-guess_old).gt.max(1.0d-15,1.0d-6*abs(guess_old)) ) then
-           cardano_diag_count = cardano_diag_count + 1
-           write(*,'(a,3i8,1p,18e16.8)') 'CARDANO_DIAG = ', &
-                                      np, branch, branch_old, guess, guess_old, radius, ratio, ratio_old, &
-                                      resid, resid_old, rhval, c, c_old, c-c_old, M, M_old, a, m_s, &
-                                      prsval, tval, qval
          end if
 
       else 
@@ -3313,8 +3222,6 @@
         !Initialize the solution vector
         v1(1) = rt_start(1)
         v1(2) = rt_start(2)
-        rt_zeros(1) = rt_start(1)
-        rt_zeros(2) = rt_start(2)
          
         !Initialize the correction to zero
         correct(1) = 0.0d0
@@ -3438,8 +3345,6 @@
         flag = 0
         v1(1) = rt_start(1)
         v1(2) = rt_start(2)
-        rt_zeros(1) = rt_start(1)
-        rt_zeros(2) = rt_start(2)
         fv2(1) = 1.0d0
         fv2(2) = 1.0d0
 
@@ -3598,7 +3503,7 @@
 
       subroutine ie_vrt_nd(diffnorm,tempr,tempt,rt_output,dt_nondim,taup_scale,prsval,rhoval,tval,qval,Tp,m_s,radius,np,flag)
       !$acc routine seq
-      use constants, only : rhow_dp,mw,ru,surften,ion,os,ms,kappa_s,rho_solute, &
+      use constants, only : rhow_dp,mw,ru,surften,kappa_s,rho_solute, &
                             cp_dp,cpl_dp,lv1_dp,lv2_dp
       use input, only : viscosity,pr_num,sc_num,pi_dp
       use cm1libs , only : drslf,deslf
@@ -3611,8 +3516,7 @@
 
       double precision :: esa,dnext,rhop,Rep,taup,rprime,Tprime,qstr,Shp,Nup,VolP,lhv,qstr_test
       double precision :: Tnext,rnext
-      double precision :: tmp, raoult_old, raoult_new, raoult_new2, raoult_den
-      integer, save :: raoult_diag_count = 0
+      double precision :: tmp, raoult
 
         ! quantities come in already non-dimensionalized, so must be converted back;
         rnext = tempr*radius
@@ -3623,19 +3527,7 @@
         esa = deslf(prsval,tval)
         VolP = (4.0d0/3.0d0)*pi_dp*rnext**3
         rhop = (m_s + VolP*rhow_dp)/VolP
-        raoult_den = VolP*rhop - m_s
-        raoult_old = (ion*os*m_s*(mw/ms))/raoult_den
-        raoult_new = (kappa_s*m_s*rhow_dp/rho_solute)/raoult_den
-        raoult_new2 = kappa_s*m_s/(rho_solute*VolP)
-
-        if ( raoult_diag_count.lt.20 .or. &
-             raoult_old.ne.raoult_old .or. raoult_new.ne.raoult_new .or. &
-             raoult_new2.ne.raoult_new2 .or. raoult_den.le.0.0d0 .or. &
-             abs(raoult_new-raoult_new2).gt.max(1.0d-12,1.0d-8*abs(raoult_new2)) ) then
-           raoult_diag_count = raoult_diag_count + 1
-           write(*,'(a,i8,1p,10e16.8)') 'RAOULT_DIAG np, old, new, new2, den, rnext, radius, m_s, VolP, rhop, kappa_s = ', &
-                                        np, raoult_old, raoult_new, raoult_new2, raoult_den, rnext, radius, m_s, VolP, rhop, kappa_s
-        end if
+        raoult = (kappa_s*m_s*rhow_dp/rho_solute)/(VolP*rhop-m_s)
 
         Rep = max( 0.0d0 , dnext*diffnorm/dble(viscosity) )
         taup = (rhop*dnext**2)/(18.0d0*rhoval*dble(viscosity))
@@ -3646,7 +3538,7 @@
 
         !!! Humidity !!!
         ! GHB prevent overflow by limiting term inside exponent:
-        tmp = ((lhv*mw/ru)*((1.0d0/max(1.0d-10,tval))-(1.0d0/max(1.0d-10,Tnext)))) + ((2.0d0*mw*surften)/(ru*rhow_dp*rnext*Tnext)) - raoult_old
+        tmp = ((lhv*mw/ru)*((1.0d0/max(1.0d-10,tval))-(1.0d0/max(1.0d-10,Tnext)))) + ((2.0d0*mw*surften)/(ru*rhow_dp*rnext*Tnext)) - raoult
         if( tmp.gt.600.0 )then
           qstr = qval
           flag = 1

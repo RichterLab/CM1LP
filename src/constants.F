@@ -8,10 +8,10 @@
             cpdcv,rovcp,rddcp,rddcv,rddrv,cvdrd,cpdrd,eps,reps,repsm1,       &
             cpt,cvt,pnum,xlv,lathv,xls,lvdcp,condc,cpl,cpi,lv1,lv2,ls1,ls2,  &
             rhow,c_e1,c_e2,c_s,rcs,earth_radius,govtwo
-    double precision :: rhow_dp,cp_dp,cpl_dp,mw,ms,surften,ion,os,ru,lv1_dp,lv2_dp, &
+    double precision :: rhow_dp,cp_dp,cpl_dp,mw,surften,ru,lv1_dp,lv2_dp, &
                         kappa_s,rho_solute
 
-    !$acc declare create (ru,mw,surften,rhow,rhow_dp,ion,os,ms,kappa_s,rho_solute, &
+    !$acc declare create (ru,mw,surften,rhow,rhow_dp,kappa_s,rho_solute, &
     !$acc                 lv1,lv1_dp,lv2,lv2_dp,cpl,cpl_dp,cp,cp_dp,eps)
 
       !----------------
@@ -199,11 +199,7 @@
       rhow   = 1.0e3
       rhow_dp = 1.0d3
       mw     = 0.018015d0  !kg/mol, molecular weight water
-      ms     = 0.05844d0   !kg/mol, molecular weight of salt (or droplet solute)
       surften= 7.28d-2   !Droplet surface tension
-      ion    = 2.0d0       !# of ions available in solute
-      !os     = 1.093d0     !Droplet osmotic coefficient
-      os     = 1.0d0     !Droplet osmotic coefficient
       ru     = 8.3144d0    !J/mol-K Universal gas constant
       kappa_s = 0.6d0      !Hygroscopicity parameter (kappa-Kohler), NaCl ~= 0.6
       rho_solute   = 2000.0d0    !Solute (NaCl) density [kg/m^3]
@@ -225,7 +221,7 @@
       c_s = ( c_m * c_m * c_m / ( c_e1 + c_e2 ) )**0.25   ! Smagorinsky constant
       rcs = 1.0/c_s
 
-      !$acc update device (ru,mw,surften,rhow,rhow_dp,ion,os,ms,kappa_s,rho_solute, &
+      !$acc update device (ru,mw,surften,rhow,rhow_dp,kappa_s,rho_solute, &
       !$acc                lv1,lv1_dp,lv2,lv2_dp,cpl,cpl_dp,cp,cp_dp,eps)
 
       end subroutine set_constants
