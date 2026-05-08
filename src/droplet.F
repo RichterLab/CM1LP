@@ -1389,7 +1389,7 @@
    subroutine lognormal_kohler_init(rng, M, S, T, rad_init, m_s)
       !$acc routine seq
       ! Sample a dry aerosol diameter from a lognormal distribution and
-      ! return the equilibrium wet radius (m) at RH=95% along with the
+      ! return the equilibrium wet radius (m) at rh_init along with the
       ! solute mass (kg).
       !
       !   M = median of log(daerosol/microns)
@@ -1397,10 +1397,10 @@
       !   T = initial droplet temperature (K)
       !
       ! Uses Box-Muller for the lognormal draw and Newton-Raphson for
-      ! the kappa-Kohler cubic.  Equation solved (RH=0.95):
+      ! the kappa-Kohler cubic.  Equation solved at rh_init:
       !   log(RH)*r^3 + a3*r^2 + a1 = 0
-      ! with a3 = -2*Mw*sigma/(R*rhow*T), a1 = kappa_init*r_dry^3.
-      use constants, only : pi, mw, surften, ru, rhow, rho_solute, kappa_init
+      ! with a3 = -2*Mw*sigma/(R*rhow*T), a1 = kappa_s*r_dry^3.
+      use constants, only : pi, mw, surften, ru, rhow, rho_solute, kappa_s, rh_init
       use MersenneTwister_mod
       implicit none
 
@@ -1408,9 +1408,8 @@
       real, intent(in)  :: M, S, T
       real, intent(out) :: rad_init, m_s
 
-      double precision, parameter :: log_RH = -5.129329438755058d-2  ! log(0.95)
       double precision :: u1, u2, z, daerosol
-      double precision :: a1, a3, r, f, fp, dr
+      double precision :: a1, a3, r, f, fp, dr, log_RH
       double precision :: pi_d
       integer :: iter
 
@@ -1425,9 +1424,10 @@
       ! --- Dry solute mass: (4/3) pi r^3 rho_s
       m_s = real( (4.0d0/3.0d0)*pi_d*(0.5d0*daerosol)**3 * rho_solute )
 
-      ! --- Kappa-Kohler cubic at equilibrium (RH = 0.95)
+      ! --- Kappa-Kohler cubic at equilibrium
       a3 = -2.0d0*mw*surften / (ru*dble(rhow)*dble(T))
-      a1 = kappa_init*dble(m_s) / ((4.0d0/3.0d0)*pi_d*rho_solute)   ! = kappa * r_dry^3
+      a1 = kappa_s*dble(m_s) / ((4.0d0/3.0d0)*pi_d*rho_solute)   ! = kappa * r_dry^3
+      log_RH = log(rh_init)
 
       ! Initial guess: Raoult limit (curvature negligible)
       r = (-a1/log_RH)**(1.0d0/3.0d0)
