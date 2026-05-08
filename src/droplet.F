@@ -3146,7 +3146,7 @@
       subroutine rad_solver2(guess,mflag,prsval,rhoval,tval,qval,Tp,m_s,radius,np)
       !$acc routine seq
       use input , only : pi_dp
-      use constants , only : rhow_dp,mw,surften,ru,kappa_s,rho_solute
+      use constants , only : rhow_dp,mw,surften,ru,ion,os,ms,kappa_s,rho_solute
       use cm1libs , only : deslf
       implicit none
 
@@ -3154,7 +3154,11 @@
       integer, intent(out) :: mflag
       real, intent(in) :: prsval,rhoval,tval,qval,Tp,m_s,radius
       integer, intent(in) :: np
-      double precision :: a, c, esa, Q, R, M, theta, S, T, rhval
+      double precision :: a, c, c_old, esa, Q, R, M, theta, S, T, rhval
+      double precision :: Q_old, R_old, M_old, theta_old, S_old, T_old
+      double precision :: guess_old, resid, resid_old, ratio, ratio_old
+      integer :: branch, branch_old
+      integer, save :: cardano_diag_count = 0
 
       mflag = 0
       esa = deslf(dble(prsval),dble(tval))  !Saturation vapor pressure at droplet temperature
@@ -3175,6 +3179,7 @@
 
 
          if (M<0.0d0) then
+           branch = 1
            theta = acos(R/sqrt(Q*Q*Q))
            guess = -(2.0d0*sqrt(Q)*cos((theta-pi_dp*2.0d0)/3.0d0))-a/3.0d0
 
@@ -3183,10 +3188,59 @@
            end if
 
          else
+           branch = 2
+           theta = 0.0d0
            S = -(R/abs(R))*(abs(R)+sqrt(M))**(1.0d0/3.0d0)
            T = Q/S
            guess = S + T - a/3.0d0
 
+         end if
+
+         c_old = (ion*os*m_s*(mw/ms))/((4.0d0/3.0d0)*pi_dp*rhow_dp)/LOG(rhval)
+         Q_old = (a*a)/9.0d0
+         R_old = (2.0d0*a*a*a+27.0d0*c_old)/54.0d0
+         M_old = R_old*R_old-Q_old*Q_old*Q_old
+
+         if (M_old<0.0d0) then
+           branch_old = 1
+           theta_old = acos(R_old/sqrt(Q_old*Q_old*Q_old))
+           S_old = 0.0d0
+           T_old = 0.0d0
+           guess_old = -(2.0d0*sqrt(Q_old)*cos((theta_old-pi_dp*2.0d0)/3.0d0))-a/3.0d0
+
+           if (guess_old < 0.0d0) then
+           guess_old = -(2.0d0*sqrt(Q_old)*cos((theta_old+pi_dp*2.0d0)/3.0d0))-a/3.0d0
+           end if
+
+         else
+           branch_old = 2
+           theta_old = 0.0d0
+           S_old = -(R_old/abs(R_old))*(abs(R_old)+sqrt(M_old))**(1.0d0/3.0d0)
+           T_old = Q_old/S_old
+           guess_old = S_old + T_old - a/3.0d0
+
+         end if
+
+         resid = guess**3 + a*guess**2 + c
+         resid_old = guess_old**3 + a*guess_old**2 + c_old
+         ratio = 0.0d0
+         ratio_old = 0.0d0
+         if (radius.gt.0.0d0) then
+           ratio = guess/dble(radius)
+           ratio_old = guess_old/dble(radius)
+         end if
+
+         if ( cardano_diag_count.lt.40 .or. branch.ne.branch_old .or. &
+              guess.ne.guess .or. guess_old.ne.guess_old .or. &
+              guess.le.0.0d0 .or. guess_old.le.0.0d0 .or. &
+              ratio.gt.10.0d0 .or. ratio_old.gt.10.0d0 .or. &
+              ratio.lt.0.1d0 .or. ratio_old.lt.0.1d0 .or. &
+              abs(guess-guess_old).gt.max(1.0d-15,1.0d-6*abs(guess_old)) ) then
+           cardano_diag_count = cardano_diag_count + 1
+           write(*,'(a,3i8,1p,18e16.8)') 'CARDANO_DIAG = ', &
+                                      np, branch, branch_old, guess, guess_old, radius, ratio, ratio_old, &
+                                      resid, resid_old, rhval, c, c_old, c-c_old, M, M_old, a, m_s, &
+                                      prsval, tval, qval
          end if
 
       else 
