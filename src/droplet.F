@@ -3146,7 +3146,7 @@
       subroutine rad_solver2(guess,mflag,prsval,rhoval,tval,qval,Tp,m_s,radius,np)
       !$acc routine seq
       use input , only : pi_dp
-      use constants , only : rhow_dp,mw,surften,ru,kappa_s,rho_solute
+      use constants , only : rhow_dp,mw,surften,ru,ion,os,ms
       use cm1libs , only : deslf
       implicit none
 
@@ -3166,7 +3166,7 @@
 
       if (rhval .lt. 0.999d0) then
          a = -(2.0d0*mw*surften)/(ru*rhow_dp*tval)/LOG(rhval)
-         c = (kappa_s*m_s/rho_solute)/((4.0d0/3.0d0)*pi_dp)/LOG(rhval)
+         c = (ion*os*m_s*(mw/ms))/((4.0d0/3.0d0)*pi_dp*rhow_dp)/LOG(rhval)
      
          !Use Cardano's method for cubic solution
          Q = (a*a)/9.0d0
