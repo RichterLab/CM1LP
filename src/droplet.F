@@ -1092,7 +1092,10 @@
       double precision :: guess
       double precision :: rt_zeros(2),rt_start(2)
       logical :: is_local
-      integer :: mflag,flag
+      logical :: solver_diag
+      integer :: mflag,flag,flag_gn
+      integer, save :: gn_solver_diag_count = 0
+      integer, save :: lv_solver_diag_count = 0
 
 
       !Store interpolated quantities for the sake of statistics
@@ -1173,11 +1176,45 @@
 
       !Start using the standard Gauss-Newton algorithm
       call gauss_newton_2d(dble(diffnorm),dt_nondim,taup_scale,rt_start,rt_zeros,flag,dble(prsval),dble(rhoval),dble(tval),dble(qval),dble(pdata(np,prtp)),dble(pdata(np,prms)),dble(pdata(np,prrp)),np)
+      flag_gn = flag
+
+      solver_diag = (gn_solver_diag_count.lt.40) .or. flag_gn.eq.1 .or. &
+                    rt_start(1).ne.rt_start(1) .or. rt_start(2).ne.rt_start(2) .or. &
+                    rt_zeros(1).ne.rt_zeros(1) .or. rt_zeros(2).ne.rt_zeros(2) .or. &
+                    rt_start(1).le.0.0d0 .or. rt_start(2).le.0.0d0 .or. &
+                    rt_zeros(1).le.0.0d0 .or. rt_zeros(2).le.0.0d0 .or. &
+                    rt_zeros(1).lt.0.05d0 .or. rt_zeros(1).gt.10.0d0 .or. &
+                    rt_zeros(2).lt.0.5d0 .or. rt_zeros(2).gt.1.5d0
+      if (solver_diag .and. gn_solver_diag_count.lt.400) then
+         gn_solver_diag_count = gn_solver_diag_count + 1
+         write(*,'(a,3i8,1p,15e16.8)') 'SOLVER_DIAG_GN = ', &
+                                      np, mflag, flag_gn, guess, dble(pdata(np,prrp)), &
+                                      rt_start(1), rt_start(2), rt_zeros(1), rt_zeros(2), &
+                                      dble(prsval), dble(tval), dble(qval), dble(rhoval), &
+                                      dble(diffnorm), dt_nondim, taup_scale, &
+                                      dble(pdata(np,prms)), dble(pdata(np,prtp))
+      end if
 
       !If Gauss-Newton failed to converge, flag is set to 1 and try Levenberg-Marquardt algorithm
       if (flag==1) then
          num100 = num100+1.0
          call LV_solver(dble(diffnorm),dt_nondim,taup_scale,rt_start,rt_zeros,flag,dble(prsval),dble(rhoval),dble(tval),dble(qval),dble(pdata(np,prtp)),dble(pdata(np,prms)),dble(pdata(np,prrp)),np)
+
+         solver_diag = (lv_solver_diag_count.lt.400) .and. &
+                       (flag.eq.1 .or. rt_zeros(1).ne.rt_zeros(1) .or. &
+                        rt_zeros(2).ne.rt_zeros(2) .or. rt_zeros(1).le.0.0d0 .or. &
+                        rt_zeros(2).le.0.0d0 .or. rt_zeros(1).lt.0.05d0 .or. &
+                        rt_zeros(1).gt.10.0d0 .or. rt_zeros(2).lt.0.5d0 .or. &
+                        rt_zeros(2).gt.1.5d0)
+         if (solver_diag) then
+            lv_solver_diag_count = lv_solver_diag_count + 1
+            write(*,'(a,4i8,1p,15e16.8)') 'SOLVER_DIAG_LV = ', &
+                                         np, mflag, flag_gn, flag, guess, dble(pdata(np,prrp)), &
+                                         rt_start(1), rt_start(2), rt_zeros(1), rt_zeros(2), &
+                                         dble(prsval), dble(tval), dble(qval), dble(rhoval), &
+                                         dble(diffnorm), dt_nondim, taup_scale, &
+                                         dble(pdata(np,prms)), dble(pdata(np,prtp))
+         end if
       end if
 
       !In rare cases both nonlinear solvers fail to converge
@@ -3276,6 +3313,8 @@
         !Initialize the solution vector
         v1(1) = rt_start(1)
         v1(2) = rt_start(2)
+        rt_zeros(1) = rt_start(1)
+        rt_zeros(2) = rt_start(2)
          
         !Initialize the correction to zero
         correct(1) = 0.0d0
@@ -3399,6 +3438,8 @@
         flag = 0
         v1(1) = rt_start(1)
         v1(2) = rt_start(2)
+        rt_zeros(1) = rt_start(1)
+        rt_zeros(2) = rt_start(2)
         fv2(1) = 1.0d0
         fv2(2) = 1.0d0
 
