@@ -205,7 +205,7 @@
       !os     = 1.093d0     !Droplet osmotic coefficient
       os     = 1.0d0     !Droplet osmotic coefficient
       ru     = 8.3144d0    !J/mol-K Universal gas constant
-      kappa_s = 1.233059548254620d0    !Hygroscopicity parameter matching old ion/os/ms Raoult term
+      kappa_s = 0.6d0      !Hygroscopicity parameter (kappa-Kohler), NaCl ~= 0.6
       rho_solute   = 2000.0d0    !Solute (NaCl) density [kg/m^3]
 
 
