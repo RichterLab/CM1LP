@@ -3646,7 +3646,7 @@
 
         !!! Humidity !!!
         ! GHB prevent overflow by limiting term inside exponent:
-        tmp = ((lhv*mw/ru)*((1.0d0/max(1.0d-10,tval))-(1.0d0/max(1.0d-10,Tnext)))) + ((2.0d0*mw*surften)/(ru*rhow_dp*rnext*Tnext)) - raoult_new
+        tmp = ((lhv*mw/ru)*((1.0d0/max(1.0d-10,tval))-(1.0d0/max(1.0d-10,Tnext)))) + ((2.0d0*mw*surften)/(ru*rhow_dp*rnext*Tnext)) - raoult_old
         if( tmp.gt.600.0 )then
           qstr = qval
           flag = 1
