@@ -160,8 +160,6 @@
 
       logical, parameter :: debug = .false.
 
-      integer :: values(8),local_seed
-
       integer :: doinject  !Do a call to droplet_inject at this time step?
 
       type(randomNumberSequence) :: randomNumbers
@@ -206,20 +204,13 @@
 
 
 
-      call date_and_time(values=values)
       ! 1) To match the initial and restart runs for total droplet number,
       !    use the following form to calculate the seed value so that it is 
       !    deterministic but varies between different MPI ranks and time steps
       ! 2) Otherwise, use David's original form with date and time to achieve
       !    more randomness but unmatched results between initial and restart runs
 
-#ifdef MPI
-        particle_seed =  (myid+values(8)+values(7)+values(6))
-#else
-        particle_seed =  values(8)+values(7)+values(6)
-#endif
-
-      !particle_seed = int(mtime) * 1000 + myid      
+      particle_seed = int(mtime) * 1000 + myid
       call new_RandomNumberSequence(randomNumbers, particle_seed)
 
       num_fallout = 0  !Reset the number of droplets that have fallen out of physical domain
@@ -3572,7 +3563,6 @@
 
       double precision :: rmin10_ssgf,rmax10_ssgf
       integer :: local_seed
-      integer :: values(8)
 
 
       !Define the bin centers and edges
@@ -3699,23 +3689,9 @@
 
       if (tot_after_reintro .lt. nparcelsMax) then   !Only add particles if the total number injected
                                                      !does not make the global exceed nparcelsMax
-       call date_and_time(values=values)
-#ifdef MPI
-        particle_seed =  (myid+values(8)+values(7)+values(6))
-#else
-        particle_seed =  values(8)+values(7)+values(6)
-#endif
-
-       call date_and_time(values=values)
-#ifdef MPI
-        particle_seed =  (myid+values(8)+values(7)+values(6))
-#else
-        particle_seed =  values(8)+values(7)+values(6)
-#endif
-
          !$acc data copyin(dFssum,binsdata,binsdata10) create(randomNumbers,randomNumbers%state)
          !$acc update device(ngidx)
-         !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) private(randomNumbers)
+         !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) private(randomNumbers,local_seed)
          do j=1,my_reintro
             np=nparcelsLocalActive+j
             if (random_droplets) then
@@ -3723,8 +3699,8 @@
                ! injected droplet
 
                !To get a repeatable sequence 
-               !particle_seed = floor(29.*mtime) + (97*myid) + (7*j)
-               call new_RandomNumberSequence(randomNumbers, j*particle_seed)
+               local_seed = floor(29.*mtime) + (97*myid) + (7*j)
+               call new_RandomNumberSequence(randomNumbers, local_seed)
 
                rand = getRandomReal(randomNumbers)
                a = totdrops*rand
@@ -3866,8 +3842,6 @@
       integer :: iter,nbin,num_create,j,ierr
 
       integer :: local_seed
-      integer :: values(8)
-
 
       my_reintro_tmp = 0.01*(1./60.)*(10.**6.)*time_since_inject*4 !total for a 4m^3 vol chamber
 
@@ -3906,17 +3880,9 @@
 
       if (tot_after_reintro .lt. nparcelsMax) then   !Only add particles if the total number injected
                                                      !does not make the global exceed nparcelsMax
-
-       call date_and_time(values=values)
-#ifdef MPI
-        particle_seed =  (myid+values(8)+values(7)+values(6))
-#else
-        particle_seed =  values(8)+values(7)+values(6)
-#endif
-
          !$acc data create(randomNumbers,randomNumbers%state)
          !$acc update device(ngidx)
-         !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) private(randomNumbers)
+         !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) private(randomNumbers,local_seed)
          do j=1,my_reintro
             np=nparcelsLocalActive+j
             if (random_droplets) then
@@ -3924,8 +3890,8 @@
                ! injected droplet
 
                !To get a repeatable sequence
-               !local_seed = floor(29.*mtime) + (97*myid) + (7*j)
-               call new_RandomNumberSequence(randomNumbers, j*particle_seed)
+               local_seed = floor(29.*mtime) + (97*myid) + (7*j)
+               call new_RandomNumberSequence(randomNumbers, local_seed)
 
                rad_init = 2.0e-7
 
