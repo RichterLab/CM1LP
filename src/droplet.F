@@ -3034,7 +3034,7 @@
       subroutine rad_solver2(guess,mflag,prsval,rhoval,tval,qval,Tp,m_s,radius,np)
       !$acc routine seq
       use input , only : pi_dp
-      use constants , only : rhow_dp,mw,ms,surften,ion,os,ru
+      use constants , only : rhow_dp,mw,surften,ru,kappa_s,rho_solute
       use cm1libs , only : deslf
       implicit none
 
@@ -3054,7 +3054,7 @@
 
       if (rhval .lt. 0.999d0) then
          a = -(2.0d0*mw*surften)/(ru*rhow_dp*tval)/LOG(rhval)
-         c = (ion*os*m_s*(mw/ms))/((4.0d0/3.0d0)*pi_dp*rhow_dp)/LOG(rhval) 
+         c = (kappa_s*m_s/rho_solute)/((4.0d0/3.0d0)*pi_dp)/LOG(rhval)
      
          !Use Cardano's method for cubic solution
          Q = (a*a)/9.0d0
@@ -3391,7 +3391,8 @@
 
       subroutine ie_vrt_nd(diffnorm,tempr,tempt,rt_output,dt_nondim,taup_scale,prsval,rhoval,tval,qval,Tp,m_s,radius,np,flag)
       !$acc routine seq
-      use constants, only : rhow_dp,mw,ru,surften,ion,os,ms,cp_dp,cpl_dp,lv1_dp,lv2_dp
+      use constants, only : rhow_dp,mw,ru,surften,kappa_s,rho_solute, &
+                            cp_dp,cpl_dp,lv1_dp,lv2_dp
       use input, only : viscosity,pr_num,sc_num,pi_dp
       use cm1libs , only : drslf,deslf
       implicit none
@@ -3424,7 +3425,7 @@
 
         !!! Humidity !!!
         ! GHB prevent overflow by limiting term inside exponent:
-        tmp = ((lhv*mw/ru)*((1.0d0/max(1.0d-10,tval))-(1.0d0/max(1.0d-10,Tnext)))) + ((2.0d0*mw*surften)/(ru*rhow_dp*rnext*Tnext)) - ((ion*os*m_s*(mw/ms))/(VolP*rhop-m_s))
+        tmp = ((lhv*mw/ru)*((1.0d0/max(1.0d-10,tval))-(1.0d0/max(1.0d-10,Tnext)))) + ((2.0d0*mw*surften)/(ru*rhow_dp*rnext*Tnext)) - ((kappa_s*m_s*rhow_dp/rho_solute)/(VolP*rhop-m_s))
         if( tmp.gt.600.0 )then
           qstr = qval
           flag = 1
@@ -3450,7 +3451,7 @@
 
       subroutine calc_qstar(qstar,prsval,rhoval,tval,qval,Tp,m_s,radius)
       !$acc routine seq
-      use constants , only : rhow_dp,mw,ms,surften,ion,os,ru,lv1_dp,lv2_dp
+      use constants , only : rhow_dp,mw,surften,ru,kappa_s,rho_solute,lv1_dp,lv2_dp
       use input, only : viscosity,pr_num,sc_num,pi_dp
       use cm1libs , only : deslf,drslf
       implicit none
@@ -3474,7 +3475,7 @@
 
       ! GHB prevent overflow by limiting term inside exponent:
       qstar = (mw/(ru*dble(Tp)*dble(rhoval)))*esa*dexp( min( 600.0d0 , ((lhv*mw/ru)*((1.0d0/dble(tval))-(1.0d0/dble(Tp)))) + &
-              ((2.0d0*mw*surften)/(ru*rhow_dp*dble(radius)*dble(Tp))) - ((ion*os*dble(m_s)*(mw/ms))/(VolP*rhop-dble(m_s))) ) )
+              ((2.0d0*mw*surften)/(ru*rhow_dp*dble(radius)*dble(Tp))) - ((kappa_s*dble(m_s)*rhow_dp/rho_solute)/(VolP*rhop-dble(m_s))) ) )
 
       end subroutine calc_qstar
 
@@ -3504,7 +3505,7 @@
         radval(i) = 10**(radstart - (i-1)*dr)
         Volp = (4.0/3.0)*pi*radval(i)**3
         rhop = (m_s + Volp*rhow)/Volp
-        SS(i) = exp((2.0*mw*surften)/(ru*rhow*radval(i)*Tf) - (ion*os*m_s*(mw/ms))/(Volp*rhop-m_s))
+        SS(i) = exp((2.0*mw*surften)/(ru*rhow*radval(i)*Tf) - (kappa_s*m_s*rhow/rho_solute)/(Volp*rhop-m_s))
         if (i > 1) then
            if (SS(i) > SS(maxidx)) then
               maxidx = i 
