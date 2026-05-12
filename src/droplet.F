@@ -1,10 +1,3 @@
-#define _VERIFY 1
-#define _COUNTPREFIX 1
-#define TROUBLE 0
-#define PITER 1048576
-#ifdef _B4B
-#undef _B4B01F
-#endif
   MODULE droplet_module
 
   implicit none
@@ -199,12 +192,6 @@
 
       logical, parameter :: verbose=.false.
       integer :: errcode
-#ifdef _VERIFY_FIND_LOC
-      integer :: tmp_flag
-#endif
-
-
-
       ! 1) To match the initial and restart runs for total droplet number,
       !    use the following form to calculate the seed value so that it is 
       !    deterministic but varies between different MPI ranks and time steps
@@ -389,18 +376,12 @@
     end if
 
 
-#ifdef _B4B01F
-    !$acc update &
-    !$acc host(pdata,xf,yf,zf,zh,sigma,sigmaf, &
-    !$acc      ua,va,wa,qa,ta,rho,prs,znt,dpten,zs)
-#else
     !JMD WARNING: Loop does not yet match CPU version.
     !$acc parallel default(present)
     !$acc loop gang vector reduction(+:num_fallout) reduction(max:errcode) &
     !$acc reduction(+:numDepartN,numDepartS,numDepartE,numDepartW) &
     !$acc reduction(+:numDepartNW,numDepartSW,numDepartNE,numDepartSE) &
     !$acc reduction(+:num_destroyed,mass_destroyed,mass_evap,mass_dpten,eng_destroyed,m1_destroyed,m2_destroyed,mass_reentry,eng_reentry,m1_reentry,m2_reentry)
-#endif
     nploop:  &
     DO np=1,nparcelsLocalActive
 
@@ -606,8 +587,7 @@
                  (pdata_locind(np,2) .eq. undefined_index)
      enddo
 
-#if (defined(_COUNTPREFIX) && defined(_OPENACC))
-
+#ifdef _OPENACC
      !$acc data create(Cindx)
 
      !$acc parallel loop gang vector default(present)
@@ -830,13 +810,7 @@
 ! Requires inputting the current 10-meter wind speed
    if ( .not. use_wall_bc ) then  
       u10_ssgf = 0.0
-      ! If _VERIFY macro is enabled than perform the following sum on
-      ! the CPU 
-#ifdef _VERIFY
       !$acc update host(s10)
-#else
-      !$acc parallel loop gang vector reduction(+:u10_ssgf)
-#endif
       do j=1,nj
          do i=1,ni
             u10_ssgf = u10_ssgf + s10(i,j)
@@ -2920,12 +2894,6 @@
                                                                 ! the current parcel location
       ! local variable
       integer :: i
-#ifdef _VERIFY_FIND_LOC
-      integer :: ind_ori
-
-      ind_ori = ind
-#endif
-
       ! Sanity check:
       ! - If input x/y location is outside the x/y range, return directly
       if ( loc .lt. dsize(lb) .or. loc .gt. dsize(end_ind) ) return
@@ -2955,22 +2923,6 @@
                end if
             end do
          end if
-#ifdef _VERIFY_FIND_LOC
-         ind_ori = ind
-         i = end_ind
-         do while( ind_ori .lt. 0 .and. i .gt. 1 )
-            i = i - 1
-            if ( loc .ge. dsize(i) .and. loc .le. dsize(i+1) ) then
-               ind_ori = i
-            end if
-         end do
-         if ( ind_ori .ne. ind ) then
-            print *, "original search scheme finds x/y index = ", ind_ori, ", new search scheme finds x/y index = ", ind 
-            stop "Failed verification test: x/y index is not the same..."
-         else
-            print *, "Pass the verification test for x/y index..."
-         end if
-#endif
       else ! Always search from the end when:
            !    - it is the first time step
            !    - a parcel enters a new or different MPI process
@@ -3003,12 +2955,6 @@
 
       ! Local variable
       integer :: i
-#ifdef _VERIFY_FIND_LOC
-      integer :: ind_ori
-
-      ind_ori = ind
-#endif
-
       ! Sanity check:
       ! - If input z location is outside the z range, return directly
 
@@ -3035,23 +2981,6 @@
             end do
          end if
          ind = i
-#ifdef _VERIFY_FIND_LOC
-         if ( is_ge ) then
-            do while( loc .ge. dsize(ind_ori+1) )
-               ind_ori = ind_ori + 1
-            end do
-         else
-            do while( loc .gt. dsize(ind_ori+1) )
-               ind_ori = ind_ori + 1
-            end do
-         end if
-         if ( ind_ori .ne. ind ) then
-            print *, "original search scheme finds z index = ", ind_ori, ", new search scheme finds z index = ", ind
-            stop "Failed verification test: z index is not the same..."
-         else
-            print *, "Pass the verification test for z index..."
-         end if
-#endif
       else ! Always search from the end when:
            !    - it is the first time step
            !    - a parcel enters a new or different MPI process
@@ -4154,13 +4083,8 @@
     ! Definitions/descriptions:
 
       if( myid.eq.0 ) print *,'  calling nf90_create '
-#ifdef NCFPLUS
-!--- works with netcdf 4.2, but not 4.0 (grumble)
-      call disp_err( nf90_create( path=string , cmode=IOR(nf90_netcdf4, nf90_classic_model) , ncid=ncid ) , .true. )
-#else
       ! must do this for netcdf 4.0 (it seems) !
       call disp_err( nf90_create(path=string,cmode=0,ncid=ncid) , .true. )
-#endif
 
     call disp_err( nf90_def_dim(ncid,"time",nf90_unlimited,timeid) , .true. )
     call disp_err( nf90_def_dim(ncid,"zh",nk,zhid) , .true. )
