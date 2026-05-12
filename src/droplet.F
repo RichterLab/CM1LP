@@ -4,7 +4,8 @@
 
   private
   public :: droplet_driver,droplet_diag,initialize_droplet_histograms, &
-            check_droplet_ownership,particle_seed,ngidx
+            check_droplet_ownership,particle_seed,ngidx, &
+            kohler_equil_radius
 
   !These are quantities which are needed in the droplet_diag output, so must be public
   real :: num100,num1000
@@ -3001,7 +3002,7 @@
       subroutine rad_solver2(guess,mflag,prsval,rhoval,tval,qval,Tp,m_s,kappa_p,radius,np)
       !$acc routine seq
       use input , only : pi_dp
-      use constants , only : rhow_dp,mw,surften,ru,rho_solute
+      use constants , only : mw,ru,rho_solute
       use cm1libs , only : deslf
       implicit none
 
@@ -3009,7 +3010,7 @@
       integer, intent(out) :: mflag
       real, intent(in) :: prsval,rhoval,tval,qval,Tp,m_s,kappa_p,radius
       integer, intent(in) :: np
-      double precision :: a, c, esa, Q, R, M, theta, S, T, rhval
+      double precision :: dry_radius3, esa, rhval
 
       mflag = 0
       esa = deslf(dble(prsval),dble(tval))  !Saturation vapor pressure at droplet temperature
@@ -3020,30 +3021,9 @@
       !Solve the cubic for the equilibrium radius
 
       if (rhval .lt. 0.999d0) then
-         a = -(2.0d0*mw*surften)/(ru*rhow_dp*tval)/LOG(rhval)
-         c = (kappa_p*m_s/rho_solute)/((4.0d0/3.0d0)*pi_dp)/LOG(rhval)
-     
-         !Use Cardano's method for cubic solution
-         Q = (a*a)/9.0d0
-         R = (2.0d0*a*a*a+27.0d0*c)/54.0d0
-         M = R*R-Q*Q*Q
-
-
-         if (M<0.0d0) then
-           theta = acos(R/sqrt(Q*Q*Q))
-           guess = -(2.0d0*sqrt(Q)*cos((theta-pi_dp*2.0d0)/3.0d0))-a/3.0d0
-
-           if (guess < 0.0d0) then
-           guess = -(2.0d0*sqrt(Q)*cos((theta+pi_dp*2.0d0)/3.0d0))-a/3.0d0
-           end if
-
-         else
-           S = -(R/abs(R))*(abs(R)+sqrt(M))**(1.0d0/3.0d0)
-           T = Q/S
-           guess = S + T - a/3.0d0
-
-         end if
-
+         dry_radius3 = dble(m_s)/(rho_solute*((4.0d0/3.0d0)*pi_dp))
+         guess = kohler_equil_radius_dry3(dry_radius3,dble(kappa_p),  &
+                                          dble(tval),rhval)
       else 
 
         guess = radius
@@ -3473,6 +3453,55 @@
               ((dble(kappa_p)*dble(m_s)*rhow_dp/rho_solute)/(VolP*rhop-dble(m_s))) ) )
 
       end subroutine calc_qstar
+
+      function kohler_equil_radius(dry_radius,kappa_p,temp_p,rh) result(radius)
+      !$acc routine seq
+
+      implicit none
+
+      double precision, intent(in) :: dry_radius,kappa_p,temp_p,rh
+      double precision :: radius
+
+      radius = kohler_equil_radius_dry3(dry_radius**3,kappa_p,temp_p,rh)
+
+      end function kohler_equil_radius
+
+      function kohler_equil_radius_dry3(dry_radius3,kappa_p,temp_p,rh) result(radius)
+      !$acc routine seq
+      use input, only : pi_dp
+      use constants, only : mw,surften,ru,rhow_dp
+
+      implicit none
+
+      double precision, intent(in) :: dry_radius3,kappa_p,temp_p,rh
+      double precision :: radius
+      double precision :: a,c,Q,R,M,theta,S,T
+
+      a = -(2.0d0*mw*surften)/(ru*rhow_dp*temp_p)/LOG(rh)
+      c = kappa_p*dry_radius3/LOG(rh)
+
+      !Use Cardano's method for cubic solution
+      Q = (a*a)/9.0d0
+      R = (2.0d0*a*a*a+27.0d0*c)/54.0d0
+      M = R*R-Q*Q*Q
+
+      if (M<0.0d0) then
+        theta = acos(R/sqrt(Q*Q*Q))
+        radius = -(2.0d0*sqrt(Q)*cos((theta-pi_dp*2.0d0)/3.0d0))  &
+                 -a/3.0d0
+
+        if (radius < 0.0d0) then
+          radius = -(2.0d0*sqrt(Q)*cos((theta+pi_dp*2.0d0)/3.0d0))  &
+                   -a/3.0d0
+        end if
+
+      else
+        S = -(R/abs(R))*(abs(R)+sqrt(M))**(1.0d0/3.0d0)
+        T = Q/S
+        radius = S + T - a/3.0d0
+      end if
+
+      end function kohler_equil_radius_dry3
 
       function crit_radius(m_s,kappa_p,Tf)
       !$acc routine seq
