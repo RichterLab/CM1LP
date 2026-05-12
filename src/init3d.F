@@ -468,6 +468,7 @@
              !Droplet solute mass
              salinity = 0.066
              pdata(i,prms) = salinity*rhow*4.0/3.0*pi*pdata(i,prrp)**3
+             pdata(i,prkap) = kappa_s
      
              !Droplet temperature
              pdata(i,prtp) = 290.0

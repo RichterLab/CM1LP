@@ -6022,6 +6022,7 @@
       prust = 0
       przs = 0
       prsig = 0
+      prkap = 0
 
       ! for parcels:
       if(iprcl.eq.1)then
@@ -6061,6 +6062,10 @@
           npvals = npvals+1
           npvars = npvars+1
           prms = npvals  !Droplet solute (i.e. salt) mass
+
+          npvals = npvals+1
+          npvars = npvars+1
+          prkap = npvals !Droplet hygroscopicity parameter
 
           npvals = npvals+1
           npvars = npvars+1
@@ -6283,12 +6288,13 @@
       if(dowr) write(outfile,*) '    prvpz    = ',prvpz
       if(dowr) write(outfile,*) '    prrp     = ',prrp
       if(dowr) write(outfile,*) '    prms     = ',prms
+      if(dowr) write(outfile,*) '    prkap    = ',prkap
       if(dowr) write(outfile,*) '    prtp     = ',prtp
       if(dowr) write(outfile,*) '    prmult   = ',prmult
       if(dowr) write(outfile,*) '    pract    = ',pract
       if(dowr) write(outfile,*)
 
-      !$acc update device (prvpx,prvpy,prvpz,prrp,prms,prtp,prx, &
+      !$acc update device (prvpx,prvpy,prvpz,prrp,prms,prkap,prtp,prx, &
       !$acc                pry,prz,prsig,prmult,pract,prtime)
 
 !--------------------------------------------------------------

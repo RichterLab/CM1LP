@@ -80,7 +80,7 @@
               prx,pry,prz,pru,prv,prw,prth,prt,prprs,prtime,                  &
               prpt1,prpt2,prqv,prq1,prq2,prnc1,prnc2,prkm,prkh,prtke,         &
               prdbz,prb,prvpg,przv,prrho,prqsl,prqsi,prznt,prust,przs,prsig,  &
-              prvpx,prvpy,prvpz,prrp,prrp0,prms,prtp,prmult,pract,            &
+              prvpx,prvpy,prvpz,prrp,prrp0,prms,prkap,prtp,prmult,pract,      &
               prpidx,prprocidx,                                               &
               nql1,nql2,nqs1,nqs2,nnc1,nnc2,nvl1,nvl2,nzl1,nzl2,              &
               nbudget,budrain,cm1setup,testcase,                              &
@@ -167,7 +167,8 @@
 
       !$acc declare create (ib,ie,jb,je,kb,ke,numq,nparcelsInit,npvals,nx,ny, &
       !$acc       axisymm,terrain_flag,ni,nj,nip1,njp1,nk,nkp1,nkm1,imoist,   &
-      !$acc                 nqv,bbc,imove,prvpx,prvpy,prvpz,prrp,prms,prtp,   &
+      !$acc                 nqv,bbc,imove,prvpx,prvpy,prvpz,prrp,prms,prkap,  &
+      !$acc                 prtp,                                             &
       !$acc                 prx,pry,prz,prsig,ngxy,ngz,ptype,pru,prv,prw,     &
       !$acc                 ibw,ibe,ibs,ibn,two_way_coupling,drop_evap,       &
       !$acc                 drop_traj,                                        &
