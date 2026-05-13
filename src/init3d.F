@@ -84,8 +84,7 @@
       use module_mp_nssl_2mom, only: ccn, lccn
       use poiss_module
       use parcel_module , only : getparcelzs
-      use droplet_module, only: initialize_droplet_histograms,particle_seed,ngidx, &
-                                kohler_equil_radius
+      use droplet_module, only: initialize_droplet_histograms,particle_seed,ngidx,lognormal_droplet
 #ifdef MPI
       use mpi
 #endif
@@ -172,10 +171,6 @@
       logical :: doit
 
       real :: salinity
-      double precision :: rand_dp, rand2_dp, normal_sample
-      double precision :: dry_diameter_um, dry_radius, wet_radius
-      double precision :: case17_lognorm_m, case17_lognorm_s
-      double precision :: case17_kappa, case17_init_rh, case17_init_temp
       integer :: values(8)
 
       ! Note:  By default, CM1 uses the same set of psuedorandom numbers 
@@ -469,29 +464,9 @@
              if (testcase.eq.17) then
                 ! Case 17 samples dry aerosol diameter from a lognormal,
                 ! then rehydrates it to equilibrium at 80% RH.
-                case17_lognorm_m = -1.7570d0
-                case17_lognorm_s =  0.3500d0
-                case17_kappa = 0.6d0
-                case17_init_rh = 0.80d0
-                case17_init_temp = 290.0d0
-
-                rand_dp = max(getRandomReal(randomNumbers),1.0d-12)
-                rand2_dp = getRandomReal(randomNumbers)
-                normal_sample = sqrt(-2.0d0*log(rand_dp))  &
-                                *cos(2.0d0*dble(pi)*rand2_dp)
-
-                dry_diameter_um = exp(case17_lognorm_m  &
-                                      +case17_lognorm_s*normal_sample)
-                dry_radius = 0.5d0*dry_diameter_um*1.0d-6
-                wet_radius = kohler_equil_radius(dry_radius,case17_kappa,  &
-                                                 case17_init_temp,  &
-                                                 case17_init_rh)
-
-                pdata(i,prrp) = real(wet_radius)
+                pdata(i,prkap) = 0.6
+                call lognormal_droplet(pdata(i,prrp),pdata(i,prms),pdata(i,prkap),randomNumbers)
                 pdata(i,prrp0) = pdata(i,prrp)
-                pdata(i,prms) = real(rho_solute*4.0d0/3.0d0  &
-                                      *dble(pi)*dry_radius**3)
-                pdata(i,prkap) = real(case17_kappa)
              else
                 !Droplet size (radius)
                 pdata(i,prrp) = 2.0e-6

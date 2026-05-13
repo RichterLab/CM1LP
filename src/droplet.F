@@ -5,7 +5,7 @@
   private
   public :: droplet_driver,droplet_diag,initialize_droplet_histograms, &
             check_droplet_ownership,particle_seed,ngidx, &
-            kohler_equil_radius
+            kohler_equil_radius,lognormal_droplet
 
   !These are quantities which are needed in the droplet_diag output, so must be public
   real :: num100,num1000
@@ -839,6 +839,10 @@
          doinject=0 
       end if
 
+      if (testcase.eq.17 .and. num_fallout.gt.0) then
+         doinject = 1
+      end if
+
       if (doinject .eq. 1) then
 
 	    my_reintro = 0
@@ -851,6 +855,9 @@
                call droplet_injection_pi(pdata,xf,yf,max(drop_inject_elapse,dt),mtime,my_reintro)
 	    end if
 
+            if (testcase.eq.17) then
+               call droplet_fallout_reinjection(pdata,xf,yf,num_fallout,mtime,my_reintro)
+            end if
 
             !This loop isn't strictly necessary, but populate the interpolated values to the newly injected particles
             !Doesn't affect solution at all! Since interpolation happens at start of droplet_driver 
@@ -3466,6 +3473,39 @@
 
       end function kohler_equil_radius
 
+      subroutine lognormal_droplet(rad_init,m_s,kappa_p,randomNumbers)
+      !$acc routine seq
+      use constants, only : rho_solute,pi
+      use MersenneTwister_mod
+
+      implicit none
+
+      real, intent(out) :: rad_init,m_s
+      real, intent(in) :: kappa_p
+      type(randomNumberSequence), intent(inout) :: randomNumbers
+
+      double precision, parameter :: lognorm_m = -1.7570d0
+      double precision, parameter :: lognorm_s =  0.3500d0
+      double precision, parameter :: init_rh = 0.80d0
+      double precision, parameter :: init_temp = 290.0d0
+      double precision :: rand_dp,rand2_dp,normal_sample
+      double precision :: dry_diameter_um,dry_radius,wet_radius
+
+      rand_dp = max(getRandomReal(randomNumbers),1.0d-12)
+      rand2_dp = getRandomReal(randomNumbers)
+      normal_sample = sqrt(-2.0d0*log(rand_dp))  &
+                      *cos(2.0d0*dble(pi)*rand2_dp)
+
+      dry_diameter_um = exp(lognorm_m+lognorm_s*normal_sample)
+      dry_radius = 0.5d0*dry_diameter_um*1.0d-6
+      wet_radius = kohler_equil_radius(dry_radius,dble(kappa_p),  &
+                                       init_temp,init_rh)
+
+      rad_init = real(wet_radius)
+      m_s = real(rho_solute*4.0d0/3.0d0*dble(pi)*dry_radius**3)
+
+      end subroutine lognormal_droplet
+
       function kohler_equil_radius_dry3(dry_radius3,kappa_p,temp_p,rh) result(radius)
       !$acc routine seq
       use input, only : pi_dp
@@ -3981,6 +4021,104 @@
       end if
 
     end subroutine droplet_injection_pi
+
+    subroutine droplet_fallout_reinjection(pdata,xf,yf,num_fallout,mtime,my_reintro)
+      !Re-inject one testcase 17 droplet for each droplet removed on this MPI rank.
+      use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
+                        prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz,prrp,prrp0,prtp,prms,prkap,pract,prtime, &
+                        prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive, &
+                        drop_mult,pi_sp,maxz
+      use constants
+      use MersenneTwister_mod
+
+      implicit none
+
+      real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
+      real, intent(in), dimension(ib:ie+1) :: xf
+      real, intent(in), dimension(jb:je+1) :: yf
+      integer, intent(in) :: num_fallout
+      double precision, intent(in) :: mtime
+      integer, intent(out) :: my_reintro
+
+      integer :: j,np,idx_tmp
+      integer :: local_seed
+      real :: xrange,yrange,zrange
+      double precision :: rand
+      type(randomNumberSequence) :: randomNumbers
+
+      my_reintro = num_fallout
+
+      if (my_reintro .le. 0) return
+
+      xrange = xf(ni+1)-xf(1)
+      yrange = yf(nj+1)-yf(1)
+      zrange = maxz
+
+      if (nparcelsLocalActive + my_reintro .le. nparcelsLocal) then
+         num_injected = num_injected + real(my_reintro)*drop_mult
+         !$acc update device (num_injected)
+
+         if (myid==0) write(*,'(a15,i,5e15.6)')  'DROP REINJECT:',my_reintro,drop_mult,xrange,yrange,zrange,num_injected,mtime
+
+         !$acc data create(randomNumbers,randomNumbers%state)
+         !$acc update device(ngidx)
+         !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) private(randomNumbers,local_seed)
+         do j=1,my_reintro
+            np=nparcelsLocalActive+j
+
+            local_seed = floor(29.*mtime) + (97*myid) + (7*j)
+            call new_RandomNumberSequence(randomNumbers, local_seed)
+
+            rand = getRandomReal(randomNumbers)
+            pdata(np,prx) = xf(1)+rand*xrange
+            rand = getRandomReal(randomNumbers)
+            pdata(np,pry) = yf(1)+rand*yrange
+            rand = getRandomReal(randomNumbers)
+            pdata(np,prz) = rand*zrange
+
+            pdata(np,prvpx) = 0.0
+            pdata(np,prvpy) = 0.0
+            pdata(np,prvpz) = 0.0
+            pdata(np,prkap) = 0.6
+            call lognormal_droplet(pdata(np,prrp),pdata(np,prms),pdata(np,prkap),randomNumbers)
+            pdata(np,prrp0) = pdata(np,prrp)
+            pdata(np,prtp) = 290.0
+            pdata(np,prmult) = drop_mult
+            pdata(np,pract) = 1.0
+            pdata(np,pru) = 0.0
+            pdata(np,prv) = 0.0
+            pdata(np,prw) = 0.0
+            pdata(np,prt) = 290.0
+            pdata(np,prqv) = 0.01
+            pdata(np,prprs) = 101325.0
+            pdata(np,prrho) = 1.0
+            pdata(np,prtime) = 0.0
+
+            !$acc atomic capture
+            idx_tmp = ngidx
+            ngidx = ngidx+1
+            !$acc end atomic
+
+            pdata(np,prpidx) = transfer(idx_tmp,0.0)
+            pdata(np,prprocidx) = transfer(myid,0.0)
+
+            mass_injected = mass_injected + (pdata(np,prms)+rhow*4.0/3.0*pi*pdata(np,prrp)**3)*pdata(np,prmult)
+            eng_injected = eng_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp)
+            m1_injected = m1_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpx)
+            m2_injected = m2_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy)
+
+            call finalize_randomNumberSequence(randomNumbers)
+         end do
+         !$acc update host(ngidx)
+         !$acc end data
+
+         nparcelsLocalActive = nparcelsLocalActive + my_reintro
+      else
+         if (myid == 0) write(*,*) 'WARNING CANNOT REINJECT PARTICLES, WILL EXCEED NPARCELSLOCAL'
+         my_reintro = 0
+      end if
+
+    end subroutine droplet_fallout_reinjection
 
     subroutine initialize_droplet_histograms
 
