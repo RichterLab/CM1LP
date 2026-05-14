@@ -2547,6 +2547,7 @@
         if( ptype.eq.4  ) param_mp = 'Gilmore/Straka/Rasmussen version of LFO scheme'
         if( ptype.eq.5  ) param_mp = 'Morrison double moment'
         if( ptype.eq.6  ) param_mp = 'Rotunno-Emanuel water-only'
+        if( ptype.eq.7  ) param_mp = 'Lagrangian droplet microphysics'
         if( ptype.eq.26 ) param_mp = 'NSSL 2-moment scheme (graupel-only, no hail)'
         if( ptype.eq.27 ) param_mp = 'NSSL 2-moment scheme (graupel and hail)'
         if( ptype.eq.28 ) param_mp = 'NSSL single-moment scheme (graupel-only)'
@@ -3360,6 +3361,55 @@
           if(dowr) write(outfile,*) ' ----------------------------------------------- '
           if(dowr) write(outfile,*) '  ... using Rotunno-Emanuel microphysics scheme ... '
           if(dowr) write(outfile,*) '         numq   = ',numq
+          if(dowr) write(outfile,*) ' ----------------------------------------------- '
+          if(dowr) write(outfile,*)
+
+!-----------------------------------------------------------------------
+!ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+!-----------------------------------------------------------------------
+
+        ELSEIF(ptype.eq.7)THEN        ! Lagrangian droplet microphysics
+
+          numq = 2    ! qv plus diagnostic droplet-projected qc
+
+          nqv  = 1
+          nql1 = -2   ! keep droplet liquid out of Eulerian liquid loading
+          nql2 = -2
+
+          cloudvar(1) = .false.
+          cloudvar(2) = .true.
+
+          qname(1) = 'qv '
+          qname(2) = 'qc '
+
+          qunit(1) = 'kg/kg'
+          qunit(2) = 'kg/kg'
+
+          qmag( 1) = 1.0e-2
+          qmag( 2) = 1.0e-2
+
+          !----- budget stuff below here -----
+
+          nbudget = 10
+
+          budname(1) = 'tcond '
+          budname(2) = 'tevac '
+          budname(3) = 'tauto '
+          budname(4) = 'taccr '
+          budname(5) = 'tevar '
+          budname(6) = 'train '
+          budname(7) = 'erain '
+          budname(8) = 'qsfc  '
+          budname(9) = 'esfc  '
+          budname(10) = 'erad  '
+
+          budrain = 6
+
+          if(dowr) write(outfile,*)
+          if(dowr) write(outfile,*) ' ----------------------------------------------- '
+          if(dowr) write(outfile,*) '  ... using Lagrangian droplet microphysics ... '
+          if(dowr) write(outfile,*) '         numq   = ',numq
+          if(dowr) write(outfile,*) '         qc is diagnostic from droplets '
           if(dowr) write(outfile,*) ' ----------------------------------------------- '
           if(dowr) write(outfile,*)
 
@@ -5884,6 +5934,23 @@
       prcl_sfc      = max(0,min(1,prcl_sfc))
       prcl_droplet  = max(0,min(1,prcl_droplet))
 
+      if( imoist.eq.1 .and. ptype.eq.7 )then
+        if( iprcl.ne.1 .or. prcl_droplet.ne.1 )then
+          IF(myid.eq.0)THEN
+            print *
+            print *,'  ptype = ',ptype
+            print *
+            print *,'  ptype=7 requires iprcl=1 and prcl_droplet=1 '
+            print *
+            print *,'  ... stopping cm1 ... '
+            print *
+          ENDIF
+#ifdef MPI
+          call MPI_BARRIER (MPI_COMM_WORLD,ierr)
+#endif
+          call stopcm1
+        endif
+      endif
 
       if( iptra.eq.0 )then
         prcl_ptra = 0
@@ -6162,14 +6229,16 @@
             !---
             npvals = npvals+1
             prqv = npvals
-            prq1 = npvals+1
             !---
-            npvals = npvals+(nql2-nql1+1)
-            if( iice.eq.1 )then
-              npvals = npvals+(nqs2-nqs1+1)
+            if( nql1.ge.1 )then
+              prq1 = npvals+1
+              npvals = npvals+(nql2-nql1+1)
+              if( iice.eq.1 )then
+                npvals = npvals+(nqs2-nqs1+1)
+              endif
+              !---
+              prq2 = npvals
             endif
-            !---
-            prq2 = npvals
           endif
         end if
         if( prcl_nc.eq.1 .and. idm.eq.1 )then

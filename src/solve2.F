@@ -549,7 +549,11 @@
               qv=max(q3d(i,j,k,nqv),0.0)
               qli=max(0.0,dum2(i,j,k)+dum3(i,j,k))
               cpli=cpl*max(0.0,dum2(i,j,k))+cpi*max(0.0,dum3(i,j,k))
-              dum8(i,j,k) = g*( th3d(i,j,k)*rth0(i,j,k) + repsm1*(qv-qv0(i,j,k)) - (qli-qc0(i,j,k)-qi0(i,j,k)) )
+              if( ptype.eq.7 )then
+                dum8(i,j,k) = g*( th3d(i,j,k)*rth0(i,j,k) + repsm1*(qv-qv0(i,j,k)) - qli )
+              else
+                dum8(i,j,k) = g*( th3d(i,j,k)*rth0(i,j,k) + repsm1*(qv-qv0(i,j,k)) - (qli-qc0(i,j,k)-qi0(i,j,k)) )
+              endif
               t11(i,j,k)=(th0(i,j,k)+th3d(i,j,k))*(1.0+reps*qv)/(1.0+qv+qli)
           ! terms in theta and pi equations for proper mass/energy conservation
           ! Reference:  Bryan and Fritsch (2002, MWR), Bryan and Morrison (2012, MWR)
@@ -569,7 +573,11 @@
             do i=1,ni
               qv=max(q3d(i,j,k,nqv),0.0)
               qli=max(0.0,dum2(i,j,k)+dum3(i,j,k))
-              dum8(i,j,k) = g*( th3d(i,j,k)*rth0(i,j,k) + repsm1*(qv-qv0(i,j,k)) - (qli-qc0(i,j,k)-qi0(i,j,k)) )
+              if( ptype.eq.7 )then
+                dum8(i,j,k) = g*( th3d(i,j,k)*rth0(i,j,k) + repsm1*(qv-qv0(i,j,k)) - qli )
+              else
+                dum8(i,j,k) = g*( th3d(i,j,k)*rth0(i,j,k) + repsm1*(qv-qv0(i,j,k)) - (qli-qc0(i,j,k)-qi0(i,j,k)) )
+              endif
               t11(i,j,k)=(th0(i,j,k)+th3d(i,j,k))*(1.0+reps*qv)/(1.0+qv+qli)
               t22(i,j,k)=(pi0(i,j,k)+pp3d(i,j,k))*rddcv
             enddo
@@ -1617,6 +1625,8 @@
       endif
 #endif
 
+      if( ptype.eq.7 .and. n.eq.nqc ) cycle
+
       ! Note: epsilon = 1.0e-18
 !!!      weps = 0.01*epsilon
 !!!      IF( idm.eq.1 .and. n.ge.nnc1 .and. n .le. nnc2 ) weps = 1.0e5*epsilon
@@ -1701,8 +1711,12 @@
             qtten(i,j,k)=th3d(i,j,k)
             q3d(i,j,k,nqv)=q3d(i,j,k,nqv)-dt*qvten(i,j,k)
             qvten(i,j,k)=q3d(i,j,k,nqv)
-            q3d(i,j,k,nqc)=q3d(i,j,k,nqc)-dt*qcten(i,j,k)
-            qcten(i,j,k)=q3d(i,j,k,nqc)
+            if( ptype.eq.7 )then
+              qcten(i,j,k)=0.0
+            else
+              q3d(i,j,k,nqc)=q3d(i,j,k,nqc)-dt*qcten(i,j,k)
+              qcten(i,j,k)=q3d(i,j,k,nqc)
+            endif
           enddo
           enddo
           enddo

@@ -384,18 +384,20 @@
         !----
       enddo
 
-      do n=nql1,nql2
-      !$acc parallel default(present)
-      !$acc loop gang vector collapse(3)
-      do k=1,nk
-        do j=1,nj
-        do i=1,ni
-          ql(i,j,k) = ql(i,j,k)+qa(i,j,k,n)
+      IF( nql1.ge.1 )THEN
+        do n=nql1,nql2
+        !$acc parallel default(present)
+        !$acc loop gang vector collapse(3)
+        do k=1,nk
+          do j=1,nj
+          do i=1,ni
+            ql(i,j,k) = ql(i,j,k)+qa(i,j,k,n)
+          enddo
+          enddo
         enddo
+        !$acc end parallel
         enddo
-      enddo
-      !$acc end parallel
-      enddo
+      ENDIF
 
       !----
 

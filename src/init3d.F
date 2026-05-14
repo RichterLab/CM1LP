@@ -1863,9 +1863,11 @@
           if(imoist.eq.1)then
             do k=1,nk
               qt=0.0
+              IF( nql1.ge.1 )THEN
               do n=nql1,nql2
                 qt=qt+qa(i,j,k,n)
               enddo
+              ENDIF
               if(iice.eq.1)then
                 do n=nqs1,nqs2
                   qt=qt+qa(i,j,k,n)
@@ -1926,9 +1928,11 @@
           do j=1,nj
           do i=1,ni
             qt=0.0
+            IF( nql1.ge.1 )THEN
             do n=nql1,nql2
               qt=qt+qa(i,j,k,n)
             enddo
+            ENDIF
             if(iice.eq.1)then
               do n=nqs1,nqs2
                 qt=qt+qa(i,j,k,n)

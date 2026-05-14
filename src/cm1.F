@@ -3203,6 +3203,9 @@ end module cuda_rt
       if( ptype.eq.0 )then
         ! qv only:
         call pdefq2_GPU(    0.0,asq(1),ruh,rvh,rmh,rho,q3d(ib,jb,kb,1))
+      elseif( ptype.eq.7 )then
+        ! qv is prognostic; qc is diagnostic from the Lagrangian droplets.
+        call pdefq2_GPU(    0.0,asq(nqv),ruh,rvh,rmh,rho,q3d(ib,jb,kb,nqv))
       else
         call   mp_driver(nstep,dt,qbudget,asq,bsq,xh,ruh,xf,ruf,yh,rvh,yf,rvf,  &
                          mh,rmh,c1,c2,zh,mf,rmf,zf,rain,prate,pi0,th0,rho0,prs0,qv0,   &
@@ -4727,4 +4730,3 @@ end module cuda_rt
       call stopcm1
 
       end program cm1
-

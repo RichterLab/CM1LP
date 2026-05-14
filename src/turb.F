@@ -368,7 +368,7 @@
           enddo
         ENDDO
           if( sfcmodel.eq.6 )then
-          if( imoist.eq.1 )then
+          if( imoist.eq.1 .and. ptype.ne.7 )then
         !$omp parallel do default(shared) private(i,j,k)
         !$acc parallel loop gang vector collapse(3) default(present)
         do j=1,nj
@@ -913,7 +913,7 @@
             enddo
             enddo
           endif
-          if( imoist.eq.1 .and. nqc.ge.1 )then
+          if( imoist.eq.1 .and. nqc.ge.1 .and. ptype.ne.7 )then
             !$acc parallel loop gang vector collapse(2) default(present) private(i,k)
             do k=1,nk
             do i=1,ni
@@ -1719,7 +1719,7 @@
         ENDDO
         ! here, ppten stores qc:
 
-        if( nqc.ge.1 )then
+        if( nqc.ge.1 .and. ptype.ne.7 )then
           !$omp parallel do default(shared) private(i,j,k)
           !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
           DO k=1,nk
@@ -4718,7 +4718,7 @@
 
     ELSE
 
-    if( ptype.eq.0 )then
+    if( ptype.eq.0 .or. ptype.eq.7 )then
       !$omp parallel do default(shared) private(i,j,k)
       !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
       do k=1,nk

@@ -81,6 +81,7 @@
             enddo
             enddo
             !---
+            IF( nql1.ge.1 )THEN
             do n=nql1,nql2
             do k=1,nk
             do i=1,ni
@@ -88,6 +89,7 @@
             enddo
             enddo
             enddo
+            ENDIF
             !---
             if( iice.eq.1 )then
             do n=nqs1,nqs2
@@ -101,7 +103,11 @@
             !---
             do k=1,nk
             do i=1,ni
-              dum6(i,j,k) = g*( th3d(i,j,k)*rth0(i,j,k) + repsm1*(q3d(i,j,k,nqv)-qv0(i,j,k)) - (dum1(i,j,k)-qc0(i,j,k)-qi0(i,j,k)) )
+              if( ptype.eq.7 )then
+                dum6(i,j,k) = g*( th3d(i,j,k)*rth0(i,j,k) + repsm1*(q3d(i,j,k,nqv)-qv0(i,j,k)) - dum1(i,j,k) )
+              else
+                dum6(i,j,k) = g*( th3d(i,j,k)*rth0(i,j,k) + repsm1*(q3d(i,j,k,nqv)-qv0(i,j,k)) - (dum1(i,j,k)-qc0(i,j,k)-qi0(i,j,k)) )
+              endif
             enddo
             enddo
             !---

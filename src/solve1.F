@@ -1536,7 +1536,7 @@
               if(timestats.ge.1) time_pbl=time_pbl+mytime()
             endif
         IF( use_pbl )THEN
-        if(nqc.ge.1)then
+        if(nqc.ge.1 .and. ptype.ne.7)then
           !$omp parallel do default(shared) private(i,j,k)
           !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
           do k=1,nk
@@ -1834,7 +1834,7 @@
               ppten(i,j,k)=ppten(i,j,k)+qpten(i,j,k)
               thten1(i,j,k)=thten1(i,j,k)+qtten(i,j,k)
               qten(i,j,k,nqv)=qten(i,j,k,nqv)+qvten(i,j,k)
-              qten(i,j,k,nqc)=qten(i,j,k,nqc)+qcten(i,j,k)
+              if( ptype.ne.7 ) qten(i,j,k,nqc)=qten(i,j,k,nqc)+qcten(i,j,k)
             enddo
             enddo
             enddo

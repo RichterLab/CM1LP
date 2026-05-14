@@ -468,7 +468,11 @@
             qpten(i,j,k)=(pp3d(i,j,k)-qpten(i,j,k))*rdt
             qtten(i,j,k)=(th3d(i,j,k)-qtten(i,j,k))*rdt
             qvten(i,j,k)=(q3d(i,j,k,nqv)-qvten(i,j,k))*rdt
-            qcten(i,j,k)=(q3d(i,j,k,nqc)-qcten(i,j,k))*rdt
+            if( ptype.eq.7 )then
+              qcten(i,j,k)=0.0
+            else
+              qcten(i,j,k)=(q3d(i,j,k,nqc)-qcten(i,j,k))*rdt
+            endif
           enddo
           enddo
           enddo
@@ -1018,6 +1022,18 @@
               out3d(i,j,k,4) = dpten(i,j,k,4)
               out3d(i,j,k,5) = dpten(i,j,k,5)
               out3d(i,j,k,6) = dpten(i,j,k,6)
+            enddo
+            enddo
+            enddo
+          endif
+          if( ptype.eq.7 .and. nqc.ge.1 )then
+            !$omp parallel do default(shared) private(i,j,k)
+            !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
+            do k=1,nk
+            do j=1,nj
+            do i=1,ni
+              q3d(i,j,k,nqc)=real(dpten(i,j,k,7))
+              qa(i,j,k,nqc)=q3d(i,j,k,nqc)
             enddo
             enddo
             enddo
