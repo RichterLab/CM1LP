@@ -370,6 +370,15 @@
              !$acc end parallel
           enddo
         ENDIF
+        if( ptype.eq.7 .and. nqc.ge.1 )then
+          !$acc parallel loop gang vector collapse(2) default(present)
+          do j=1,nj
+          do i=1,ni
+            ql(i,j,k) = ql(i,j,k)+q3d(i,j,k,nqc)
+          enddo
+          enddo
+          !$acc end parallel
+        endif
         if( iice.eq.1 )then
           !$acc parallel loop gang vector collapse(2) default(present)
           do j=1,nj
