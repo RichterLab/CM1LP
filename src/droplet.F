@@ -34,10 +34,6 @@
   !    not move between processes within this subroutine?
   integer, parameter :: location_offset = 16
 
-  ! set this variable to ".true." to rebounce the particles
-  ! falling off the bottom (i.e., conserve the total droplet number)
-  logical, parameter :: use_wall_bc = .false.
-
   !For testing: set this parameter to ".false." to make droplet injection deterministic (not random)
   logical, parameter :: random_droplets = .true.
 
@@ -849,17 +845,16 @@
       integer(i8) :: np_tmp
       real :: uval,vval,wval,qval,prsval,tval,rhoval,sigdot
 
-!----------------------------------------------------------------------
-! Final thing: Inject droplets which will be active on the next call of droplet_driver
-! Requires inputting the current 10-meter wind speed
-   if ( .not. use_wall_bc ) then
+      !----------------------------------------------------------------------
+      ! Final thing: Inject droplets which will be active on the next call of droplet_driver
+      ! Requires inputting the current 10-meter wind speed
       u10_ssgf = 0.0
       !$acc update host(s10)
       do j=1,nj
-         do i=1,ni
-            u10_ssgf = u10_ssgf + s10(i,j)
-         end do
-      end do
+        do i=1,ni
+          u10_ssgf = u10_ssgf + s10(i,j)
+        enddo
+      enddo
 
 #ifdef MPI
       call mpi_allreduce(mpi_in_place,u10_ssgf,1,mpi_double_precision,mpi_sum,mpi_comm_world,ierr)
@@ -891,66 +886,66 @@
         my_reintro = 0
 
         if (testcase.eq.15) then  !Hurricane boundary layer spray LES case
-               call droplet_injection(pdata,xf,yf,max(drop_inject_elapse,dt),mtime,my_reintro)
+          call droplet_injection(pdata,xf,yf,max(drop_inject_elapse,dt),mtime,my_reintro)
         end if
 
-            if (testcase.eq.16) then  !Pi chamber
-               call droplet_injection_pi(pdata,xf,yf,max(drop_inject_elapse,dt),mtime,my_reintro)
+        if (testcase.eq.16) then  !Pi chamber
+          call droplet_injection_pi(pdata,xf,yf,max(drop_inject_elapse,dt),mtime,my_reintro)
         end if
 
-            if (testcase.eq.17) then
-               call droplet_fallout_reinjection(pdata,xf,yf,num_fallout,mtime,my_reintro)
-            end if
+        if (testcase.eq.17) then
+          call droplet_fallout_reinjection(pdata,xf,yf,num_fallout,mtime,my_reintro)
+        end if
 
-            !This loop isn't strictly necessary, but populate the interpolated values to the newly injected particles
-            !Doesn't affect solution at all! Since interpolation happens at start of droplet_driver
-            !But makes sure that the interpolated mean quantities in droplet_diag are meaningful
-            !$acc parallel loop gang vector default(present)
-            do np=nparcelsLocalActive-my_reintro+1,nparcelsLocalActive
-               x3d = pdata(np,prx)
-               y3d = pdata(np,pry)
-               if( .not. terrain_flag )then
-                 z3d = pdata(np,prz)
-               else
-                 sig3d = pdata(np,prsig)
-               endif
-               iflag = undefined_index
-               jflag = undefined_index
-               kflag = 0
-               IF(nx.eq.1)THEN
-                 iflag = 1
-               ELSE
-                 ! cm1r19:
-                 call find_horizontal_location_index (pdata_locind(np,1), x3d, ib, ie+1, xf, ni+1, iflag)
-               ENDIF
-               IF(axisymm.eq.1.or.ny.eq.1)THEN
-                 jflag = 1
-               ELSE
-                 ! cm1r19:
-                 call find_horizontal_location_index (pdata_locind(np,2), y3d, jb, je+1, yf, nj+1, jflag)
-               ENDIF
-               kflag = 1
-               if( .not. terrain_flag )then
-                 do while( z3d.gt.zf(iflag,jflag,kflag+1) )
-                    kflag = kflag+1
-                 enddo
-                 pdata_locind(np,3) = kflag
-               else
-                  call find_vertical_location_index (pdata_locind(np,3), sig3d, kb, ke+1, sigmaf, kflag, .TRUE.)
-               endif
-               call interpolate_to_parcel(np,iflag,jflag,kflag,x3d,y3d,z3d,sig3d, &
-                                          uval,vval,wval,tval,qval,rhoval,prsval, &
-                                          xh,xf,yh,yf,zh,zf,zs,znt,sigma,sigmaf, &
-                                          ua,va,wa,ta,qa,rho,prs,sigdot)
-               !Now set to actual interpolated values
-               pdata(np,pru) = uval
-               pdata(np,prv) = vval
-               pdata(np,prw) = wval
-               pdata(np,prt) = tval
-               pdata(np,prqv) = qval
-               pdata(np,prprs) = prsval
-               pdata(np,prrho) = rhoval
-            end do
+        !This loop isn't strictly necessary, but populate the interpolated values to the newly injected particles
+        !Doesn't affect solution at all! Since interpolation happens at start of droplet_driver
+        !But makes sure that the interpolated mean quantities in droplet_diag are meaningful
+        !$acc parallel loop gang vector default(present)
+        do np=nparcelsLocalActive-my_reintro+1,nparcelsLocalActive
+          x3d = pdata(np,prx)
+          y3d = pdata(np,pry)
+          if( .not. terrain_flag )then
+            z3d = pdata(np,prz)
+          else
+            sig3d = pdata(np,prsig)
+          endif
+          iflag = undefined_index
+          jflag = undefined_index
+          kflag = 0
+          IF(nx.eq.1)THEN
+            iflag = 1
+          ELSE
+            ! cm1r19:
+            call find_horizontal_location_index (pdata_locind(np,1), x3d, ib, ie+1, xf, ni+1, iflag)
+          ENDIF
+          IF(axisymm.eq.1.or.ny.eq.1)THEN
+            jflag = 1
+          ELSE
+            ! cm1r19:
+            call find_horizontal_location_index (pdata_locind(np,2), y3d, jb, je+1, yf, nj+1, jflag)
+          ENDIF
+          kflag = 1
+          if( .not. terrain_flag )then
+            do while( z3d.gt.zf(iflag,jflag,kflag+1) )
+              kflag = kflag+1
+            enddo
+            pdata_locind(np,3) = kflag
+          else
+            call find_vertical_location_index (pdata_locind(np,3), sig3d, kb, ke+1, sigmaf, kflag, .TRUE.)
+          endif
+          call interpolate_to_parcel(np,iflag,jflag,kflag,x3d,y3d,z3d,sig3d, &
+                                     uval,vval,wval,tval,qval,rhoval,prsval, &
+                                     xh,xf,yh,yf,zh,zf,zs,znt,sigma,sigmaf, &
+                                     ua,va,wa,ta,qa,rho,prs,sigdot)
+          !Now set to actual interpolated values
+          pdata(np,pru) = uval
+          pdata(np,prv) = vval
+          pdata(np,prw) = wval
+          pdata(np,prt) = tval
+          pdata(np,prqv) = qval
+          pdata(np,prprs) = prsval
+          pdata(np,prrho) = rhoval
+        enddo
       end if    !doinject
 
       np_tmp = nparcelsLocalActive
@@ -962,9 +957,8 @@
          !write(*,'(a8,3i)')  'DHR1:',myid,np_tmp,nparcelsLocalActive
          write(*,'(a18,i)')  'Total particles:',np_tmp
       end if
-   end if  ! end of "if use_wall_bc" statement
 
-   if(timestats.ge.1) time_droplet_inject=time_droplet_inject+mytime()
+      if(timestats.ge.1) time_droplet_inject=time_droplet_inject+mytime()
 
    end subroutine droplet_injection_driver
 

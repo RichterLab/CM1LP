@@ -7,12 +7,13 @@
     real :: g,rd,rv,cp,cpinv,cv,cpv,cvv,rcp,                                 &
             cpdcv,rovcp,rddcp,rddcv,rddrv,cvdrd,cpdrd,eps,reps,repsm1,       &
             cpt,cvt,pnum,xlv,lathv,xls,lvdcp,condc,cpl,cpi,lv1,lv2,ls1,ls2,  &
-            rhow,c_e1,c_e2,c_s,rcs,earth_radius,govtwo
+            rhow,c_e1,c_e2,c_s,rcs,earth_radius,govtwo,p00,rp00
     double precision :: rhow_dp,cp_dp,cpl_dp,mw,surften,ru,lv1_dp,lv2_dp, &
                         kappa_s,rho_solute
 
     !$acc declare create (ru,mw,surften,rhow,rhow_dp,kappa_s,rho_solute, &
-    !$acc                 lv1,lv1_dp,lv2,lv2_dp,cpl,cpl_dp,cp,cp_dp,eps)
+    !$acc                 lv1,lv1_dp,lv2,lv2_dp,cpl,cpl_dp,cp,cp_dp,eps, &
+    !$acc                 p00,rp00)
 
       !----------------
 
@@ -21,8 +22,7 @@
       real, parameter ::  pi     = 3.1415926535897932384626433
       real, parameter ::  th0r   = 300.0
       real, parameter ::  to     = 273.15
-      real, parameter ::  p00    = 1.0e5
-      real, parameter ::  rp00   = 1.0/p00
+      real, parameter ::  p00_default = 1.0e5    ! p00 is set in set_constants
       real, parameter ::  piddeg = pi/180.0
       real, parameter ::  degdpi = 180.0/pi
       real, parameter ::  clwsat = 1.e-6
@@ -98,6 +98,10 @@
       implicit none
 
       integer, intent(in) :: testcase
+
+      p00 = p00_default
+      if( testcase.eq.17 ) p00 = 101700.0
+      rp00 = 1.0/p00
 
 
       !--------------------
@@ -225,7 +229,8 @@
       rcs = 1.0/c_s
 
       !$acc update device (ru,mw,surften,rhow,rhow_dp,kappa_s,rho_solute, &
-      !$acc                lv1,lv1_dp,lv2,lv2_dp,cpl,cpl_dp,cp,cp_dp,eps)
+      !$acc                lv1,lv1_dp,lv2,lv2_dp,cpl,cpl_dp,cp,cp_dp,eps, &
+      !$acc                p00,rp00)
 
       end subroutine set_constants
 
