@@ -172,7 +172,7 @@
       use adv_routines, only : movesfc
       use misclibs
       use parcel_module, only : parcel_driver
-      use droplet_module, only : droplet_driver
+      use droplet_module, only : droplet_driver,droplet_injection_driver
       use pdcomp_module, only : pidcomp
       use lsnudge_module
       use ib_module
@@ -350,7 +350,7 @@
 #endif
       character(len=20) :: text1,text2
 
-      integer :: num_dropsub,i_dropsub
+      integer :: num_dropsub,i_dropsub,num_drop_fallout,num_drop_fallout_step
       real :: dt_dropsub
       double precision :: dbldt_dropsub,mtime_dropsub
 
@@ -960,6 +960,7 @@
 
           num_dropsub = 1
           mtime_dropsub = mtime
+          num_drop_fallout_step = 0
           do i_dropsub = 1,num_dropsub
           if (myid.eq.0) print *, 'DHR2: In dropsub loop, i_dropsub=',i_dropsub
 
@@ -991,7 +992,13 @@
                                nw1,nw2,ne1,ne2,sw1,sw2,se1,se2,reqs_p,                    &
                                sw31,sw32,se31,se32,ss31,ss32,sn31,sn32,                   &
                                n3w1,n3w2,n3e1,n3e2,s3w1,s3w2,s3e1,s3e2,reqs_s,            &
-                               dpten,pdata_locind,nstep)
+                               dpten,pdata_locind,nstep,num_drop_fallout)
+          num_drop_fallout_step = num_drop_fallout_step + num_drop_fallout
+          if (i_dropsub.eq.num_dropsub) then
+            call droplet_injection_driver(dt,mtime,xh,xf,yh,yf,zh,zf,zs,zntmp, &
+                                          sigma,sigmaf,rho,rru,rrv,rrw,dum1,qa,prs, &
+                                          s10,pdata,pdata_locind,num_drop_fallout_step)
+          endif
           if(timestats.ge.1) time_parcels=time_parcels+mytime()
 #ifdef MPI
           call sync()

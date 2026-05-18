@@ -3,7 +3,7 @@
   implicit none
 
   private
-  public :: droplet_driver,droplet_diag,initialize_droplet_histograms, &
+  public :: droplet_driver,droplet_injection_driver,droplet_diag,initialize_droplet_histograms, &
             check_droplet_ownership,particle_seed,ngidx, &
             kohler_equil_radius,lognormal_droplet
 
@@ -60,7 +60,7 @@
                                  ne2,sw1,sw2,se1,se2,reqs_p,sw31,sw32, &
                                  se31,se32,ss31,ss32,sn31,sn32,n3w1, &
                                  n3w2,n3e1,n3e2,s3w1,s3w2,s3e1,s3e2, &
-                                 reqs_s,dpten,pdata_locind,nstep)
+                                 reqs_s,dpten,pdata_locind,nstep,num_fallout_out)
 
       use input, only : ib,ie,jb,je,kb,ke,ibl,iel,jbl,jel,numq,ni,nj, &
           nk,imp,jmp,kmp,rmp,cmp,kmt,npvals,npvars,cgs1,cgs2,cgs3, &
@@ -69,11 +69,10 @@
           prx,pry,prz,prsig,pract,prvpx,prvpy,prvpz,prtp,prrp,prmult, &
           prms,prkap,przs,pru,prv,prw,prt,prqv,prprs,prrho,prtime, &
           prpidx,prprocidx, &
-          timestats,time_droplet,time_droplet_inject,mytime,ierr,maxx, &
+          timestats,time_droplet,mytime,ierr,maxx, &
           maxy,maxz,ierr,mynw,mysw,myne,myse,mynorth,mysouth,myeast, &
           mywest,myid,nparcelsLocal,nparcelsLocalActive, &
-          time_phys_H2D,time_phys_D2H,drop_inject_elapse, &
-          drop_inject_time,time_dropC1,time_dropC2,time_dropC3, &
+          time_phys_H2D,time_phys_D2H,time_dropC1,time_dropC2,time_dropC3, &
           time_dropC4,ngxy,dx,dy,dz,testcase,drop_traj
       use constants
       use comm_module
@@ -95,6 +94,7 @@
 
       real, intent(in) :: dt
       integer, intent(in) :: nstep
+      integer, intent(out) :: num_fallout_out
       double precision, intent(in) :: dbldt
       double precision, intent(in) :: mtime
       real, intent(in), dimension(ib:ie) :: xh,uh,ruh
@@ -151,11 +151,7 @@
       real :: uval,vval,wval,qval,prsval,tval,rhoval,rhval
       real :: sigdot
 
-      integer :: my_reintro !Number of droplets created by droplet_injection routine
-
       logical, parameter :: debug = .false.
-
-      integer :: doinject  !Do a call to droplet_inject at this time step?
 
       type(randomNumberSequence) :: randomNumbers
 
@@ -175,7 +171,6 @@
       integer :: ptrDepart(num_nn)                         ! Points to the begining of Depart_ind for various departure buffers
       integer :: ptrArrive(num_nn)                         ! Points to the begining of holes_ind for various arrival buffers
       integer, dimension(nparcelsLocal) :: pdata_neighbor  ! array to store the new MPI region info for all the droplets
-      integer(i8) :: np_tmp
 #endif
       integer :: neighbor                                  ! indicate which MPI region a droplet stays after this time step 
 
@@ -806,10 +801,58 @@
 
     if(timestats.ge.1) time_droplet=time_droplet+mytime()
 
+    num_fallout_out = num_fallout
+
+   end subroutine droplet_driver
+
+!----------------------------------------------------------------------
+
+   subroutine droplet_injection_driver(dt,mtime,xh,xf,yh,yf,zh,zf,zs,znt, &
+                                       sigma,sigmaf,rho,ua,va,wa,ta,qa,prs, &
+                                       s10,pdata,pdata_locind,num_fallout)
+
+      use input, only : ib,ie,jb,je,kb,ke,ibl,iel,jbl,jel,numq,ni,nj, &
+          nk,npvals,axisymm,terrain_flag,nx,ny,nparcelsLocal, &
+          nparcelsLocalActive,prx,pry,prz,prsig,pru,prv,prw, &
+          prt,prqv,prprs,prrho,drop_inject_elapse,drop_inject_time, &
+          testcase,myid,timestats,time_droplet_inject,mytime,ierr
+      use constants
+#ifdef MPI
+      use mpi
+#endif
+      implicit none
+
+      real, intent(in) :: dt
+      double precision, intent(in) :: mtime
+      real, intent(in), dimension(ib:ie) :: xh
+      real, intent(in), dimension(ib:ie+1) :: xf
+      real, intent(in), dimension(jb:je) :: yh
+      real, intent(in), dimension(jb:je+1) :: yf
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke) :: zh
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: zf
+      real, intent(in), dimension(ib:ie,jb:je) :: zs,znt
+      real, intent(in), dimension(kb:ke) :: sigma
+      real, intent(in), dimension(kb:ke+1) :: sigmaf
+      real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: rho,ta,prs
+      real, intent(inout), dimension(ib:ie+1,jb:je,kb:ke) :: ua
+      real, intent(inout), dimension(ib:ie,jb:je+1,kb:ke) :: va
+      real, intent(inout), dimension(ib:ie,jb:je,kb:ke+1) :: wa
+      real, intent(inout), dimension(ib:ie,jb:je,kb:ke,numq) :: qa
+      real, intent(in), dimension(ibl:iel,jbl:jel) :: s10
+      real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
+      integer, intent(inout), dimension(nparcelsLocal,3) :: pdata_locind
+      integer, intent(in) :: num_fallout
+
+      integer :: i,j,np,iflag,jflag,kflag
+      integer :: doinject,my_reintro
+      real :: x3d,y3d,z3d,sig3d
+      integer(i8) :: np_tmp
+      real :: uval,vval,wval,qval,prsval,tval,rhoval,sigdot
+
 !----------------------------------------------------------------------
 ! Final thing: Inject droplets which will be active on the next call of droplet_driver
 ! Requires inputting the current 10-meter wind speed
-   if ( .not. use_wall_bc ) then  
+   if ( .not. use_wall_bc ) then
       u10_ssgf = 0.0
       !$acc update host(s10)
       do j=1,nj
@@ -836,7 +879,7 @@
 
       !Only inject if past a certain time (specified in the namelist file)
       if (mtime .lt. drop_inject_time) then
-         doinject=0 
+         doinject=0
       end if
 
       if (testcase.eq.17 .and. num_fallout.gt.0) then
@@ -845,22 +888,22 @@
 
       if (doinject .eq. 1) then
 
-	    my_reintro = 0
+        my_reintro = 0
 
-	    if (testcase.eq.15) then  !Hurricane boundary layer spray LES case
+        if (testcase.eq.15) then  !Hurricane boundary layer spray LES case
                call droplet_injection(pdata,xf,yf,max(drop_inject_elapse,dt),mtime,my_reintro)
-	    end if
+        end if
 
             if (testcase.eq.16) then  !Pi chamber
                call droplet_injection_pi(pdata,xf,yf,max(drop_inject_elapse,dt),mtime,my_reintro)
-	    end if
+        end if
 
             if (testcase.eq.17) then
                call droplet_fallout_reinjection(pdata,xf,yf,num_fallout,mtime,my_reintro)
             end if
 
             !This loop isn't strictly necessary, but populate the interpolated values to the newly injected particles
-            !Doesn't affect solution at all! Since interpolation happens at start of droplet_driver 
+            !Doesn't affect solution at all! Since interpolation happens at start of droplet_driver
             !But makes sure that the interpolated mean quantities in droplet_diag are meaningful
             !$acc parallel loop gang vector default(present)
             do np=nparcelsLocalActive-my_reintro+1,nparcelsLocalActive
@@ -878,13 +921,13 @@
                  iflag = 1
                ELSE
                  ! cm1r19:
-                 call find_horizontal_location_index (pdata_locind(np,1), x3d, ib, ie+1, xf, ni+1, iflag) 
+                 call find_horizontal_location_index (pdata_locind(np,1), x3d, ib, ie+1, xf, ni+1, iflag)
                ENDIF
                IF(axisymm.eq.1.or.ny.eq.1)THEN
                  jflag = 1
                ELSE
                  ! cm1r19:
-                 call find_horizontal_location_index (pdata_locind(np,2), y3d, jb, je+1, yf, nj+1, jflag)  
+                 call find_horizontal_location_index (pdata_locind(np,2), y3d, jb, je+1, yf, nj+1, jflag)
                ENDIF
                kflag = 1
                if( .not. terrain_flag )then
@@ -910,11 +953,12 @@
             end do
       end if    !doinject
 
+      np_tmp = nparcelsLocalActive
 #ifdef MPI
       call mpi_allreduce(nparcelsLocalActive,np_tmp,1,mpi_integer8, &
                          mpi_sum,mpi_comm_world,ierr)
 #endif
-      if (myid==0) then 
+      if (myid==0) then
          !write(*,'(a8,3i)')  'DHR1:',myid,np_tmp,nparcelsLocalActive
          write(*,'(a18,i)')  'Total particles:',np_tmp
       end if
@@ -922,7 +966,7 @@
 
    if(timestats.ge.1) time_droplet_inject=time_droplet_inject+mytime()
 
-   end subroutine droplet_driver
+   end subroutine droplet_injection_driver
 
 !----------------------------------------------------------------------
 
