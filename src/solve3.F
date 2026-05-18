@@ -172,7 +172,7 @@
       use adv_routines, only : movesfc
       use misclibs
       use parcel_module, only : parcel_driver
-      use droplet_module, only : droplet_driver,droplet_injection_driver
+      use droplet_module, only : droplet_driver,droplet_injection_driver,project_droplet_qc
       use pdcomp_module, only : pidcomp
       use lsnudge_module
       use ib_module
@@ -262,7 +262,7 @@
       real, intent(inout), dimension(ibl:iel,jbl:jel) :: tmn,tml,t0ml,hml,h0ml,huml,hvml,tmoml
       real, intent(inout), dimension(ibp:iep,jbp:jep,kbp:kep,npt) :: pta,pt3d,ptten
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
-      double precision, intent(inout), dimension(ib:ie,jb:je,kb:ke,7) :: dpten
+      double precision, intent(inout), dimension(ib:ie,jb:je,kb:ke,5) :: dpten
       real, intent(in), dimension(ipb:ipe,jpb:jpe,kpb:kpe) :: cfb
       real, intent(in), dimension(kpb:kpe) :: cfa,cfc,ad1,ad2
       complex, intent(inout), dimension(ipb:ipe,jpb:jpe,kpb:kpe) :: pdt,lgbth,lgbph
@@ -978,8 +978,6 @@
             dpten(i,j,k,3) = 0.0
             dpten(i,j,k,4) = 0.0
             dpten(i,j,k,5) = 0.0
-            dpten(i,j,k,6) = 0.0
-            dpten(i,j,k,7) = 0.0
           enddo
           enddo
           enddo
@@ -994,6 +992,9 @@
                                n3w1,n3w2,n3e1,n3e2,s3w1,s3w2,s3e1,s3e2,reqs_s,            &
                                dpten,pdata_locind,nstep,num_drop_fallout)
           num_drop_fallout_step = num_drop_fallout_step + num_drop_fallout
+          if( ptype.eq.7 .and. nqc.ge.1 )then
+            call project_droplet_qc(xf,yf,zf,sigmaf,rho,pdata,pdata_locind,q3d,qa)
+          endif
           if (i_dropsub.eq.num_dropsub) then
             call droplet_injection_driver(dt,mtime,xh,xf,yh,yf,zh,zf,zs,zntmp, &
                                           sigma,sigmaf,rho,rru,rrv,rrw,dum1,qa,prs, &
@@ -1015,7 +1016,7 @@
 #ifdef MPI
           if(timestats.ge.1) time_dpc=time_dpc+mytime()
 #endif
-          if( nout3d.ge.6 )then
+          if( nout3d.ge.5 )then
             !$omp parallel do default(shared) private(i,j,k)
             !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
             do k=1,nk
@@ -1028,19 +1029,6 @@
               out3d(i,j,k,3) = dpten(i,j,k,3)
               out3d(i,j,k,4) = dpten(i,j,k,4)
               out3d(i,j,k,5) = dpten(i,j,k,5)
-              out3d(i,j,k,6) = dpten(i,j,k,6)
-            enddo
-            enddo
-            enddo
-          endif
-          if( ptype.eq.7 .and. nqc.ge.1 )then
-            !$omp parallel do default(shared) private(i,j,k)
-            !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
-            do k=1,nk
-            do j=1,nj
-            do i=1,ni
-              q3d(i,j,k,nqc)=real(dpten(i,j,k,7))
-              qa(i,j,k,nqc)=q3d(i,j,k,nqc)
             enddo
             enddo
             enddo

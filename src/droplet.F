@@ -3,7 +3,8 @@
   implicit none
 
   private
-  public :: droplet_driver,droplet_injection_driver,droplet_diag,initialize_droplet_histograms, &
+  public :: droplet_driver,droplet_injection_driver,project_droplet_qc, &
+            droplet_diag,initialize_droplet_histograms, &
             check_droplet_ownership,particle_seed,ngidx, &
             kohler_equil_radius,lognormal_droplet
 
@@ -107,7 +108,7 @@
       real, intent(in), dimension(ibl:iel,jbl:jel) :: s10
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: rho,prs,ta
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke) :: pi0,th0,th_in,ppa
-      double precision, intent(inout), dimension(ib:ie,jb:je,kb:ke,7) :: dpten
+      double precision, intent(inout), dimension(ib:ie,jb:je,kb:ke,5) :: dpten
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke,numq) :: qa
       real, intent(inout), dimension(ib:ie+1,jb:je,kb:ke) :: ua
       real, intent(inout), dimension(ib:ie,jb:je+1,kb:ke) :: va
@@ -800,6 +801,107 @@
     num_fallout_out = num_fallout
 
    end subroutine droplet_driver
+
+!----------------------------------------------------------------------
+
+   subroutine project_droplet_qc(xf,yf,zf,sigmaf,rho,pdata,pdata_locind,q3d,qa)
+
+      use input, only : ib,ie,jb,je,kb,ke,numq,ni,nj,nk,npvals,nparcelsLocal, &
+          nparcelsLocalActive,nx,ny,axisymm,terrain_flag,nqc, &
+          prx,pry,prz,prsig,prrp,prmult
+      use constants
+      implicit none
+
+      real, intent(in), dimension(ib:ie+1) :: xf
+      real, intent(in), dimension(jb:je+1) :: yf
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: zf
+      real, intent(in), dimension(kb:ke+1) :: sigmaf
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke) :: rho
+      real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
+      integer, intent(inout), dimension(nparcelsLocal,3) :: pdata_locind
+      real, intent(inout), dimension(ib:ie,jb:je,kb:ke,numq) :: q3d,qa
+
+      integer :: i,j,k,np,iflag,jflag,kflag
+      real :: x3d,y3d,z3d,sig3d,dV,watermass
+
+      if( nqc.lt.1 ) return
+
+      !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
+      do k=1,nk
+      do j=1,nj
+      do i=1,ni
+        q3d(i,j,k,nqc) = 0.0
+      enddo
+      enddo
+      enddo
+
+      !$acc parallel loop gang vector default(present) &
+      !$acc private(np,iflag,jflag,kflag,x3d,y3d,z3d,sig3d,dV,watermass)
+      do np=1,nparcelsLocalActive
+        x3d = pdata(np,prx)
+        y3d = pdata(np,pry)
+        if( .not. terrain_flag )then
+          z3d = pdata(np,prz)
+        else
+          sig3d = pdata(np,prsig)
+        endif
+
+        iflag = undefined_index
+        jflag = undefined_index
+        kflag = undefined_index
+
+        IF(nx.eq.1)THEN
+          iflag = 1
+        ELSE
+          call find_horizontal_location_index (pdata_locind(np,1), x3d, ib, ie+1, xf, ni+1, iflag)
+        ENDIF
+
+        IF(axisymm.eq.1.or.ny.eq.1)THEN
+          jflag = 1
+        ELSE
+          call find_horizontal_location_index (pdata_locind(np,2), y3d, jb, je+1, yf, nj+1, jflag)
+        ENDIF
+
+        if( iflag.ge.1 .and. iflag.le.ni .and. jflag.ge.1 .and. jflag.le.nj )then
+          kflag = 1
+          if( .not. terrain_flag )then
+            if( z3d.ge.zf(iflag,jflag,kb) .and. z3d.le.zf(iflag,jflag,ke+1) )then
+              do while( z3d.gt.zf(iflag,jflag,kflag+1) )
+                kflag = kflag+1
+              enddo
+              pdata_locind(np,3) = kflag
+            else
+              kflag = undefined_index
+            endif
+          else
+            if( sig3d.ge.sigmaf(kb) .and. sig3d.le.sigmaf(ke+1) )then
+              call find_vertical_location_index (pdata_locind(np,3), sig3d, kb, ke+1, sigmaf, kflag, .TRUE.)
+            else
+              kflag = undefined_index
+            endif
+          endif
+
+          if( kflag.ge.1 .and. kflag.le.nk )then
+            dV = (xf(iflag+1)-xf(iflag))*(yf(jflag+1)-yf(jflag)) &
+               *(zf(iflag,jflag,kflag+1)-zf(iflag,jflag,kflag))
+            watermass = rhow*4.0/3.0*pi*pdata(np,prrp)**3
+            !$acc atomic update
+            q3d(iflag,jflag,kflag,nqc) = q3d(iflag,jflag,kflag,nqc) &
+              + watermass*pdata(np,prmult)/(rho(iflag,jflag,kflag)*dV)
+          endif
+        endif
+      enddo
+
+      !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
+      do k=1,nk
+      do j=1,nj
+      do i=1,ni
+        qa(i,j,k,nqc) = q3d(i,j,k,nqc)
+      enddo
+      enddo
+      enddo
+
+   end subroutine project_droplet_qc
 
 !----------------------------------------------------------------------
 
@@ -1706,7 +1808,7 @@
       real, intent(in), dimension(ib:ie,jb:je,kb:ke) :: zh
       real, intent(in), dimension(kb:ke) :: sigma
       real, intent(in), dimension(kb:ke+1) :: sigmaf
-      double precision, intent(inout), dimension(ib:ie,jb:je,kb:ke,7) :: dpten
+      double precision, intent(inout), dimension(ib:ie,jb:je,kb:ke,5) :: dpten
 
       integer, intent(in) :: np
       integer, intent(in) :: iflag,jflag,kflag
@@ -2035,13 +2137,6 @@
       !        + ta(i+1,j+1,k  )*w7 &
       !        + ta(i+1,j+1,k+1)*w8
 
-      ! diagnostic purposes only: number and liquid mixint ratio of drops in each grid cell
-      !$acc atomic update
-      dpten(iflag,jflag,kflag,6) = dpten(iflag,jflag,kflag,6) + 1.0
-
-      !$acc atomic update
-      dpten(iflag,jflag,kflag,7) = dpten(iflag,jflag,kflag,7) + partmass/rhoval*pdata(np,prmult)/dV
-
       end subroutine project_feedback
 
       subroutine droplet_diag(rtime,nrec,zh,zf,pdata,pdata_locind,dpten,wa,qa,th_in,th0,pi0,ppa,rho)
@@ -2056,7 +2151,7 @@
 
       integer, intent(inout) :: nrec
       real, intent(in) :: rtime
-      double precision, intent(in), dimension(ib:ie,jb:je,kb:ke,7) :: dpten
+      double precision, intent(in), dimension(ib:ie,jb:je,kb:ke,5) :: dpten
       real, intent(in), dimension(nparcelsLocal,npvals) :: pdata
       integer, intent(inout), dimension(nparcelsLocal,3) :: pdata_locind    ! x/y/z location index of each parcel
       real, intent(in), dimension(ib:ie,jb:je,kb:ke) :: zh
@@ -2411,7 +2506,8 @@
                qvsrc_tmp = qvsrc_tmp + dpten(i,j,k,2)
                rhovsrc_tmp = rhovsrc_tmp + dpten(i,j,k,2)*rho(i,j,k)
 
-               qt = qa(i,j,k,nqv) + dpten(i,j,k,7)/rho(i,j,k)  !Total mixing ratio of vapor + liquid
+               qt = qa(i,j,k,nqv)
+               if( ptype.eq.7 .and. nqc.ge.1 ) qt = qt + qa(i,j,k,nqc)
                ta_tmp = (th0(i,j,k)+th_in(i,j,k))*(pi0(i,j,k)+ppa(i,j,k))
                lhv=lv1-lv2*ta_tmp
                kmoist_tmp = kmoist_tmp + ta_tmp*(cp + qt*cpl) + lhv*qa(i,j,k,nqv)

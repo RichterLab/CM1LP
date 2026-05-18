@@ -429,7 +429,7 @@ end module cuda_rt
 !    No other changes are necessary:  output file will contain the 
 !    variables "out1", "out2", "out3", ... etc.
 
-      nout3d =   6
+      nout3d =   5
 
 !----------------------------------------------------------------------
 !  For arbitrary 2d output array:  
@@ -2297,7 +2297,7 @@ end module cuda_rt
       allocate(  pdata_locind(nparcelsLocal,3) )
       pdata_locind = undefined_index
 
-      allocate( dpten(ib:ie,jb:je,kb:ke,7) )
+      allocate( dpten(ib:ie,jb:je,kb:ke,5) )
       dpten = 0.0
 
       allocate( flag(ib:ie,jb:je,kb:ke) )
