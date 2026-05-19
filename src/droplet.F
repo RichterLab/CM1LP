@@ -3,7 +3,8 @@
   implicit none
 
   private
-  public :: droplet_driver,droplet_injection_driver,project_droplet_qc, &
+  public :: droplet_driver,droplet_injection_driver,compute_droplet_substeps, &
+            project_droplet_qc, &
             droplet_diag,initialize_droplet_histograms, &
             check_droplet_ownership,particle_seed,ngidx, &
             kohler_equil_radius,lognormal_droplet
@@ -803,6 +804,137 @@
    end subroutine droplet_driver
 
 !----------------------------------------------------------------------
+
+   subroutine compute_droplet_substeps(dt,xf,yf,zf,sigmaf,pdata,pdata_locind,num_dropsub)
+
+      use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,npvals,nparcelsLocal, &
+          nparcelsLocalActive,nx,ny,axisymm,terrain_flag,viscosity,sc_num, &
+          prx,pry,prz,prsig,prrp,prmult,ierr
+      use constants
+#ifdef MPI
+      use mpi
+#endif
+      implicit none
+
+      real, intent(in) :: dt
+      real, intent(in), dimension(ib:ie+1) :: xf
+      real, intent(in), dimension(jb:je+1) :: yf
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: zf
+      real, intent(in), dimension(kb:ke+1) :: sigmaf
+      real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
+      integer, intent(inout), dimension(nparcelsLocal,3) :: pdata_locind
+      integer, intent(out) :: num_dropsub
+
+      integer :: i,j,k,np,iflag,jflag,kflag
+      real :: x3d,y3d,z3d,sig3d,dV,diffv,tauc_min
+      real :: drop_radnc_local,drop_radnc_global
+      real, dimension(ib:ie,jb:je,kb:ke) :: drop_radnc
+
+      num_dropsub = 1
+
+      if( dt.le.0.0 ) return
+
+      !$acc data create(drop_radnc)
+
+      !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
+      do k=1,nk
+      do j=1,nj
+      do i=1,ni
+        drop_radnc(i,j,k) = 0.0
+      enddo
+      enddo
+      enddo
+
+      !$acc parallel loop gang vector default(present) &
+      !$acc private(np,iflag,jflag,kflag,x3d,y3d,z3d,sig3d,dV)
+      do np=1,nparcelsLocalActive
+        x3d = pdata(np,prx)
+        y3d = pdata(np,pry)
+        if( .not. terrain_flag )then
+          z3d = pdata(np,prz)
+        else
+          sig3d = pdata(np,prsig)
+        endif
+
+        iflag = undefined_index
+        jflag = undefined_index
+        kflag = undefined_index
+
+        IF(nx.eq.1)THEN
+          iflag = 1
+        ELSE
+          call find_horizontal_location_index (pdata_locind(np,1), x3d, ib, ie+1, xf, ni+1, iflag)
+        ENDIF
+
+        IF(axisymm.eq.1.or.ny.eq.1)THEN
+          jflag = 1
+        ELSE
+          call find_horizontal_location_index (pdata_locind(np,2), y3d, jb, je+1, yf, nj+1, jflag)
+        ENDIF
+
+        if( iflag.ge.1 .and. iflag.le.ni .and. jflag.ge.1 .and. jflag.le.nj )then
+          kflag = 1
+          if( .not. terrain_flag )then
+            if( z3d.ge.zf(iflag,jflag,kb) .and. z3d.le.zf(iflag,jflag,ke+1) )then
+              do while( z3d.gt.zf(iflag,jflag,kflag+1) )
+                kflag = kflag+1
+              enddo
+              pdata_locind(np,3) = kflag
+            else
+              kflag = undefined_index
+            endif
+          else
+            if( sig3d.ge.sigmaf(kb) .and. sig3d.le.sigmaf(ke+1) )then
+              call find_vertical_location_index (pdata_locind(np,3), sig3d, kb, ke+1, sigmaf, kflag, .TRUE.)
+            else
+              kflag = undefined_index
+            endif
+          endif
+
+          if( kflag.ge.1 .and. kflag.le.nk )then
+            dV = (xf(iflag+1)-xf(iflag))*(yf(jflag+1)-yf(jflag)) &
+               *(zf(iflag,jflag,kflag+1)-zf(iflag,jflag,kflag))
+            if( dV.gt.0.0 )then
+              !$acc atomic update
+              drop_radnc(iflag,jflag,kflag) = drop_radnc(iflag,jflag,kflag) &
+                + pdata(np,prrp)*pdata(np,prmult)/dV
+            endif
+          endif
+        endif
+      enddo
+
+      ! avg_rad*Nc = sum(mult*radius)/dV, so the largest value gives the
+      ! shortest local cloud relaxation time.
+      drop_radnc_local = 0.0
+      !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k) &
+      !$acc reduction(max:drop_radnc_local)
+      do k=1,nk
+      do j=1,nj
+      do i=1,ni
+        drop_radnc_local = max(drop_radnc_local,drop_radnc(i,j,k))
+      enddo
+      enddo
+      enddo
+
+      !$acc end data
+
+#ifdef MPI
+      call MPI_ALLREDUCE(drop_radnc_local,drop_radnc_global,1,MPI_REAL, &
+                         MPI_MAX,MPI_COMM_WORLD,ierr)
+#else
+      drop_radnc_global = drop_radnc_local
+#endif
+
+      diffv = viscosity/max(sc_num,1.0e-12)
+      if( drop_radnc_global.gt.0.0 .and. diffv.gt.0.0 )then
+        tauc_min = 1.0/(pi*diffv*drop_radnc_global)
+        if( tauc_min.gt.0.0 .and. dt.gt.tauc_min )then
+          num_dropsub = max(1,ceiling(dt/tauc_min))
+        endif
+      endif
+
+   end subroutine compute_droplet_substeps
+
 
    subroutine project_droplet_qc(xf,yf,zf,sigmaf,rho,pdata,pdata_locind,q3d,qa)
 

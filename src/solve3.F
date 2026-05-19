@@ -172,7 +172,8 @@
       use adv_routines, only : movesfc
       use misclibs
       use parcel_module, only : parcel_driver
-      use droplet_module, only : droplet_driver,droplet_injection_driver,project_droplet_qc
+      use droplet_module, only : droplet_driver,droplet_injection_driver, &
+          compute_droplet_substeps,project_droplet_qc
       use pdcomp_module, only : pidcomp
       use lsnudge_module
       use ib_module
@@ -958,11 +959,14 @@
         ifdroplet:  &
         if (prcl_droplet.ge.1) then
 
-          num_dropsub = 1
+          if( ptype.eq.7 .and. two_way_coupling.eq.1 )then
+            call compute_droplet_substeps(dt,xf,yf,zf,sigmaf,pdata,pdata_locind,num_dropsub)
+          else
+            num_dropsub = 1
+          endif
           mtime_dropsub = mtime
           num_drop_fallout_step = 0
           do i_dropsub = 1,num_dropsub
-          if (myid.eq.0) print *, 'DHR2: In dropsub loop, i_dropsub=',i_dropsub
 
           dt_dropsub = dt/real(num_dropsub)
           dbldt_dropsub = dbldt/dble(num_dropsub)
@@ -992,10 +996,10 @@
                                n3w1,n3w2,n3e1,n3e2,s3w1,s3w2,s3e1,s3e2,reqs_s,            &
                                dpten,pdata_locind,nstep,num_drop_fallout)
           num_drop_fallout_step = num_drop_fallout_step + num_drop_fallout
-          if( ptype.eq.7 .and. nqc.ge.1 )then
-            call project_droplet_qc(xf,yf,zf,sigmaf,rho,pdata,pdata_locind,q3d,qa)
-          endif
           if (i_dropsub.eq.num_dropsub) then
+            if( ptype.eq.7 .and. nqc.ge.1 )then
+              call project_droplet_qc(xf,yf,zf,sigmaf,rho,pdata,pdata_locind,q3d,qa)
+            endif
             call droplet_injection_driver(dt,mtime,xh,xf,yh,yf,zh,zf,zs,zntmp, &
                                           sigma,sigmaf,rho,rru,rrv,rrw,dum1,qa,prs, &
                                           s10,pdata,pdata_locind,num_drop_fallout_step)
