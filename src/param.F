@@ -2124,13 +2124,13 @@
         call stopcm1
       ENDIF
       !-----
-      IF( radopt.eq.2 .and. ( ptype.ne.3 .and. ptype.ne.5 )  )THEN
+      IF( radopt.eq.2 .and. ( ptype.ne.3 .and. ptype.ne.5 .and. ptype.ne.7 )  )THEN
         if(myid.eq.0)then
         print *
         print *,'  radopt   = ',radopt
         print *,'  ptype    = ',ptype
         print *
-        print *,'  radopt=2 requires ptype=3,5 (for now) '
+        print *,'  radopt=2 requires ptype=3,5,7 (for now) '
         print *
         print *,'   stopping model .... '
         print *
@@ -4313,7 +4313,7 @@
 !-------   END:  modify stuff above here -------------------------------
 !-----------------------------------------------------------------------
 
-      IF( (radopt.eq.1.or.radopt.eq.2) .and. iice.ne.1 )THEN
+      IF( (radopt.eq.1.or.radopt.eq.2) .and. iice.ne.1 .and. ptype.ne.7 )THEN
         print *
         print *,'  radopt   = ',radopt
         print *,'  iice     = ',iice

@@ -1771,6 +1771,7 @@ SUBROUTINE cldoptd(nx,ny,m,n,nz, radstgr,                               &
           effrad = 0.0015
 ! hm 8/20/12
           if(ptype.eq.5) effrad = effc(k)*1.e-4 !convert from micron to cm
+          if(ptype.eq.7) effrad = effc(k)*100.0 ! convert from m to cm
           tauqc  = w1/effrad
           reff2  = effrad*1.0E4
         ELSE

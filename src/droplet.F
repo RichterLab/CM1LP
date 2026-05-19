@@ -4,7 +4,7 @@
 
   private
   public :: droplet_driver,droplet_injection_driver,compute_droplet_substeps, &
-            project_droplet_qc, &
+            project_droplet_qc_effc, &
             droplet_diag,initialize_droplet_histograms, &
             check_droplet_ownership,particle_seed,ngidx, &
             kohler_equil_radius,lognormal_droplet
@@ -936,9 +936,10 @@
    end subroutine compute_droplet_substeps
 
 
-   subroutine project_droplet_qc(xf,yf,zf,sigmaf,rho,pdata,pdata_locind,q3d,qa)
+   subroutine project_droplet_qc_effc(xf,yf,zf,sigmaf,rho,pdata,pdata_locind,q3d,qa,effc)
 
-      use input, only : ib,ie,jb,je,kb,ke,numq,ni,nj,nk,npvals,nparcelsLocal, &
+      use input, only : ib,ie,jb,je,kb,ke,ibr,ier,jbr,jer,kbr,ker, &
+          numq,ni,nj,nk,npvals,nparcelsLocal, &
           nparcelsLocalActive,nx,ny,axisymm,terrain_flag,nqc, &
           prx,pry,prz,prsig,prrp,prmult
       use constants
@@ -952,17 +953,24 @@
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
       integer, intent(inout), dimension(nparcelsLocal,3) :: pdata_locind
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke,numq) :: q3d,qa
+      real, intent(inout), dimension(ibr:ier,jbr:jer,kbr:ker) :: effc
 
       integer :: i,j,k,np,iflag,jflag,kflag
       real :: x3d,y3d,z3d,sig3d,dV,watermass
+      real, dimension(ib:ie,jb:je,kb:ke) :: sum_r2,sum_r3
 
       if( nqc.lt.1 ) return
+
+      !$acc data create(sum_r2,sum_r3)
 
       !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
       do k=1,nk
       do j=1,nj
       do i=1,ni
         q3d(i,j,k,nqc) = 0.0
+        sum_r2(i,j,k) = 0.0
+        sum_r3(i,j,k) = 0.0
+        effc(i,j,k) = 10.0e-6
       enddo
       enddo
       enddo
@@ -1020,6 +1028,12 @@
             !$acc atomic update
             q3d(iflag,jflag,kflag,nqc) = q3d(iflag,jflag,kflag,nqc) &
               + watermass*pdata(np,prmult)/(rho(iflag,jflag,kflag)*dV)
+            !$acc atomic update
+            sum_r2(iflag,jflag,kflag) = sum_r2(iflag,jflag,kflag) &
+              + pdata(np,prmult)*pdata(np,prrp)**2
+            !$acc atomic update
+            sum_r3(iflag,jflag,kflag) = sum_r3(iflag,jflag,kflag) &
+              + pdata(np,prmult)*pdata(np,prrp)**3
           endif
         endif
       enddo
@@ -1029,11 +1043,16 @@
       do j=1,nj
       do i=1,ni
         qa(i,j,k,nqc) = q3d(i,j,k,nqc)
+        if( sum_r2(i,j,k).gt.0.0 )then
+          effc(i,j,k) = max(2.5e-6,min(sum_r3(i,j,k)/sum_r2(i,j,k),50.0e-6))
+        endif
       enddo
       enddo
       enddo
 
-   end subroutine project_droplet_qc
+      !$acc end data
+
+   end subroutine project_droplet_qc_effc
 
 !----------------------------------------------------------------------
 
