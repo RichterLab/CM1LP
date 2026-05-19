@@ -1869,7 +1869,11 @@ end module cuda_rt
       rad2d = 0.0
 
       allocate(  effc(ibr:ier,jbr:jer,kbr:ker) )
-      effc = 25.0
+      if( ptype.eq.7 )then
+        effc = 10.0e-6
+      else
+        effc = 25.0
+      endif
       allocate(  effi(ibr:ier,jbr:jer,kbr:ker) )
       effi = 25.0
       allocate(  effs(ibr:ier,jbr:jer,kbr:ker) )

@@ -964,13 +964,21 @@
       !$acc data create(sum_r2,sum_r3)
 
       !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
+      do k=kbr,ker
+      do j=jbr,jer
+      do i=ibr,ier
+        effc(i,j,k) = 10.0e-6
+      enddo
+      enddo
+      enddo
+
+      !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
       do k=1,nk
       do j=1,nj
       do i=1,ni
         q3d(i,j,k,nqc) = 0.0
         sum_r2(i,j,k) = 0.0
         sum_r3(i,j,k) = 0.0
-        effc(i,j,k) = 10.0e-6
       enddo
       enddo
       enddo

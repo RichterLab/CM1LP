@@ -4562,7 +4562,7 @@
           enddo
           enddo
 
-          if( radopt.eq.2 )then
+          if( radopt.eq.2 .or. ptype.eq.7 )then
             !$omp parallel do default(shared)  &
             !$omp private(i,j,k)
           !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)

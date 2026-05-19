@@ -5055,6 +5055,14 @@
         vardesc(nvar) = 'cloud droplet effective radius'
         varunit(nvar) = 'micron'
         call getavg3d(effc(ibr,jbr,kbr),savg)
+        if( ptype.eq.7 )then
+          ! Lagrangian droplet effc is carried in meters for radiation.
+          !$acc parallel loop gang vector default(present)
+          do k=1,nk+1
+            savg(k) = 1.0d6*savg(k)
+          enddo
+          !$acc end parallel
+        endif
         call write3d(savg,trecs,trecw,vargrid,nvar,varname,vardesc,varunit)
 
         nvar = nvar+1
