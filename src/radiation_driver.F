@@ -93,11 +93,7 @@
       integer :: has_reqc,has_reqi,has_reqs,icloud,mp_physics,sf_surface_physics,yr,julday,no_src_types,aer_opt,o3input
       real :: julian,xtime,declin,solcon,gmt,tfoo,rcvm,radt_min,co2out
       real :: qrad_l,qrad_i
-      real :: avg_prs0s,avg_rth0s_inv,avg_rho0s,avg_tsk
-      real :: avg_rad2d_ncosss,avg_rad2d_nrsirbm,avg_rad2d_nrsirdf
-      real :: avg_rad2d_nrsuvbm,avg_rad2d_nrsuvdf,avg_rad2d_ncosz
-      real :: avg_rad2d_nfdirir,avg_rad2d_nfdifir,avg_rad2d_nfdirpar,avg_rad2d_nfdifpar
-      real :: avg_olr,avg_dsr,avg_radsw,avg_rnflx,avg_radswnet,avg_radlwin
+      real :: avg_prs0s,avg_rth0s_inv,avg_rho0s
       real :: avg_default_effc
 
       real, dimension(kb:ke) :: avg_prs_col,avg_prs0_col,avg_pi0_col,avg_ppi_col
@@ -126,6 +122,9 @@
       real, dimension(1:1,1:1) :: avg_lwupb2d,avg_lwupbc2d,avg_lwdnb2d,avg_lwdnbc2d
       real, dimension(1:1,1:1) :: avg_swupt2d,avg_swuptc2d,avg_swdnt2d,avg_swdntc2d
       real, dimension(1:1,1:1) :: avg_swupb2d,avg_swupbc2d,avg_swdnb2d,avg_swdnbc2d
+      real, dimension(1:1,1:1) :: avg_dsr2d,avg_radsw2d,avg_rnflx2d,avg_radswnet2d,avg_radlwin2d
+      real, dimension(1:1,1:1) :: avg_ncosss2d,avg_nrsirbm2d,avg_nrsirdf2d,avg_nrsuvbm2d,avg_nrsuvdf2d
+      real, dimension(1:1,1:1) :: avg_ncosz2d,avg_nfdirir2d,avg_nfdifir2d,avg_nfdirpar2d,avg_nfdifpar2d
 
       real, dimension(:,:,:,:), pointer :: tauaer_sw=>null(), ssaaer_sw=>null(), asyaer_sw=>null()
 
@@ -293,17 +292,17 @@
           call avg2d_interior(prs0s(1:ni,1:nj),avg_prs0s)
           call avg2d_interior_inv(rth0s(1:ni,1:nj),avg_rth0s_inv)
           call avg2d_interior(rho0s(1:ni,1:nj),avg_rho0s)
-          call avg2d_interior(tsk(1:ni,1:nj),avg_tsk)
-          call avg2d_interior(rad2d(1:ni,1:nj,ncosss),avg_rad2d_ncosss)
-          call avg2d_interior(rad2d(1:ni,1:nj,nrsirbm),avg_rad2d_nrsirbm)
-          call avg2d_interior(rad2d(1:ni,1:nj,nrsirdf),avg_rad2d_nrsirdf)
-          call avg2d_interior(rad2d(1:ni,1:nj,nrsuvbm),avg_rad2d_nrsuvbm)
-          call avg2d_interior(rad2d(1:ni,1:nj,nrsuvdf),avg_rad2d_nrsuvdf)
-          call avg2d_interior(rad2d(1:ni,1:nj,ncosz),avg_rad2d_ncosz)
-          call avg2d_interior(rad2d(1:ni,1:nj,nfdirir),avg_rad2d_nfdirir)
-          call avg2d_interior(rad2d(1:ni,1:nj,nfdifir),avg_rad2d_nfdifir)
-          call avg2d_interior(rad2d(1:ni,1:nj,nfdirpar),avg_rad2d_nfdirpar)
-          call avg2d_interior(rad2d(1:ni,1:nj,nfdifpar),avg_rad2d_nfdifpar)
+          call avg2d_interior(tsk(1:ni,1:nj),avg_tsk2d(1,1))
+          call avg2d_interior(rad2d(1:ni,1:nj,ncosss),avg_ncosss2d(1,1))
+          call avg2d_interior(rad2d(1:ni,1:nj,nrsirbm),avg_nrsirbm2d(1,1))
+          call avg2d_interior(rad2d(1:ni,1:nj,nrsirdf),avg_nrsirdf2d(1,1))
+          call avg2d_interior(rad2d(1:ni,1:nj,nrsuvbm),avg_nrsuvbm2d(1,1))
+          call avg2d_interior(rad2d(1:ni,1:nj,nrsuvdf),avg_nrsuvdf2d(1,1))
+          call avg2d_interior(rad2d(1:ni,1:nj,ncosz),avg_ncosz2d(1,1))
+          call avg2d_interior(rad2d(1:ni,1:nj,nfdirir),avg_nfdirir2d(1,1))
+          call avg2d_interior(rad2d(1:ni,1:nj,nfdifir),avg_nfdifir2d(1,1))
+          call avg2d_interior(rad2d(1:ni,1:nj,nfdirpar),avg_nfdirpar2d(1,1))
+          call avg2d_interior(rad2d(1:ni,1:nj,nfdifpar),avg_nfdifpar2d(1,1))
 
           swtmp = 0.0
           lwtmp = 0.0
@@ -347,21 +346,23 @@
            rhostr(1) = avg_rho0s
             doirrad = .true.
             dosorad = .true.
-            avg_olr = 0.0
-            avg_dsr = 0.0
-            avg_radsw = 0.0
-            avg_rnflx = 0.0
-            avg_radswnet = 0.0
-            avg_radlwin = 0.0
+            avg_olr2d = 0.0
+            avg_dsr2d = 0.0
+            avg_radsw2d = 0.0
+            avg_rnflx2d = 0.0
+            avg_radswnet2d = 0.0
+            avg_radlwin2d = 0.0
 
           CALL radtrns(nir,njr,nkr, rbufsz, 0,myid,dx,dy,            &
-                 ib,ie,jb,je,kb,ke,xh,yh,avg_prs0s,avg_olr,avg_dsr,  &
+                 ib,ie,jb,je,kb,ke,xh,yh,avg_prs0s,avg_olr2d(1,1),avg_dsr2d(1,1), &
                  ptprt,pprt,qv,qc,qr,qi,qs,qh,cvr,                  &
-                 ptbar,pbar,appi,o31,rhostr, avg_tsk, zpp ,         &
-                 avg_radsw,avg_rnflx,avg_radswnet,avg_radlwin, avg_rad2d_ncosss, &
-                 avg_rad2d_nrsirbm,avg_rad2d_nrsirdf,avg_rad2d_nrsuvbm,          &
-                 avg_rad2d_nrsuvdf, avg_rad2d_ncosz,sazimuth,                    &
-                 avg_rad2d_nfdirir,avg_rad2d_nfdifir,avg_rad2d_nfdirpar,avg_rad2d_nfdifpar, &
+                 ptbar,pbar,appi,o31,rhostr,avg_tsk2d(1,1), zpp ,   &
+                 avg_radsw2d(1,1),avg_rnflx2d(1,1),avg_radswnet2d(1,1),           &
+                 avg_radlwin2d(1,1),avg_ncosss2d(1,1),                           &
+                 avg_nrsirbm2d(1,1),avg_nrsirdf2d(1,1),avg_nrsuvbm2d(1,1),        &
+                 avg_nrsuvdf2d(1,1),avg_ncosz2d(1,1),sazimuth,                   &
+                 avg_nfdirir2d(1,1),avg_nfdifir2d(1,1),avg_nfdirpar2d(1,1),       &
+                 avg_nfdifpar2d(1,1),                                             &
                  tem1, tem2, tem3, tem4, tem5,                &
                  tem6, tem7, tem8, tem9, tem10,               &
                  tem11,tem12,tem13,tem14,tem15,tem16,         &
@@ -377,22 +378,22 @@
           call spread_col_3d(avg_swten_col,swten,1,nk)
           call spread_col_3d(avg_lwten_col,lwten,1,nk)
           call spread_col_3d(avg_cldfra_col,cldfra,1,nk)
-          call spread_scalar_2d(avg_olr,olr)
-          call spread_scalar_2d(avg_dsr,dsr)
-          call spread_scalar_2d(avg_radsw,radsw)
-          call spread_scalar_2d(avg_rnflx,rnflx)
-          call spread_scalar_2d(avg_radswnet,radswnet)
-          call spread_scalar_2d(avg_radlwin,radlwin)
-          call spread_scalar_2d(avg_rad2d_ncosss,rad2d(1:ni,1:nj,ncosss))
-          call spread_scalar_2d(avg_rad2d_nrsirbm,rad2d(1:ni,1:nj,nrsirbm))
-          call spread_scalar_2d(avg_rad2d_nrsirdf,rad2d(1:ni,1:nj,nrsirdf))
-          call spread_scalar_2d(avg_rad2d_nrsuvbm,rad2d(1:ni,1:nj,nrsuvbm))
-          call spread_scalar_2d(avg_rad2d_nrsuvdf,rad2d(1:ni,1:nj,nrsuvdf))
-          call spread_scalar_2d(avg_rad2d_ncosz,rad2d(1:ni,1:nj,ncosz))
-          call spread_scalar_2d(avg_rad2d_nfdirir,rad2d(1:ni,1:nj,nfdirir))
-          call spread_scalar_2d(avg_rad2d_nfdifir,rad2d(1:ni,1:nj,nfdifir))
-          call spread_scalar_2d(avg_rad2d_nfdirpar,rad2d(1:ni,1:nj,nfdirpar))
-          call spread_scalar_2d(avg_rad2d_nfdifpar,rad2d(1:ni,1:nj,nfdifpar))
+          call spread_scalar_2d(avg_olr2d(1,1),olr)
+          call spread_scalar_2d(avg_dsr2d(1,1),dsr)
+          call spread_scalar_2d(avg_radsw2d(1,1),radsw)
+          call spread_scalar_2d(avg_rnflx2d(1,1),rnflx)
+          call spread_scalar_2d(avg_radswnet2d(1,1),radswnet)
+          call spread_scalar_2d(avg_radlwin2d(1,1),radlwin)
+          call spread_scalar_2d(avg_ncosss2d(1,1),rad2d(1:ni,1:nj,ncosss))
+          call spread_scalar_2d(avg_nrsirbm2d(1,1),rad2d(1:ni,1:nj,nrsirbm))
+          call spread_scalar_2d(avg_nrsirdf2d(1,1),rad2d(1:ni,1:nj,nrsirdf))
+          call spread_scalar_2d(avg_nrsuvbm2d(1,1),rad2d(1:ni,1:nj,nrsuvbm))
+          call spread_scalar_2d(avg_nrsuvdf2d(1,1),rad2d(1:ni,1:nj,nrsuvdf))
+          call spread_scalar_2d(avg_ncosz2d(1,1),rad2d(1:ni,1:nj,ncosz))
+          call spread_scalar_2d(avg_nfdirir2d(1,1),rad2d(1:ni,1:nj,nfdirir))
+          call spread_scalar_2d(avg_nfdifir2d(1,1),rad2d(1:ni,1:nj,nfdifir))
+          call spread_scalar_2d(avg_nfdirpar2d(1,1),rad2d(1:ni,1:nj,nfdirpar))
+          call spread_scalar_2d(avg_nfdifpar2d(1,1),rad2d(1:ni,1:nj,nfdifpar))
 
         else
           ! big OpenMP parallelization loop:
