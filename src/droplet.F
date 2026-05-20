@@ -1106,7 +1106,8 @@
       integer(i8) :: np_tmp,total_fallout
       real :: uval,vval,wval,qval,prsval,tval,rhoval,sigdot
       real :: radmin,radmax,Tpmin,Tpmax
-      real :: minvals(2),maxvals(2)
+      real :: qfmin,qfmax,Tfmin,Tfmax
+      real :: minvals(4),maxvals(4)
 
       !----------------------------------------------------------------------
       ! Final thing: Inject droplets which will be active on the next call of droplet_driver
@@ -1224,41 +1225,59 @@
       radmax = -1000.0
       Tpmin = 1000.0
       Tpmax = -1000.0
+      qfmin = 1000.0
+      qfmax = -1000.0
+      Tfmin = 1000.0
+      Tfmax = -1000.0
 
       !$acc parallel loop gang vector default(present) &
-      !$acc          reduction(min:radmin,Tpmin) &
-      !$acc          reduction(max:radmax,Tpmax)
+      !$acc          reduction(min:radmin,Tpmin,qfmin,Tfmin) &
+      !$acc          reduction(max:radmax,Tpmax,qfmax,Tfmax)
       do np=1,nparcelsLocalActive
          radmin = min(radmin,pdata(np,prrp))
          radmax = max(radmax,pdata(np,prrp))
          Tpmin = min(Tpmin,pdata(np,prtp))
          Tpmax = max(Tpmax,pdata(np,prtp))
+         qfmin = min(qfmin,pdata(np,prqv))
+         qfmax = max(qfmax,pdata(np,prqv))
+         Tfmin = min(Tfmin,pdata(np,prt))
+         Tfmax = max(Tfmax,pdata(np,prt))
       end do
       !$acc end parallel
 
 #ifdef MPI
       call mpi_allreduce(mpi_in_place,np_tmp,1,mpi_integer8,mpi_sum,mpi_comm_world,ierr)
-      minvals = (/ radmin,Tpmin /)
-      maxvals = (/ radmax,Tpmax /)
-      call mpi_allreduce(mpi_in_place,minvals,2,mpi_real,mpi_min,mpi_comm_world,ierr)
-      call mpi_allreduce(mpi_in_place,maxvals,2,mpi_real,mpi_max,mpi_comm_world,ierr)
+      minvals = (/ radmin,Tpmin,qfmin,Tfmin /)
+      maxvals = (/ radmax,Tpmax,qfmax,Tfmax /)
+      call mpi_allreduce(mpi_in_place,minvals,4,mpi_real,mpi_min,mpi_comm_world,ierr)
+      call mpi_allreduce(mpi_in_place,maxvals,4,mpi_real,mpi_max,mpi_comm_world,ierr)
       radmin = minvals(1)
       Tpmin = minvals(2)
+      qfmin = minvals(3)
+      Tfmin = minvals(4)
       radmax = maxvals(1)
       Tpmax = maxvals(2)
+      qfmax = maxvals(3)
+      Tfmax = maxvals(4)
 #endif
       if (np_tmp.le.0_i8) then
          radmin = 0.0
          radmax = 0.0
          Tpmin = 0.0
          Tpmax = 0.0
+         qfmin = 0.0
+         qfmax = 0.0
+         Tfmin = 0.0
+         Tfmax = 0.0
       end if
 
       if (myid==0) then
          !write(*,'(a8,3i)')  'DHR1:',myid,np_tmp,nparcelsLocalActive
-         write(*,'(a18,i18,4(a,1pe15.6))') 'Total particles:',np_tmp, &
+         write(*,'(a18,i18,8(a,1pe15.6))') 'Total particles:',np_tmp, &
                                             ' rmin=',radmin,' rmax=',radmax, &
-                                            ' Tpmin=',Tpmin,' Tpmax=',Tpmax
+                                            ' Tpmin=',Tpmin,' Tpmax=',Tpmax, &
+                                            ' qfmin=',qfmin,' qfmax=',qfmax, &
+                                            ' Tfmin=',Tfmin,' Tfmax=',Tfmax
       end if
 
       if(timestats.ge.1) time_droplet_inject=time_droplet_inject+mytime()
