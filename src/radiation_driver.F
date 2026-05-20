@@ -93,6 +93,39 @@
       integer :: has_reqc,has_reqi,has_reqs,icloud,mp_physics,sf_surface_physics,yr,julday,no_src_types,aer_opt,o3input
       real :: julian,xtime,declin,solcon,gmt,tfoo,rcvm,radt_min,co2out
       real :: qrad_l,qrad_i
+      real :: avg_prs0s,avg_rth0s_inv,avg_rho0s,avg_tsk
+      real :: avg_rad2d_ncosss,avg_rad2d_nrsirbm,avg_rad2d_nrsirdf
+      real :: avg_rad2d_nrsuvbm,avg_rad2d_nrsuvdf,avg_rad2d_ncosz
+      real :: avg_rad2d_nfdirir,avg_rad2d_nfdifir,avg_rad2d_nfdirpar,avg_rad2d_nfdifpar
+      real :: avg_olr,avg_dsr,avg_radsw,avg_rnflx,avg_radswnet,avg_radlwin
+      real :: avg_default_effc
+
+      real, dimension(kb:ke) :: avg_prs_col,avg_prs0_col,avg_pi0_col,avg_ppi_col
+      real, dimension(kb:ke) :: avg_tha_col,avg_th0_col,avg_rho_col,avg_o3_col
+      real, dimension(kb:ke) :: avg_p8w_col,avg_t8w_col,avg_t3d_col,avg_pi3d_col,avg_dz8w_col
+      real, dimension(kb:ke) :: avg_qv_col,avg_qc_col,avg_qr_col,avg_qi_col,avg_qs_col,avg_qg_col
+      real, dimension(kb:ke) :: avg_effc_rad_col,avg_effi_col,avg_effs_col,avg_effr_col,avg_effg_col,avg_effis_col
+      real, dimension(kb:ke) :: avg_swten_col,avg_lwten_col,avg_swtenc_col,avg_lwtenc_col
+      real, dimension(kb:ke) :: avg_cldfra_col
+      integer, dimension(kb:ke) :: avg_cldfra_flag_col
+      real, dimension(kb:ke+1) :: avg_zf_col
+
+      real, dimension(1:1,1:1,kb:ke) :: avg_p8w,avg_t8w,avg_p3d,avg_pi3d,avg_dz8w
+      real, dimension(1:1,1:1,kb:ke) :: avg_t3d,avg_rho3d,avg_o33d,avg_cldfra3d
+      real, dimension(1:1,1:1,kb:ke) :: avg_qv3d,avg_qc3d,avg_qr3d,avg_qi3d,avg_qs3d,avg_qg3d
+      real, dimension(1:1,1:1,kb:ke) :: avg_re_cloud,avg_re_ice,avg_re_snow
+      real, dimension(1:1,1:1,kb:ke) :: avg_lwten3d,avg_swten3d,avg_lwtenc3d,avg_swtenc3d
+      integer, dimension(1:1,1:1,kb:ke) :: avg_cldfra1_flag3d
+
+      real, dimension(1:1,1:1) :: avg_glw2d,avg_olr2d,avg_lwcf2d,avg_emiss2d,avg_tsk2d
+      real, dimension(1:1,1:1) :: avg_xland2d,avg_xice2d,avg_xsnow2d
+      real, dimension(1:1,1:1) :: avg_gsw2d,avg_swcf2d,avg_coszr2d,avg_xlat2d,avg_xlong2d
+      real, dimension(1:1,1:1) :: avg_albd2d,avg_swddir2d,avg_swddni2d,avg_swddif2d
+      real, dimension(1:1,1:1) :: avg_swdownc2d,avg_swddnic2d,avg_swddirc2d,avg_coszen2d
+      real, dimension(1:1,1:1) :: avg_lwupt2d,avg_lwuptc2d,avg_lwdnt2d,avg_lwdntc2d
+      real, dimension(1:1,1:1) :: avg_lwupb2d,avg_lwupbc2d,avg_lwdnb2d,avg_lwdnbc2d
+      real, dimension(1:1,1:1) :: avg_swupt2d,avg_swuptc2d,avg_swdnt2d,avg_swdntc2d
+      real, dimension(1:1,1:1) :: avg_swupb2d,avg_swupbc2d,avg_swdnb2d,avg_swdnbc2d
 
       real, dimension(:,:,:,:), pointer :: tauaer_sw=>null(), ssaaer_sw=>null(), asyaer_sw=>null()
 
@@ -229,6 +262,139 @@
 
     END DO
   END DO
+        if( testcase.eq.17 )then
+
+          call avg3d_core(prs,avg_prs_col,kb,ke)
+          call avg3d_core(prs0,avg_prs0_col,kb,ke)
+          call avg3d_core(pi0,avg_pi0_col,kb,ke)
+          call avg3d_core(ppi,avg_ppi_col,kb,ke)
+          call avg3d_core(tha,avg_tha_col,kb,ke)
+          call avg3d_core(th0,avg_th0_col,kb,ke)
+          call avg3d_core(rho,avg_rho_col,kb,ke)
+          call avg3d_core_zf(zf,avg_zf_col,kb,ke+1)
+          call avg3d_rad(o30,avg_o3_col,kb,ke)
+          call avg_qa_col(qa,nqv,avg_qv_col,kb,ke)
+          call avg_qa_col(qa,nqc,avg_qc_col,kb,ke)
+          call avg_qa_col(qa,nqr,avg_qr_col,kb,ke)
+          call avg_qa_col(qa,nqi,avg_qi_col,kb,ke)
+          call avg_qa_col(qa,nqs,avg_qs_col,kb,ke)
+          call avg_qa_col(qa,nqg,avg_qg_col,kb,ke)
+          if( ptype.eq.7 )then
+            avg_default_effc = 10.0e-6
+          else
+            avg_default_effc = 25.0
+          endif
+          call avg_effc_col(qa,effc,nqc,avg_default_effc,avg_effc_rad_col)
+          call avg3d_rad(effi,avg_effi_col,kb,ke)
+          call avg3d_rad(effs,avg_effs_col,kb,ke)
+          call avg3d_rad(effr,avg_effr_col,kb,ke)
+          call avg3d_rad(effg,avg_effg_col,kb,ke)
+          call avg3d_rad(effis,avg_effis_col,kb,ke)
+          call avg2d_interior(prs0s(1:ni,1:nj),avg_prs0s)
+          call avg2d_interior_inv(rth0s(1:ni,1:nj),avg_rth0s_inv)
+          call avg2d_interior(rho0s(1:ni,1:nj),avg_rho0s)
+          call avg2d_interior(tsk(1:ni,1:nj),avg_tsk)
+          call avg2d_interior(rad2d(1:ni,1:nj,ncosss),avg_rad2d_ncosss)
+          call avg2d_interior(rad2d(1:ni,1:nj,nrsirbm),avg_rad2d_nrsirbm)
+          call avg2d_interior(rad2d(1:ni,1:nj,nrsirdf),avg_rad2d_nrsirdf)
+          call avg2d_interior(rad2d(1:ni,1:nj,nrsuvbm),avg_rad2d_nrsuvbm)
+          call avg2d_interior(rad2d(1:ni,1:nj,nrsuvdf),avg_rad2d_nrsuvdf)
+          call avg2d_interior(rad2d(1:ni,1:nj,ncosz),avg_rad2d_ncosz)
+          call avg2d_interior(rad2d(1:ni,1:nj,nfdirir),avg_rad2d_nfdirir)
+          call avg2d_interior(rad2d(1:ni,1:nj,nfdifir),avg_rad2d_nfdifir)
+          call avg2d_interior(rad2d(1:ni,1:nj,nfdirpar),avg_rad2d_nfdirpar)
+          call avg2d_interior(rad2d(1:ni,1:nj,nfdifpar),avg_rad2d_nfdifpar)
+
+          swtmp = 0.0
+          lwtmp = 0.0
+          do k=1,nk+2
+            ptprt(k) = avg_tha_col(k-1)
+             pprt(k) = avg_prs_col(k-1)-avg_prs0_col(k-1)
+               qv(k) = avg_qv_col(k-1)
+               qc(k) = avg_qc_col(k-1)
+               qr(k) = avg_qr_col(k-1)
+               qi(k) = avg_qi_col(k-1)
+               qs(k) = avg_qs_col(k-1)
+               qh(k) = avg_qg_col(k-1)
+              cvr(k) = cv+cvv*qv(k)+cpl*(qc(k)+qr(k))+cpi*(qi(k)+qs(k)+qh(k))
+             appi(k) = avg_pi0_col(k-1)+avg_ppi_col(k-1)
+              o31(k) = avg_o3_col(k-1)
+            teffc(k) = avg_effc_rad_col(k-1)
+            teffi(k) = avg_effi_col(k-1)
+            teffs(k) = avg_effs_col(k-1)
+            teffr(k) = avg_effr_col(k-1)
+            teffg(k) = avg_effg_col(k-1)
+           teffis(k) = avg_effis_col(k-1)
+          enddo
+          ptprt(1) = ptprt(2)
+           pprt(1) =  pprt(2)
+          ptprt(nk+2) = ptprt(nk+1)
+           pprt(nk+2) =  pprt(nk+1)
+          x1(1) = xf(1)
+          x1(2) = xf(ni+1)
+          y1(1) = yf(1)
+          y1(2) = yf(nj+1)
+          do k=1,nk+3
+            zpp(k) = avg_zf_col(k-1)
+          enddo
+          do k=1,nk+2
+            ptbar(k) = avg_th0_col(k-1)
+             pbar(k) = avg_prs0_col(k-1)
+           rhostr(k) = avg_rho_col(k-1)
+          enddo
+            ptbar(1) = avg_rth0s_inv
+             pbar(1) = avg_prs0s
+           rhostr(1) = avg_rho0s
+            doirrad = .true.
+            dosorad = .true.
+            avg_olr = 0.0
+            avg_dsr = 0.0
+            avg_radsw = 0.0
+            avg_rnflx = 0.0
+            avg_radswnet = 0.0
+            avg_radlwin = 0.0
+
+          CALL radtrns(nir,njr,nkr, rbufsz, 0,myid,dx,dy,            &
+                 ib,ie,jb,je,kb,ke,xh,yh,avg_prs0s,avg_olr,avg_dsr,  &
+                 ptprt,pprt,qv,qc,qr,qi,qs,qh,cvr,                  &
+                 ptbar,pbar,appi,o31,rhostr, avg_tsk, zpp ,         &
+                 avg_radsw,avg_rnflx,avg_radswnet,avg_radlwin, avg_rad2d_ncosss, &
+                 avg_rad2d_nrsirbm,avg_rad2d_nrsirdf,avg_rad2d_nrsuvbm,          &
+                 avg_rad2d_nrsuvdf, avg_rad2d_ncosz,sazimuth,                    &
+                 avg_rad2d_nfdirir,avg_rad2d_nfdifir,avg_rad2d_nfdirpar,avg_rad2d_nfdifpar, &
+                 tem1, tem2, tem3, tem4, tem5,                &
+                 tem6, tem7, tem8, tem9, tem10,               &
+                 tem11,tem12,tem13,tem14,tem15,tem16,         &
+                 radbuf(1), tem17,swtmp,lwtmp,doirrad,dosorad, &
+                 teffc,teffi,teffs,teffr,teffg,teffis,        &
+                 cgs1,cgs2,cgs3,cgt1,cgt2,cgt3,ptype,g,cp,eqtset)
+
+          do k=1,nk
+            avg_swten_col(k) = swtmp(k+1)
+            avg_lwten_col(k) = lwtmp(k+1)
+            avg_cldfra_col(k) = tem5(nk+3-k)
+          enddo
+          call spread_col_3d(avg_swten_col,swten,1,nk)
+          call spread_col_3d(avg_lwten_col,lwten,1,nk)
+          call spread_col_3d(avg_cldfra_col,cldfra,1,nk)
+          call spread_scalar_2d(avg_olr,olr)
+          call spread_scalar_2d(avg_dsr,dsr)
+          call spread_scalar_2d(avg_radsw,radsw)
+          call spread_scalar_2d(avg_rnflx,rnflx)
+          call spread_scalar_2d(avg_radswnet,radswnet)
+          call spread_scalar_2d(avg_radlwin,radlwin)
+          call spread_scalar_2d(avg_rad2d_ncosss,rad2d(1:ni,1:nj,ncosss))
+          call spread_scalar_2d(avg_rad2d_nrsirbm,rad2d(1:ni,1:nj,nrsirbm))
+          call spread_scalar_2d(avg_rad2d_nrsirdf,rad2d(1:ni,1:nj,nrsirdf))
+          call spread_scalar_2d(avg_rad2d_nrsuvbm,rad2d(1:ni,1:nj,nrsuvbm))
+          call spread_scalar_2d(avg_rad2d_nrsuvdf,rad2d(1:ni,1:nj,nrsuvdf))
+          call spread_scalar_2d(avg_rad2d_ncosz,rad2d(1:ni,1:nj,ncosz))
+          call spread_scalar_2d(avg_rad2d_nfdirir,rad2d(1:ni,1:nj,nfdirir))
+          call spread_scalar_2d(avg_rad2d_nfdifir,rad2d(1:ni,1:nj,nfdifir))
+          call spread_scalar_2d(avg_rad2d_nfdirpar,rad2d(1:ni,1:nj,nfdirpar))
+          call spread_scalar_2d(avg_rad2d_nfdifpar,rad2d(1:ni,1:nj,nfdifpar))
+
+        else
           ! big OpenMP parallelization loop:
 !$omp parallel do default(shared)  &
 !$omp private(i,j,k,ptprt,pprt,qv,qc,qr,qi,qs,qh,cvr,appi,o31,        &
@@ -306,6 +472,7 @@
           enddo
         enddo
         enddo
+        endif
 
 
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -471,6 +638,7 @@
              enddo
              enddo
 
+      if( testcase.ne.17 )then
       if( ptype.eq.7 )then
           !$omp parallel do default(shared)   &
           !$omp private(i,j,k)
@@ -520,6 +688,7 @@
                   ids=1  ,ide=ni+1 , jds= 1 ,jde=nj+1 , kds=1  ,kde=nk+1 ,          &
                   ims=ib ,ime=ie   , jms=jb ,jme=je   , kms=kb ,kme=ke ,            &
                   its=1  ,ite=ni   , jts=1  ,jte=nj   , kts=1  ,kte=nk )
+      endif
       endif
 
   !-----------------------------------------------------------------------------------------
@@ -573,6 +742,272 @@
         endif
 
   !-----------------------------------------------------------------------------------------
+
+        if( testcase.eq.17 )then
+
+          avg_p8w_col = 0.0
+          avg_t8w_col = 0.0
+          avg_prs_col = 0.0
+          avg_pi3d_col = 0.0
+          avg_dz8w_col = 0.0
+          avg_t3d_col = 0.0
+          avg_rho_col = 0.0
+          avg_o3_col = 0.0
+          avg_qv_col = 0.0
+          avg_qc_col = 0.0
+          avg_qr_col = 0.0
+          avg_qi_col = 0.0
+          avg_qs_col = 0.0
+          avg_qg_col = 0.0
+          avg_effi_col = 0.0
+          avg_effs_col = 0.0
+
+          call avg3d_core(dum1,avg_p8w_col,1,nk+1)
+          call avg3d_core(dum2,avg_t8w_col,1,nk+1)
+          call avg3d_core(prs,avg_prs_col,1,nk)
+          call avg3d_core(dum4,avg_pi3d_col,1,nk)
+          call avg3d_core(dum5,avg_dz8w_col,1,nk+1)
+          call avg3d_core(dum3,avg_t3d_col,1,nk)
+          call avg3d_core(rho,avg_rho_col,1,nk)
+          call avg3d_rad(o30,avg_o3_col,1,nk)
+          call avg_qa_col(qa,nqv,avg_qv_col,1,nk)
+          call avg_qa_col(qa,nqc,avg_qc_col,1,nk)
+          call avg_qa_col(qa,nqr,avg_qr_col,1,nk)
+          call avg_qa_col(qa,nqi,avg_qi_col,1,nk)
+          call avg_qa_col(qa,nqs,avg_qs_col,1,nk)
+          call avg_qa_col(qa,nqg,avg_qg_col,1,nk)
+          if( ptype.eq.7 )then
+            avg_default_effc = 10.0e-6
+          else
+            avg_default_effc = 25.0
+          endif
+          call avg_effc_col(qa,effc,nqc,avg_default_effc,avg_effc_rad_col)
+          call avg3d_rad(effi,avg_effi_col,1,nk)
+          call avg3d_rad(effs,avg_effs_col,1,nk)
+
+          call fill_rrtmg_avg3d(avg_p8w_col,avg_p8w)
+          call fill_rrtmg_avg3d(avg_t8w_col,avg_t8w)
+          call fill_rrtmg_avg3d(avg_prs_col,avg_p3d)
+          call fill_rrtmg_avg3d(avg_pi3d_col,avg_pi3d)
+          call fill_rrtmg_avg3d(avg_dz8w_col,avg_dz8w)
+          call fill_rrtmg_avg3d(avg_t3d_col,avg_t3d)
+          call fill_rrtmg_avg3d(avg_rho_col,avg_rho3d)
+          call fill_rrtmg_avg3d(avg_o3_col,avg_o33d)
+          call fill_rrtmg_avg3d(avg_qv_col,avg_qv3d)
+          call fill_rrtmg_avg3d(avg_qc_col,avg_qc3d)
+          call fill_rrtmg_avg3d(avg_qr_col,avg_qr3d)
+          call fill_rrtmg_avg3d(avg_qi_col,avg_qi3d)
+          call fill_rrtmg_avg3d(avg_qs_col,avg_qs3d)
+          call fill_rrtmg_avg3d(avg_qg_col,avg_qg3d)
+          call fill_rrtmg_avg3d(avg_effc_rad_col,avg_re_cloud)
+          call fill_rrtmg_avg3d(avg_effi_col,avg_re_ice)
+          call fill_rrtmg_avg3d(avg_effs_col,avg_re_snow)
+
+          if( ptype.eq.7 )then
+            avg_qr3d = 0.0
+            avg_qi3d = 0.0
+            avg_qs3d = 0.0
+            avg_qg3d = 0.0
+          elseif( ptype.eq.8 .or. ptype.eq.50 .or. ptype.eq.51 .or. ptype.eq.52 )then
+            avg_qs3d = 0.0
+            avg_qg3d = 0.0
+            f_qs = .false.
+            f_qg = .false.
+          endif
+
+          call avg2d_interior(tsk(1:ni,1:nj),avg_tsk2d(1,1))
+          call avg2d_interior(emiss(1:ni,1:nj),avg_emiss2d(1,1))
+          call avg2d_interior(xland(1:ni,1:nj),avg_xland2d(1,1))
+          call avg2d_interior(xice(1:ni,1:nj),avg_xice2d(1,1))
+          call avg2d_interior(xsnow(1:ni,1:nj),avg_xsnow2d(1,1))
+          call avg2d_interior(xlat(1:ni,1:nj),avg_xlat2d(1,1))
+          call avg2d_interior(xlong(1:ni,1:nj),avg_xlong2d(1,1))
+          call avg2d_interior(albd(1:ni,1:nj),avg_albd2d(1,1))
+          call avg2d_interior(coszen(1:ni,1:nj),avg_coszen2d(1,1))
+
+          avg_cldfra3d = 0.0
+          avg_cldfra1_flag3d = 0
+          CALL cal_cldfra1(CLDFRA=avg_cldfra3d,                                   &
+                    QV=avg_qv3d,QC=avg_qc3d,QI=avg_qi3d,QS=avg_qs3d,              &
+                     F_QV=F_QV,F_QC=F_QC,F_QI=F_QI,F_QS=F_QS,t_phy=avg_t3d,       &
+                     p_phy=avg_p3d,mp_physics=mp_physics,                         &
+                     cldfra1_flag=avg_cldfra1_flag3d,                             &
+                    ids=1  ,ide=2    , jds= 1 ,jde=2    , kds=1  ,kde=nk+1 ,      &
+                    ims=1  ,ime=1    , jms=1  ,jme=1    , kms=kb ,kme=ke ,        &
+                    its=1  ,ite=1    , jts=1  ,jte=1    , kts=1  ,kte=nk )
+
+          do k=1,nk
+            avg_cldfra_col(k) = avg_cldfra3d(1,1,k)
+            avg_cldfra_flag_col(k) = avg_cldfra1_flag3d(1,1,k)
+          enddo
+          call spread_col_3d(avg_cldfra_col,cldfra,1,nk)
+          call spread_col_flag(avg_cldfra_flag_col,cldfra1_flag,1,nk)
+
+          avg_lwten3d = 0.0
+          avg_swten3d = 0.0
+          avg_lwtenc3d = 0.0
+          avg_swtenc3d = 0.0
+          avg_glw2d = 0.0
+          avg_olr2d = 0.0
+          avg_lwcf2d = 0.0
+          avg_lwupt2d = 0.0
+          avg_lwuptc2d = 0.0
+          avg_lwdnt2d = 0.0
+          avg_lwdntc2d = 0.0
+          avg_lwupb2d = 0.0
+          avg_lwupbc2d = 0.0
+          avg_lwdnb2d = 0.0
+          avg_lwdnbc2d = 0.0
+          avg_gsw2d = 0.0
+          avg_swcf2d = 0.0
+          avg_coszr2d = 0.0
+          avg_swupt2d = 0.0
+          avg_swuptc2d = 0.0
+          avg_swdnt2d = 0.0
+          avg_swdntc2d = 0.0
+          avg_swupb2d = 0.0
+          avg_swupbc2d = 0.0
+          avg_swdnb2d = 0.0
+          avg_swdnbc2d = 0.0
+          avg_swddir2d = 0.0
+          avg_swddni2d = 0.0
+          avg_swddif2d = 0.0
+          avg_swdownc2d = 0.0
+          avg_swddnic2d = 0.0
+          avg_swddirc2d = 0.0
+
+             if(myid.eq.0) print *,'  rrtmg_lwrad '
+             CALL RRTMG_LWRAD(                                      &
+                  RTHRATENLW=avg_lwten3d,lwtenc=avg_lwtenc3d,       &
+                  LWUPT=avg_lwupt2d,LWUPTC=avg_lwuptc2d,            &
+                  LWDNT=avg_lwdnt2d,LWDNTC=avg_lwdntc2d,            &
+                  LWUPB=avg_lwupb2d,LWUPBC=avg_lwupbc2d,            &
+                  LWDNB=avg_lwdnb2d,LWDNBC=avg_lwdnbc2d,            &
+                  GLW=avg_glw2d,OLR=avg_olr2d,LWCF=avg_lwcf2d,      &
+                  EMISS=avg_emiss2d,                                &
+                  P8W=avg_p8w,P3D=avg_p3d,PI3D=avg_pi3d,            &
+                  DZ8W=avg_dz8w,TSK=avg_tsk2d,T3D=avg_t3d,          &
+                  T8W=avg_t8w,RHO3D=avg_rho3d,R=rd,G=G,             &
+                  ICLOUD=icloud,WARM_RAIN=warm_rain,                &
+                  CLDFRA3D=avg_cldfra3d,                            &
+                  cldovrlp=cldovrlp,                                &
+                  IS_CAMMGMP_USED=is_cammgmp_used,                  &
+                  XLAND=avg_xland2d,XICE=avg_xice2d,SNOW=avg_xsnow2d, &
+                  QV3D=avg_qv3d,QC3D=avg_qc3d,QR3D=avg_qr3d,        &
+                  QI3D=avg_qi3d,QS3D=avg_qs3d,QG3D=avg_qg3d,        &
+                  O3INPUT=O3INPUT,O33D=avg_o33d,                    &
+                  F_QV=F_QV,F_QC=F_QC,F_QR=F_QR,                    &
+                  F_QI=F_QI,F_QS=F_QS,F_QG=F_QG,                    &
+                  RE_CLOUD=avg_re_cloud,RE_ICE=avg_re_ice,RE_SNOW=avg_re_snow, &
+                  has_reqc=has_reqc,has_reqi=has_reqi,has_reqs=has_reqs, &
+                  YR=YR,JULIAN=JULIAN,                              &
+                  calc_clean_atm_diag=calc_clean_atm_diag,          &
+                  ids=1  ,ide=2    , jds= 1 ,jde=2    , kds=1  ,kde=nk+1 ,      &
+                  ims=1  ,ime=1    , jms=1  ,jme=1    , kms=kb ,kme=ke ,        &
+                  its=1  ,ite=1    , jts=1  ,jte=1    , kts=1  ,kte=nk ,        &
+                  mp_physics=mp_physics,co2out=co2out               )
+
+          do k=1,nk
+            avg_lwten_col(k) = avg_lwten3d(1,1,k)
+            avg_lwtenc_col(k) = avg_lwtenc3d(1,1,k)
+          enddo
+          call spread_col_3d(avg_lwten_col,lwten,1,nk)
+          call spread_col_3d(avg_lwtenc_col,lwtenc,1,nk)
+          call spread_scalar_2d(avg_glw2d(1,1),glw(1:ni,1:nj))
+          call spread_scalar_2d(avg_olr2d(1,1),olr)
+          call spread_scalar_2d(avg_lwcf2d(1,1),lwcf(1:ni,1:nj))
+          call spread_scalar_2d(avg_lwupt2d(1,1),lwupt(1:ni,1:nj))
+          call spread_scalar_2d(avg_lwuptc2d(1,1),lwuptc(1:ni,1:nj))
+          call spread_scalar_2d(avg_lwdnt2d(1,1),lwdnt(1:ni,1:nj))
+          call spread_scalar_2d(avg_lwdntc2d(1,1),lwdntc(1:ni,1:nj))
+          call spread_scalar_2d(avg_lwupb2d(1,1),lwupb(1:ni,1:nj))
+          call spread_scalar_2d(avg_lwupbc2d(1,1),lwupbc(1:ni,1:nj))
+          call spread_scalar_2d(avg_lwdnb2d(1,1),lwdnb(1:ni,1:nj))
+          call spread_scalar_2d(avg_lwdnbc2d(1,1),lwdnbc(1:ni,1:nj))
+
+          if( nstep.le.1 .and. myid.eq.0 ) print *,'  co2 = ',co2out
+
+             !-------------------------
+
+             no_src_types = 6
+
+             sf_surface_physics = 1
+
+             aer_opt = 0
+
+             radt_min = dtrad/60.0
+
+             if(myid.eq.0) print *,'  rrtmg_swrad '
+             CALL RRTMG_SWRAD(                                         &
+                     RTHRATENSW=avg_swten3d,swtenc=avg_swtenc3d,       &
+                     SWUPT=avg_swupt2d,SWUPTC=avg_swuptc2d,            &
+                     SWDNT=avg_swdnt2d,SWDNTC=avg_swdntc2d,            &
+                     SWUPB=avg_swupb2d,SWUPBC=avg_swupbc2d,            &
+                     SWDNB=avg_swdnb2d,SWDNBC=avg_swdnbc2d,            &
+                     SWCF=avg_swcf2d,GSW=avg_gsw2d,                    &
+                     XTIME=XTIME,GMT=GMT,XLAT=avg_xlat2d,              &
+                     XLONG=avg_xlong2d,RADT=radt_min,DEGRAD=DEGRAD,    &
+                     DECLIN=DECLIN,COSZR=avg_coszr2d,                  &
+                     JULDAY=JULDAY,SOLCON=SOLCON,                      &
+                     ALBEDO=avg_albd2d,t3d=avg_t3d,t8w=avg_t8w,        &
+                     TSK=avg_tsk2d,p3d=avg_p3d,p8w=avg_p8w,            &
+                     pi3d=avg_pi3d,rho3d=avg_rho3d,dz8w=avg_dz8w,      &
+                     CLDFRA3D=avg_cldfra3d,                            &
+                     IS_CAMMGMP_USED=is_cammgmp_used,                  &
+                     R=rd,G=G,                                         &
+                     ICLOUD=icloud,WARM_RAIN=warm_rain,                &
+                     cldovrlp=cldovrlp,                                &
+                     XLAND=avg_xland2d,XICE=avg_xice2d,SNOW=avg_xsnow2d, &
+                     QV3D=avg_qv3d,QC3D=avg_qc3d,QR3D=avg_qr3d,        &
+                     QI3D=avg_qi3d,QS3D=avg_qs3d,QG3D=avg_qg3d,        &
+                     O3INPUT=O3INPUT,O33D=avg_o33d,                    &
+                     AER_OPT=AER_OPT,                                  &
+                     no_src=no_src_types,                              &
+                     SF_SURFACE_PHYSICS=sf_surface_physics,            &
+                     F_QV=f_qv,F_QC=f_qc,F_QR=f_qr,                   &
+                     F_QI=f_qi,F_QS=f_qs,F_QG=f_qg,                   &
+                     RE_CLOUD=avg_re_cloud,RE_ICE=avg_re_ice,RE_SNOW=avg_re_snow, &
+                     has_reqc=has_reqc,has_reqi=has_reqi,has_reqs=has_reqs, &
+                     calc_clean_atm_diag=calc_clean_atm_diag,          &
+                     ids=1  ,ide=2    , jds= 1 ,jde=2    , kds=1  ,kde=nk+1 ,      &
+                     ims=1  ,ime=1    , jms=1  ,jme=1    , kms=kb ,kme=ke ,        &
+                     its=1  ,ite=1    , jts=1  ,jte=1    , kts=1  ,kte=nk ,        &
+                     tauaer3d_sw=tauaer_sw,                            &
+                     ssaaer3d_sw=ssaaer_sw,                            &
+                     asyaer3d_sw=asyaer_sw,                            &
+                     swddir=avg_swddir2d,swddni=avg_swddni2d,          &
+                     swddif=avg_swddif2d,swdownc=avg_swdownc2d,        &
+                     swddnic=avg_swddnic2d,swddirc=avg_swddirc2d,      &
+                     xcoszen=avg_coszen2d,yr=yr,julian=julian,         &
+                     mp_physics=mp_physics,co2out=co2out               )
+
+          do k=1,nk
+            avg_swten_col(k) = avg_swten3d(1,1,k)
+            avg_swtenc_col(k) = avg_swtenc3d(1,1,k)
+          enddo
+          call spread_col_3d(avg_swten_col,swten,1,nk)
+          call spread_col_3d(avg_swtenc_col,swtenc,1,nk)
+          call spread_scalar_2d(avg_gsw2d(1,1),gsw(1:ni,1:nj))
+          call spread_scalar_2d(avg_swcf2d(1,1),swcf(1:ni,1:nj))
+          call spread_scalar_2d(avg_coszr2d(1,1),coszr(1:ni,1:nj))
+          call spread_scalar_2d(avg_swupt2d(1,1),swupt(1:ni,1:nj))
+          call spread_scalar_2d(avg_swuptc2d(1,1),swuptc(1:ni,1:nj))
+          call spread_scalar_2d(avg_swdnt2d(1,1),swdnt(1:ni,1:nj))
+          call spread_scalar_2d(avg_swdntc2d(1,1),swdntc(1:ni,1:nj))
+          call spread_scalar_2d(avg_swupb2d(1,1),swupb(1:ni,1:nj))
+          call spread_scalar_2d(avg_swupbc2d(1,1),swupbc(1:ni,1:nj))
+          call spread_scalar_2d(avg_swdnb2d(1,1),swdnb(1:ni,1:nj))
+          call spread_scalar_2d(avg_swdnbc2d(1,1),swdnbc(1:ni,1:nj))
+          call spread_scalar_2d(avg_swddir2d(1,1),swddir(1:ni,1:nj))
+          call spread_scalar_2d(avg_swddni2d(1,1),swddni(1:ni,1:nj))
+          call spread_scalar_2d(avg_swddif2d(1,1),swddif(1:ni,1:nj))
+          call spread_scalar_2d(avg_swdownc2d(1,1),swdownc(1:ni,1:nj))
+          call spread_scalar_2d(avg_swddnic2d(1,1),swddnic(1:ni,1:nj))
+          call spread_scalar_2d(avg_swddirc2d(1,1),swddirc(1:ni,1:nj))
+
+          if( nstep.le.1 .and. myid.eq.0 ) print *,'  co2 = ',co2out
+
+        else
 
              if(myid.eq.0) print *,'  rrtmg_lwrad '
       if( ptype.eq.7 )then
@@ -814,6 +1249,8 @@
 
             if( nstep.le.1 .and. myid.eq.0 ) print *,'  co2 = ',co2out
 
+        endif
+
         IF( eqtset.eq.2 )THEN
           ! for Bryan-Fritsch equation set:
           !$omp parallel do default(shared)  &
@@ -851,6 +1288,338 @@
 
       end subroutine radiation_driver
 
+
+
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc!
+!----------------------------------------------------------------------!
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc!
+
+      subroutine avg2d_interior(s,savg)
+      use input, only : nx,ny
+#ifdef MPI
+      use mpi
+#endif
+      implicit none
+
+      real, intent(in), dimension(:,:) :: s
+      real, intent(out) :: savg
+      integer :: i,j
+#ifdef MPI
+      integer :: ierr
+#endif
+      double precision :: stmp
+
+      stmp = 0.0d0
+      do j=1,size(s,2)
+      do i=1,size(s,1)
+        stmp = stmp+dble(s(i,j))
+      enddo
+      enddo
+#ifdef MPI
+      call MPI_ALLREDUCE(MPI_IN_PLACE,stmp,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+#endif
+      savg = real(stmp/dble(nx*ny))
+
+      end subroutine avg2d_interior
+
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc!
+
+      subroutine avg2d_interior_inv(s,savg)
+      use input, only : nx,ny
+#ifdef MPI
+      use mpi
+#endif
+      implicit none
+
+      real, intent(in), dimension(:,:) :: s
+      real, intent(out) :: savg
+      integer :: i,j
+#ifdef MPI
+      integer :: ierr
+#endif
+      double precision :: stmp
+
+      stmp = 0.0d0
+      do j=1,size(s,2)
+      do i=1,size(s,1)
+        stmp = stmp+1.0d0/dble(s(i,j))
+      enddo
+      enddo
+#ifdef MPI
+      call MPI_ALLREDUCE(MPI_IN_PLACE,stmp,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+#endif
+      savg = real(stmp/dble(nx*ny))
+
+      end subroutine avg2d_interior_inv
+
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc!
+
+      subroutine avg3d_core(s,savg,klo,khi)
+      use input, only : ib,ie,jb,je,kb,ke,ni,nj,nx,ny
+#ifdef MPI
+      use mpi
+#endif
+      implicit none
+
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke) :: s
+      real, intent(out), dimension(kb:ke) :: savg
+      integer, intent(in) :: klo,khi
+      integer :: i,j,k
+#ifdef MPI
+      integer :: ierr
+#endif
+      double precision, dimension(kb:ke) :: stmp
+
+      stmp = 0.0d0
+      savg = 0.0
+      do k=klo,khi
+      do j=1,nj
+      do i=1,ni
+        stmp(k) = stmp(k)+dble(s(i,j,k))
+      enddo
+      enddo
+      enddo
+#ifdef MPI
+      call MPI_ALLREDUCE(MPI_IN_PLACE,stmp(klo),khi-klo+1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+#endif
+      do k=klo,khi
+        savg(k) = real(stmp(k)/dble(nx*ny))
+      enddo
+
+      end subroutine avg3d_core
+
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc!
+
+      subroutine avg3d_core_zf(s,savg,klo,khi)
+      use input, only : ib,ie,jb,je,kb,ke,ni,nj,nx,ny
+#ifdef MPI
+      use mpi
+#endif
+      implicit none
+
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: s
+      real, intent(out), dimension(kb:ke+1) :: savg
+      integer, intent(in) :: klo,khi
+      integer :: i,j,k
+#ifdef MPI
+      integer :: ierr
+#endif
+      double precision, dimension(kb:ke+1) :: stmp
+
+      stmp = 0.0d0
+      savg = 0.0
+      do k=klo,khi
+      do j=1,nj
+      do i=1,ni
+        stmp(k) = stmp(k)+dble(s(i,j,k))
+      enddo
+      enddo
+      enddo
+#ifdef MPI
+      call MPI_ALLREDUCE(MPI_IN_PLACE,stmp(klo),khi-klo+1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+#endif
+      do k=klo,khi
+        savg(k) = real(stmp(k)/dble(nx*ny))
+      enddo
+
+      end subroutine avg3d_core_zf
+
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc!
+
+      subroutine avg3d_rad(s,savg,klo,khi)
+      use input, only : ibr,ier,jbr,jer,kbr,ker,kb,ke,ni,nj,nx,ny
+#ifdef MPI
+      use mpi
+#endif
+      implicit none
+
+      real, intent(in), dimension(ibr:ier,jbr:jer,kbr:ker) :: s
+      real, intent(out), dimension(kb:ke) :: savg
+      integer, intent(in) :: klo,khi
+      integer :: i,j,k
+#ifdef MPI
+      integer :: ierr
+#endif
+      double precision, dimension(kb:ke) :: stmp
+
+      stmp = 0.0d0
+      savg = 0.0
+      do k=klo,khi
+      do j=1,nj
+      do i=1,ni
+        stmp(k) = stmp(k)+dble(s(i,j,k))
+      enddo
+      enddo
+      enddo
+#ifdef MPI
+      call MPI_ALLREDUCE(MPI_IN_PLACE,stmp(klo),khi-klo+1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+#endif
+      do k=klo,khi
+        savg(k) = real(stmp(k)/dble(nx*ny))
+      enddo
+
+      end subroutine avg3d_rad
+
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc!
+
+      subroutine avg_qa_col(qa,nq,savg,klo,khi)
+      use input, only : ibm,iem,jbm,jem,kbm,kem,numq,kb,ke,ni,nj,nx,ny
+#ifdef MPI
+      use mpi
+#endif
+      implicit none
+
+      real, intent(in), dimension(ibm:iem,jbm:jem,kbm:kem,numq) :: qa
+      integer, intent(in) :: nq,klo,khi
+      real, intent(out), dimension(kb:ke) :: savg
+      integer :: i,j,k
+#ifdef MPI
+      integer :: ierr
+#endif
+      double precision, dimension(kb:ke) :: stmp
+
+      stmp = 0.0d0
+      savg = 0.0
+      if( nq.lt.1 ) return
+      do k=klo,khi
+      do j=1,nj
+      do i=1,ni
+        stmp(k) = stmp(k)+dble(qa(i,j,k,nq))
+      enddo
+      enddo
+      enddo
+#ifdef MPI
+      call MPI_ALLREDUCE(MPI_IN_PLACE,stmp(klo),khi-klo+1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+#endif
+      do k=klo,khi
+        savg(k) = real(stmp(k)/dble(nx*ny))
+      enddo
+
+      end subroutine avg_qa_col
+
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc!
+
+      subroutine avg_effc_col(qa,effc,nqc,default_effc,savg)
+      use input, only : ibm,iem,jbm,jem,kbm,kem,numq,ibr,ier,jbr,jer,kbr,ker, &
+                        kb,ke,ni,nj,nk,nx,ny
+#ifdef MPI
+      use mpi
+#endif
+      implicit none
+
+      real, intent(in), dimension(ibm:iem,jbm:jem,kbm:kem,numq) :: qa
+      real, intent(in), dimension(ibr:ier,jbr:jer,kbr:ker) :: effc
+      integer, intent(in) :: nqc
+      real, intent(in) :: default_effc
+      real, intent(out), dimension(kb:ke) :: savg
+      integer :: i,j,k
+#ifdef MPI
+      integer :: ierr
+#endif
+      double precision, dimension(kb:ke) :: sqc,sqc_over_re
+
+      savg = default_effc
+      if( nqc.lt.1 ) return
+
+      sqc = 0.0d0
+      sqc_over_re = 0.0d0
+      do k=1,nk
+      do j=1,nj
+      do i=1,ni
+        sqc(k) = sqc(k)+dble(qa(i,j,k,nqc))
+        if( effc(i,j,k).gt.0.0 )then
+          sqc_over_re(k) = sqc_over_re(k)+dble(qa(i,j,k,nqc)/effc(i,j,k))
+        endif
+      enddo
+      enddo
+      enddo
+#ifdef MPI
+      call MPI_ALLREDUCE(MPI_IN_PLACE,sqc(1),nk,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,sqc_over_re(1),nk,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+#endif
+      do k=1,nk
+        if( sqc(k).gt.0.0d0 .and. sqc_over_re(k).gt.0.0d0 )then
+          savg(k) = real(sqc(k)/sqc_over_re(k))
+        endif
+      enddo
+
+      end subroutine avg_effc_col
+
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc!
+
+      subroutine fill_rrtmg_avg3d(col,avg)
+      use input, only : kb,ke
+      implicit none
+
+      real, intent(in), dimension(kb:ke) :: col
+      real, intent(out), dimension(1:1,1:1,kb:ke) :: avg
+      integer :: k
+
+      do k=kb,ke
+        avg(1,1,k) = col(k)
+      enddo
+
+      end subroutine fill_rrtmg_avg3d
+
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc!
+
+      subroutine spread_col_3d(col,s,klo,khi)
+      use input, only : ibr,ier,jbr,jer,kbr,ker,kb,ke,ni,nj
+      implicit none
+
+      real, intent(in), dimension(kb:ke) :: col
+      real, intent(inout), dimension(ibr:ier,jbr:jer,kbr:ker) :: s
+      integer, intent(in) :: klo,khi
+      integer :: i,j,k
+
+      do k=klo,khi
+      do j=1,nj
+      do i=1,ni
+        s(i,j,k) = col(k)
+      enddo
+      enddo
+      enddo
+
+      end subroutine spread_col_3d
+
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc!
+
+      subroutine spread_col_flag(col,s,klo,khi)
+      use input, only : ibr,ier,jbr,jer,kbr,ker,kb,ke,ni,nj
+      implicit none
+
+      integer, intent(in), dimension(kb:ke) :: col
+      integer, intent(inout), dimension(ibr:ier,jbr:jer,kbr:ker) :: s
+      integer, intent(in) :: klo,khi
+      integer :: i,j,k
+
+      do k=klo,khi
+      do j=1,nj
+      do i=1,ni
+        s(i,j,k) = col(k)
+      enddo
+      enddo
+      enddo
+
+      end subroutine spread_col_flag
+
+!cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc!
+
+      subroutine spread_scalar_2d(val,s)
+      use input, only : ni,nj
+      implicit none
+
+      real, intent(in) :: val
+      real, intent(inout), dimension(:,:) :: s
+      integer :: i,j
+
+      do j=1,nj
+      do i=1,ni
+        s(i,j) = val
+      enddo
+      enddo
+
+      end subroutine spread_scalar_2d
 
 
 !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc!
