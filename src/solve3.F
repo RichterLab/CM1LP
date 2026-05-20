@@ -968,6 +968,8 @@
           num_drop_fallout_step = 0
           do i_dropsub = 1,num_dropsub
 
+          if (myid.eq.0) write(*,'(a,i8,a,i8)') 'Drop sub-loop: ',i_dropsub,' out of ',num_dropsub
+
           dt_dropsub = dt/real(num_dropsub)
           dbldt_dropsub = dbldt/dble(num_dropsub)
           

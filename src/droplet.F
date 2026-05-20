@@ -1071,7 +1071,7 @@
       use input, only : ib,ie,jb,je,kb,ke,ibl,iel,jbl,jel,numq,ni,nj, &
           nk,npvals,axisymm,terrain_flag,nx,ny,nparcelsLocal, &
           nparcelsLocalActive,prx,pry,prz,prsig,pru,prv,prw, &
-          prt,prqv,prprs,prrho,drop_inject_elapse,drop_inject_time, &
+          prt,prqv,prprs,prrho,prrp,prtp,drop_inject_elapse,drop_inject_time, &
           testcase,myid,timestats,time_droplet_inject,mytime,ierr
       use constants
 #ifdef MPI
@@ -1103,8 +1103,10 @@
       integer :: i,j,np,iflag,jflag,kflag
       integer :: doinject,my_reintro
       real :: x3d,y3d,z3d,sig3d
-      integer(i8) :: np_tmp
+      integer(i8) :: np_tmp,total_fallout
       real :: uval,vval,wval,qval,prsval,tval,rhoval,sigdot
+      real :: radmin,radmax,Tpmin,Tpmax
+      real :: minvals(2),maxvals(2)
 
       !----------------------------------------------------------------------
       ! Final thing: Inject droplets which will be active on the next call of droplet_driver
@@ -1124,6 +1126,7 @@
 
 
       doinject = 0
+      total_fallout = 0_i8
 
       !Only inject if a certain time has elapsed (specified in the namelist file)
       !Negative drop_inject_elapse means inject every time step
@@ -1138,7 +1141,14 @@
          doinject=0
       end if
 
-      if (testcase.eq.17 .and. num_fallout.gt.0) then
+      if (testcase.eq.17) then
+         total_fallout = int(num_fallout,i8)
+#ifdef MPI
+         call mpi_allreduce(mpi_in_place,total_fallout,1,mpi_integer8,mpi_sum,mpi_comm_world,ierr)
+#endif
+      end if
+
+      if (testcase.eq.17 .and. total_fallout.gt.0_i8) then
          doinject = 1
       end if
 
@@ -1209,14 +1219,46 @@
         enddo
       end if    !doinject
 
-      np_tmp = nparcelsLocalActive
+      np_tmp = int(nparcelsLocalActive,i8)
+      radmin = 1000.0
+      radmax = -1000.0
+      Tpmin = 1000.0
+      Tpmax = -1000.0
+
+      !$acc parallel loop gang vector default(present) &
+      !$acc          reduction(min:radmin,Tpmin) &
+      !$acc          reduction(max:radmax,Tpmax)
+      do np=1,nparcelsLocalActive
+         radmin = min(radmin,pdata(np,prrp))
+         radmax = max(radmax,pdata(np,prrp))
+         Tpmin = min(Tpmin,pdata(np,prtp))
+         Tpmax = max(Tpmax,pdata(np,prtp))
+      end do
+      !$acc end parallel
+
 #ifdef MPI
-      call mpi_allreduce(nparcelsLocalActive,np_tmp,1,mpi_integer8, &
-                         mpi_sum,mpi_comm_world,ierr)
+      call mpi_allreduce(mpi_in_place,np_tmp,1,mpi_integer8,mpi_sum,mpi_comm_world,ierr)
+      minvals = (/ radmin,Tpmin /)
+      maxvals = (/ radmax,Tpmax /)
+      call mpi_allreduce(mpi_in_place,minvals,2,mpi_real,mpi_min,mpi_comm_world,ierr)
+      call mpi_allreduce(mpi_in_place,maxvals,2,mpi_real,mpi_max,mpi_comm_world,ierr)
+      radmin = minvals(1)
+      Tpmin = minvals(2)
+      radmax = maxvals(1)
+      Tpmax = maxvals(2)
 #endif
+      if (np_tmp.le.0_i8) then
+         radmin = 0.0
+         radmax = 0.0
+         Tpmin = 0.0
+         Tpmax = 0.0
+      end if
+
       if (myid==0) then
          !write(*,'(a8,3i)')  'DHR1:',myid,np_tmp,nparcelsLocalActive
-         write(*,'(a18,i)')  'Total particles:',np_tmp
+         write(*,'(a18,i18,4(a,1pe15.6))') 'Total particles:',np_tmp, &
+                                            ' rmin=',radmin,' rmax=',radmax, &
+                                            ' Tpmin=',Tpmin,' Tpmax=',Tpmax
       end if
 
       if(timestats.ge.1) time_droplet_inject=time_droplet_inject+mytime()
@@ -4323,6 +4365,9 @@
                         drop_mult,pi_sp,maxz
       use constants
       use MersenneTwister_mod
+#ifdef MPI
+      use mpi
+#endif
 
       implicit none
 
@@ -4335,23 +4380,38 @@
 
       integer :: j,np,idx_tmp
       integer :: local_seed
+      integer(i8) :: total_reintro
+#ifdef MPI
+      integer :: ierr
+#endif
       real :: xrange,yrange,zrange
       double precision :: rand
       type(randomNumberSequence) :: randomNumbers
 
       my_reintro = num_fallout
 
-      if (my_reintro .le. 0) return
-
       xrange = xf(ni+1)-xf(1)
       yrange = yf(nj+1)-yf(1)
       zrange = maxz
 
+      if (my_reintro.gt.0 .and. nparcelsLocalActive + my_reintro .le. nparcelsLocal) then
+         total_reintro = int(my_reintro,i8)
+      else
+         total_reintro = 0_i8
+      end if
+#ifdef MPI
+      call mpi_allreduce(mpi_in_place,total_reintro,1,mpi_integer8,mpi_sum,mpi_comm_world,ierr)
+#endif
+      if (myid==0 .and. total_reintro.gt.0_i8) then
+         write(*,'(a,1pe15.6,a,i18)') 'DROP REINJECT: mtime=',mtime, &
+                                      ' superdroplets=',total_reintro
+      end if
+
+      if (my_reintro .le. 0) return
+
       if (nparcelsLocalActive + my_reintro .le. nparcelsLocal) then
          num_injected = num_injected + real(my_reintro)*drop_mult
          !$acc update device (num_injected)
-
-         if (myid==0) write(*,'(a15,i,5e15.6)')  'DROP REINJECT:',my_reintro,drop_mult,xrange,yrange,zrange,num_injected,mtime
 
          !$acc data create(randomNumbers,randomNumbers%state)
          !$acc update device(ngidx)
