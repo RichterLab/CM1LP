@@ -52,7 +52,7 @@
 
       subroutine droplet_driver (dt,dbldt,mtime,xh,uh,ruh,xf,yh,vh, &
                                  rvh,yf,zh,mh,rmh,zf,mf,zs,sigma, &
-                                 sigmaf,znt,rho,ua,va,wa,s10,pdata, &
+                                 sigmaf,znt,rho,ua,va,wa,s10,khh,khv,pdata, &
                                  th_in,qa,th0,pi0,ppa,prs,ta,pw1,pw2, &
                                  pe1,pe2,ps1,ps2,pn1,pn2,nw1,nw2,ne1, &
                                  ne2,sw1,sw2,se1,se2,reqs_p,sw31,sw32, &
@@ -61,8 +61,9 @@
                                  reqs_s,dpten,pdata_locind,nstep,num_fallout_out)
 
       use input, only : ib,ie,jb,je,kb,ke,ibl,iel,jbl,jel,numq,ni,nj, &
-          nk,imp,jmp,kmp,rmp,cmp,kmt,npvals,npvars,cgs1,cgs2,cgs3, &
+          nk,nkp1,imp,jmp,kmp,rmp,cmp,kmt,npvals,npvars,cgs1,cgs2,cgs3, &
           cgt1,cgt2,cgt3,bbc,tbc,imove,zt,rzt,umove,vmove,nqv, &
+          ibc,iec,jbc,jec,kbc,kec, &
           terrain_flag,nx,ny,axisymm,nodex,nodey,myi,myj,viscosity, &
           prx,pry,prz,prsig,pract,prvpx,prvpy,prvpz,prtp,prrp,prmult, &
           prms,prkap,przs,pru,prv,prw,prt,prqv,prprs,prrho,prtime, &
@@ -71,7 +72,7 @@
           maxy,maxz,ierr,mynw,mysw,myne,myse,mynorth,mysouth,myeast, &
           mywest,myid,nparcelsLocal,nparcelsLocalActive, &
           time_phys_H2D,time_phys_D2H,time_dropC1,time_dropC2,time_dropC3, &
-          time_dropC4,ngxy,dx,dy,dz,testcase,drop_traj
+          time_dropC4,ngxy,dx,dy,dz,testcase,drop_traj,drop_sgs_opt
       use constants
       use comm_module
       use comm_droplet_module
@@ -114,6 +115,7 @@
       real, intent(inout), dimension(ib:ie+1,jb:je,kb:ke) :: ua
       real, intent(inout), dimension(ib:ie,jb:je+1,kb:ke) :: va
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke+1) :: wa
+      real, intent(in), dimension(ibc:iec,jbc:jec,kbc:kec) :: khh,khv
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
 
       real, intent(inout), dimension(jmp,kmp) :: pw1,pw2,pe1,pe2
@@ -147,6 +149,7 @@
       double precision :: foot
 
       real :: uval,vval,wval,qval,prsval,tval,rhoval,rhval
+      real :: khhval,khvval,dkhvdzval
       real :: sigdot
 
       logical, parameter :: debug = .false.
@@ -454,9 +457,18 @@
                                  xh,xf,yh,yf,zh,zf,zs,znt,sigma,sigmaf, &
                                  ua,va,wa,ta,qa,rho,prs,sigdot)
 
+      khhval = 0.0
+      khvval = 0.0
+      dkhvdzval = 0.0
+      if (drop_sgs_opt.eq.1) then
+        call interpolate_sfs_position_fields(iflag,jflag,kflag,x3d,y3d,z3d,sig3d, &
+                                             khhval,khvval,dkhvdzval, &
+                                             xh,yh,zf,sigmaf,khh,khv)
+      endif
 
-      call BE_integration (dt,dbldt,np,pdata,pdata_locind,xf,yf, &
+      call BE_integration (dt,dbldt,nstep,mtime,np,pdata,pdata_locind,xf,yf, &
                            x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
+                           khhval,khvval,dkhvdzval, &
                            rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                            part_grav1,part_grav2,part_grav3,debug, &
                            neighbor,num_fallout,errcode)
@@ -1305,8 +1317,9 @@
 
 !----------------------------------------------------------------------
 
-   subroutine BE_integration(dt,dbldt,np,pdata,pdata_locind,xf,yf, &
+   subroutine BE_integration(dt,dbldt,nstep,mtime,np,pdata,pdata_locind,xf,yf, &
                              x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
+                             khhval,khvval,dkhvdzval, &
                              rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                              part_grav1,part_grav2,part_grav3,debug, &
                              neighbor,num_fallout,errcode)
@@ -1319,7 +1332,7 @@
           prz,pru,prv, &
           prw,prt,prqv,prprs,prrho,pract,prtime,prmult,ni,nj,mywest, &
           mysw,mynw,myeast,myse,myne,mysouth,mynorth,nparcelsLocal, &
-          myid,dx,dy,pi_sp,pi_dp,ngxy,nbc,sbc,ebc,wbc,tsk0,drop_evap
+          myid,dx,dy,pi_sp,pi_dp,ngxy,nbc,sbc,ebc,wbc,tsk0,drop_evap,drop_sgs_opt
       use constants , only : rhow,rhow_dp,undefined_index,cpl,cpl_dp,cp_dp
       use comm_module
       use parcel_module
@@ -1327,13 +1340,14 @@
 
       implicit none
 
-      double precision, intent(in) :: dbldt
+      double precision, intent(in) :: dbldt,mtime
       real, intent(in), dimension(ib:ie+1) :: xf
       real, intent(in), dimension(jb:je+1) :: yf
-      integer, intent(in) :: np
+      integer, intent(in) :: nstep,np
       logical, intent(in) :: debug
       real, intent(inout) :: x3d,y3d,z3d,sig3d
       real, intent(in) :: uval,vval,wval,qval,rhoval,prsval,tval
+      real, intent(in) :: khhval,khvval,dkhvdzval
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
       integer, intent(inout), dimension(nparcelsLocal,3) :: pdata_locind
       real, intent(out) :: Nup
@@ -1412,6 +1426,11 @@
       x3d = pdata(np,prx) + dt*pdata(np,prvpx)
       y3d = pdata(np,pry) + dt*pdata(np,prvpy)
       z3d = pdata(np,prz) + dt*pdata(np,prvpz)
+
+      if (drop_sgs_opt.eq.1) then
+        call sfs_position_update(dt,nstep,mtime,np,pdata, &
+                                 x3d,y3d,z3d,khhval,khvval,dkhvdzval)
+      endif
 
       pdata(np,prvpx) = (pdata(np,prvpx) + uval*(dbldt/taup) + dbldt*part_grav1)/(1.0d0 + dbldt/taup)
       pdata(np,prvpy) = (pdata(np,prvpy) + vval*(dbldt/taup) + dbldt*part_grav2)/(1.0d0 + dbldt/taup)
@@ -1661,6 +1680,148 @@
       end if
 
       end subroutine BE_integration
+
+      subroutine interpolate_sfs_position_fields(iflag,jflag,kflag,x3d,y3d,z3d,sig3d, &
+                                                 khhval,khvval,dkhvdzval, &
+                                                 xh,yh,zf,sigmaf,khh,khv)
+      !$acc routine seq
+      use input, only : ib,ie,jb,je,kb,ke,ibc,iec,jbc,jec,kbc,kec, &
+                        ni,nj,nkp1,terrain_flag
+      use parcel_module
+      implicit none
+
+      integer, intent(in) :: iflag,jflag,kflag
+      real, intent(in) :: x3d,y3d,z3d,sig3d
+      real, intent(out) :: khhval,khvval,dkhvdzval
+      real, intent(in), dimension(ib:ie) :: xh
+      real, intent(in), dimension(jb:je) :: yh
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: zf
+      real, intent(in), dimension(kb:ke+1) :: sigmaf
+      real, intent(in), dimension(ibc:iec,jbc:jec,kbc:kec) :: khh,khv
+
+      integer :: i,j,k
+      real :: rx,ry,rz,w1,w2,w3,w4,w5,w6,w7,w8
+      real :: wxy1,wxy2,wxy3,wxy4,khv_bot,khv_top,dzloc
+
+      i = iflag
+      j = jflag
+      k = kflag
+
+      if( x3d.lt.xh(i) )then
+        i = i-1
+      endif
+      if( y3d.lt.yh(j) )then
+        j = j-1
+      endif
+
+      ! CM1 locates kh at w points: scalar x/y, full-level z/sigma.
+      rx = ( x3d-xh(i) )/( xh(i+1)-xh(i) )
+      ry = ( y3d-yh(j) )/( yh(j+1)-yh(j) )
+      if( .not. terrain_flag )then
+        rz = ( z3d-zf(iflag,jflag,k) )/( zf(iflag,jflag,k+1)-zf(iflag,jflag,k) )
+      else
+        rz = ( sig3d-sigmaf(k) )/( sigmaf(k+1)-sigmaf(k) )
+      endif
+
+      w1 = (1.0-rx)*(1.0-ry)*(1.0-rz)
+      w2 = rx*(1.0-ry)*(1.0-rz)
+      w3 = (1.0-rx)*ry*(1.0-rz)
+      w4 = (1.0-rx)*(1.0-ry)*rz
+      w5 = rx*(1.0-ry)*rz
+      w6 = (1.0-rx)*ry*rz
+      w7 = rx*ry*(1.0-rz)
+      w8 = rx*ry*rz
+
+      khhval = tri_interp(ni,nj,nkp1,i,j,k,w1,w2,w3,w4,w5,w6,w7,w8,khh)
+      khvval = tri_interp(ni,nj,nkp1,i,j,k,w1,w2,w3,w4,w5,w6,w7,w8,khv)
+
+      wxy1 = (1.0-rx)*(1.0-ry)
+      wxy2 = rx*(1.0-ry)
+      wxy3 = (1.0-rx)*ry
+      wxy4 = rx*ry
+      khv_bot = khv(i  ,j  ,k  )*wxy1 + khv(i+1,j  ,k  )*wxy2 &
+              + khv(i  ,j+1,k  )*wxy3 + khv(i+1,j+1,k  )*wxy4
+      khv_top = khv(i  ,j  ,k+1)*wxy1 + khv(i+1,j  ,k+1)*wxy2 &
+              + khv(i  ,j+1,k+1)*wxy3 + khv(i+1,j+1,k+1)*wxy4
+      dzloc = max(zf(iflag,jflag,k+1)-zf(iflag,jflag,k),1.0e-6)
+      dkhvdzval = (khv_top-khv_bot)/dzloc
+
+      end subroutine interpolate_sfs_position_fields
+
+      subroutine sfs_position_update(dt,nstep,mtime,np,pdata, &
+                                     x3d,y3d,z3d,khhval,khvval,dkhvdzval)
+      !$acc routine seq
+      use input, only : nparcelsLocal,npvals,nx,ny,axisymm,prpidx,prprocidx
+      use constants, only : i8,pi
+      implicit none
+
+      real, intent(in) :: dt,khhval,khvval,dkhvdzval
+      double precision, intent(in) :: mtime
+      integer, intent(in) :: nstep,np
+      real, intent(inout) :: x3d,y3d,z3d
+      real, intent(in), dimension(nparcelsLocal,npvals) :: pdata
+
+      integer :: pidx,procidx
+      integer(i8) :: seed,state
+      integer(i8), parameter :: im = 2147483647_i8
+      real :: khh_eff,khv_eff
+      real :: normx,normy,normz
+      double precision :: u1,u2,fac,theta
+
+      ! Deterministic per-particle seed: particle ID, creator rank, step, and time.
+      pidx = transfer(pdata(np,prpidx),0)
+      procidx = transfer(pdata(np,prprocidx),0)
+      seed = 1_i8
+      seed = mod(seed + abs(int(pidx,i8))*1000003_i8,im)
+      seed = mod(seed + abs(int(procidx,i8))*9176_i8,im)
+      seed = mod(seed + abs(int(nstep,i8))*1013_i8,im)
+      seed = mod(seed + abs(int(1000.0d0*mtime+0.5d0,i8))*37_i8,im)
+      if( seed.le.0_i8 ) seed = 1_i8
+      state = seed
+
+      ! Box-Muller transform: two uniform draws give x/y standard normals.
+      u1 = max(sfs_uniform(state),1.0d-12)
+      u2 = sfs_uniform(state)
+      fac = sqrt(-2.0d0*log(u1))
+      theta = 2.0d0*dble(pi)*u2
+      normx = real(fac*cos(theta))
+      normy = real(fac*sin(theta))
+
+      ! A second Box-Muller pair supplies the vertical standard normal.
+      u1 = max(sfs_uniform(state),1.0d-12)
+      u2 = sfs_uniform(state)
+      fac = sqrt(-2.0d0*log(u1))
+      theta = 2.0d0*dble(pi)*u2
+      normz = real(fac*cos(theta))
+
+      khh_eff = max(khhval,0.0)
+      khv_eff = max(khvval,0.0)
+
+      if( nx.gt.1 .and. axisymm.ne.1 )then
+        x3d = x3d + normx*sqrt(2.0*khh_eff*dt)
+      endif
+      if( ny.gt.1 .and. axisymm.ne.1 )then
+        y3d = y3d + normy*sqrt(2.0*khh_eff*dt)
+      endif
+      z3d = z3d + normz*sqrt(2.0*khv_eff*dt) + dkhvdzval*dt
+
+      end subroutine sfs_position_update
+
+      double precision function sfs_uniform(state)
+      !$acc routine seq
+      use constants, only : i8
+      implicit none
+
+      ! Local scalar RNG avoids shared Mersenne Twister state inside the per-particle OpenACC path.
+      integer(i8), intent(inout) :: state
+      integer(i8), parameter :: im = 2147483647_i8
+      integer(i8), parameter :: ia = 48271_i8
+
+      state = mod(ia*state,im)
+      if( state.le.0_i8 ) state = state + im - 1_i8
+      sfs_uniform = dble(state)/dble(im)
+
+      end function sfs_uniform
 
       subroutine interpolate_to_parcel(np,iflag,jflag,kflag,x3d,y3d,z3d,sig3d,uval,vval,wval,tval,qval,rhoval,prsval,xh,xf,yh,yf,zh,zf,zs,znt,sigma,sigmaf,ua,va,wa,ta,qa,rho,prs,sigdot)
       !$acc routine seq

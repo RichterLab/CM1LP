@@ -164,6 +164,7 @@
 
       integer(i8) :: nparcelsInit,nparcelsMax,nparcelsRest,nparcelsLocal, &
                      nparcelsLocalActive
+      integer :: drop_sgs_opt = 0
 
       !$acc declare create (ib,ie,jb,je,kb,ke,numq,nparcelsInit,npvals,nx,ny, &
       !$acc       axisymm,terrain_flag,ni,nj,nip1,njp1,nk,nkp1,nkm1,imoist,   &
@@ -171,7 +172,7 @@
       !$acc                 prtp,                                             &
       !$acc                 prx,pry,prz,prsig,ngxy,ngz,ptype,pru,prv,prw,     &
       !$acc                 ibw,ibe,ibs,ibn,two_way_coupling,drop_evap,       &
-      !$acc                 drop_traj,                                        &
+      !$acc                 drop_traj,drop_sgs_opt,                           &
       !$acc                 prt,prqv,prprs,prrho,nparcelsLocal,mywest,        &
       !$acc                 myeast,mynorth,mysouth,myne,myse,mysw,mynw,       &
       !$acc                 prmult,pract,prtime)
@@ -337,7 +338,7 @@
               prcl_rho,prcl_qsat,prcl_sfc,                                    &
               nparcelsInit,nparcelsMax,drop_mult,                             &
 	      drop_inject_elapse,drop_inject_time,two_way_coupling,           &
-	      drop_evap,drop_traj
+	      drop_evap,drop_traj,drop_sgs_opt
       namelist /param14/                                                      &
               dodomaindiag,diagfrq
       namelist /param15/                                                      &

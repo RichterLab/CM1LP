@@ -301,6 +301,7 @@
       call bcast_int(two_way_coupling) ! DEVICE
       call bcast_int(drop_evap) ! DEVICE
       call bcast_int(drop_traj) ! DEVICE
+      call bcast_int(drop_sgs_opt) ! DEVICE
       call bcast_int(nparcelsMax)
       call bcast_real(drop_inject_elapse)
       call bcast_real(drop_inject_time)
@@ -2697,6 +2698,7 @@
       if(dowr) write(outfile,*) 'nparcelsMax=',nparcelsMax
       if(dowr) write(outfile,*) 'two_way_coupling=',two_way_coupling
       if(dowr) write(outfile,*) 'drop_evap=',drop_evap
+      if(dowr) write(outfile,*) 'drop_sgs_opt=',drop_sgs_opt
       if(dowr) write(outfile,*)
       if(dowr) write(outfile,*) 'kdiff2    =',kdiff2
       if(dowr) write(outfile,*) 'kdiff6    =',kdiff6
@@ -5933,6 +5935,7 @@
       prcl_qsat     = max(0,min(1,prcl_qsat))
       prcl_sfc      = max(0,min(1,prcl_sfc))
       prcl_droplet  = max(0,min(1,prcl_droplet))
+      drop_sgs_opt  = max(0,min(1,drop_sgs_opt))
 
       if( imoist.eq.1 .and. ptype.eq.7 )then
         if( iprcl.ne.1 .or. prcl_droplet.ne.1 )then

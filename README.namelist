@@ -1602,6 +1602,9 @@
  drop_evap  -  Are the droplets allowed to evaporate/condense and change size?
                (1 = yes, 0 = no)
 
+ drop_sgs_opt  -  Lagrangian droplet subgrid transport option
+                  (0 = off, 1 = stochastic position update)
+
 
 ------------------------------------------------------------------------
   nssl2mom_params section - parameters/options for NSSL microphysics scheme
@@ -1714,4 +1717,3 @@
 -------------------------------------------------------------------------
 
 Questions, comments, suggestions:  send email to gbryan@ucar.edu
-
