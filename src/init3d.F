@@ -181,6 +181,8 @@
 
       real :: tmpx, tmpy, tmpz
       real :: xrange, yrange, zrange
+      real :: dzbot, dztop, zbuf_bot, zbuf_top
+      integer :: iloc, jloc
       integer(i8) :: np_tmp
 
 !--------------------------
@@ -433,7 +435,7 @@
         nparcelsLocalActive = 0
         xrange = xf(ni+1) - xf(1)
         yrange = yf(nj+1) - yf(1)
-	zrange = maxz
+        zrange = maxz
 
         iter = floor(real(nparcelsInit) / real(numprocs))
         if ( mod(real(nparcelsInit),real(numprocs)) /= 0 ) then
@@ -450,6 +452,19 @@
           tmpy = yf(1)+rand*yrange
           rand = getRandomReal(randomNumbers)
           tmpz = rand*zrange
+
+          iloc = 1
+          if (nx.gt.1) then
+             do while (iloc.lt.ni .and. tmpx.ge.xf(iloc+1))
+                iloc = iloc+1
+             enddo
+          endif
+          jloc = 1
+          if (axisymm.ne.1 .and. ny.gt.1) then
+             do while (jloc.lt.nj .and. tmpy.ge.yf(jloc+1))
+                jloc = jloc+1
+             enddo
+          endif
 
           pdata(i,prx) = tmpx
           pdata(i,pry) = tmpy
@@ -477,7 +492,14 @@
                 pdata(i,prms) = salinity*rhow*4.0/3.0*pi*pdata(i,prrp)**3
                 pdata(i,prkap) = kappa_s
              end if
-     
+
+             dzbot = max(zf(iloc,jloc,kb+1)-zf(iloc,jloc,kb),1.0e-6)
+             dztop = max(zf(iloc,jloc,ke+1)-zf(iloc,jloc,ke),1.0e-6)
+             ! Radius can round away in single precision, so initialize off exact wall/full levels.
+             zbuf_bot = max(pdata(i,prrp),1.0e-6*dzbot)
+             zbuf_top = max(pdata(i,prrp),1.0e-6*dztop)
+             pdata(i,prz) = min(max(pdata(i,prz),zbuf_bot),maxz-zbuf_top)
+
              !Droplet temperature
              pdata(i,prtp) = 290.0
      

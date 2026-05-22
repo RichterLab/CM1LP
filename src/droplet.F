@@ -466,7 +466,8 @@
                                              xh,yh,zf,sigmaf,khh,khv)
       endif
 
-      call BE_integration (dt,dbldt,nstep,mtime,np,pdata,pdata_locind,xf,yf, &
+      call BE_integration (dt,dbldt,nstep,mtime,np,pdata,pdata_locind,xf,yf,zf, &
+                           iflag,jflag, &
                            x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
                            khhval,khvval,dkhvdzval, &
                            rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
@@ -1317,7 +1318,8 @@
 
 !----------------------------------------------------------------------
 
-   subroutine BE_integration(dt,dbldt,nstep,mtime,np,pdata,pdata_locind,xf,yf, &
+   subroutine BE_integration(dt,dbldt,nstep,mtime,np,pdata,pdata_locind,xf,yf,zf, &
+                             iflag,jflag, &
                              x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
                              khhval,khvval,dkhvdzval, &
                              rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
@@ -1343,7 +1345,8 @@
       double precision, intent(in) :: dbldt,mtime
       real, intent(in), dimension(ib:ie+1) :: xf
       real, intent(in), dimension(jb:je+1) :: yf
-      integer, intent(in) :: nstep,np
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: zf
+      integer, intent(in) :: nstep,np,iflag,jflag
       logical, intent(in) :: debug
       real, intent(inout) :: x3d,y3d,z3d,sig3d
       real, intent(in) :: uval,vval,wval,qval,rhoval,prsval,tval
@@ -1370,6 +1373,7 @@
       real :: sig1
       real :: top,bot,restime10_tmp,rad10_tmp
       real :: north,south,east,west
+      real :: dzbot,dztop,zbuf_bot,zbuf_top
       integer :: i,j,k,ibin,ibin_res
       double precision :: taup,volp,rhop,tmp_coeff
       double precision :: taup_scale,dt_nondim
@@ -1508,19 +1512,29 @@
       !Finally, take care of particle BCs
 
       !Wall BCs:
-      top = maxz-pdata(np,prrp)
-      bot = pdata(np,prrp)
+      dzbot = max(zf(iflag,jflag,kb+1)-zf(iflag,jflag,kb),1.0e-6)
+      dztop = max(zf(iflag,jflag,ke+1)-zf(iflag,jflag,ke),1.0e-6)
+      ! Radius can be smaller than single-precision spacing; keep particles off exact wall/full levels.
+      zbuf_bot = max(pdata(np,prrp),1.0e-6*dzbot)
+      zbuf_top = max(pdata(np,prrp),1.0e-6*dztop)
+      top = maxz-zbuf_top
+      bot = zbuf_bot
       east = maxx-pdata(np,prrp)
       west = minx+pdata(np,prrp)
       north = maxy-pdata(np,prrp)
       south = miny+pdata(np,prrp)
 
 
-      !Bounce off the top wall:
-      !if ( z3d .gt. top ) then
-      !   z3d = top - (z3d - top)
-      !   pdata(np,prvpz) = -pdata(np,prvpz)
-      !   pdata_locind(np,3) = undefined_index
+      !Temporary no-flux vertical boundary option:
+      !if (z3d.gt.top) then
+      !  z3d = top - (z3d-top)
+      !  pdata_locind(np,3) = undefined_index
+      !endif
+      !if (z3d.lt.bot) then
+      !  z3d = bot + (bot-z3d)
+      !  pdata_locind(np,3) = undefined_index
+      !endif
+      !z3d = min(max(z3d,bot),top)
 
       !The different cases that kill a particle:
       if (z3d.gt.top .or. z3d.lt.bot) then
@@ -2825,9 +2839,16 @@
 
       !$acc parallel loop gang vector default(present)
       do np=1,nparcelsLocalActive
-         kflag = 1
-         k = pdata_locind(np,3)   ! JS: do not mess up the "pdata_locind"
-         call find_vertical_location_index (k,pdata(np,prz),kb,ke+1,dumzf(:),kflag,.TRUE.)
+         if (pdata(np,prz).le.dumzf(kb)) then
+            k = 1
+         elseif (pdata(np,prz).ge.dumzf(ke+1)) then
+            k = nk
+         else
+            kflag = 1
+            k = undefined_index
+            call find_vertical_location_index (k,pdata(np,prz),kb,ke+1,dumzf(:),kflag,.FALSE.)
+            k = max(1,min(nk,k))
+         endif
          !$acc atomic update
          partnum(k) = partnum(k) + 1.0
          !$acc atomic update
@@ -3126,9 +3147,16 @@
       do np=1,nparcelsLocalActive
 
          !First need its vertical location
-         kflag = 1
-         k = pdata_locind(np,3) 
-         call find_vertical_location_index (k,pdata(np,prz),kb,ke+1,dumzf(:),kflag,.TRUE.)
+         if (pdata(np,prz).le.dumzf(kb)) then
+            k = 1
+         elseif (pdata(np,prz).ge.dumzf(ke+1)) then
+            k = nk
+         else
+            kflag = 1
+            k = undefined_index
+            call find_vertical_location_index (k,pdata(np,prz),kb,ke+1,dumzf(:),kflag,.FALSE.)
+            k = max(1,min(nk,k))
+         endif
 
          !Then need its radius location
          rad10_tmp = log10(pdata(np,prrp))
