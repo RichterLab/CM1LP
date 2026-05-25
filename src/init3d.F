@@ -478,6 +478,7 @@
              pdata(i,prusgs) = 0.0
              pdata(i,prvsgs) = 0.0
              pdata(i,prwsgs) = 0.0
+             pdata(i,prsigsgs) = 0.0
      
              if (testcase.eq.17) then
                 ! Case 17 samples dry aerosol diameter from a lognormal,

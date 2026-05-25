@@ -1603,7 +1603,8 @@
                (1 = yes, 0 = no)
 
  drop_sgs_opt  -  Lagrangian droplet subgrid transport option
-                  (0 = off, 1 = stochastic position update)
+                  (0 = off, 1 = stochastic position update,
+                   2 = stochastic SGS velocity update)
 
 
 ------------------------------------------------------------------------

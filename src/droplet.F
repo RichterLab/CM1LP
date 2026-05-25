@@ -52,7 +52,8 @@
 
       subroutine droplet_driver (dt,dbldt,mtime,xh,uh,ruh,xf,yh,vh, &
                                  rvh,yf,zh,mh,rmh,zf,mf,zs,sigma, &
-                                 sigmaf,znt,rho,ua,va,wa,s10,khh,khv,pdata, &
+                                 sigmaf,znt,rho,ua,va,wa,s10,khh,khv, &
+                                 tkea,dissten,pdata, &
                                  th_in,qa,th0,pi0,ppa,prs,ta,pw1,pw2, &
                                  pe1,pe2,ps1,ps2,pn1,pn2,nw1,nw2,ne1, &
                                  ne2,sw1,sw2,se1,se2,reqs_p,sw31,sw32, &
@@ -63,7 +64,7 @@
       use input, only : ib,ie,jb,je,kb,ke,ibl,iel,jbl,jel,numq,ni,nj, &
           nk,nkp1,imp,jmp,kmp,rmp,cmp,kmt,npvals,npvars,cgs1,cgs2,cgs3, &
           cgt1,cgt2,cgt3,bbc,tbc,imove,zt,rzt,umove,vmove,nqv, &
-          ibc,iec,jbc,jec,kbc,kec, &
+          ibc,iec,jbc,jec,kbc,kec,ibt,iet,jbt,jet,kbt,ket, &
           terrain_flag,nx,ny,axisymm,nodex,nodey,myi,myj,viscosity, &
           prx,pry,prz,prsig,pract,prvpx,prvpy,prvpz,prtp,prrp,prmult, &
           prms,prkap,przs,pru,prv,prw,prt,prqv,prprs,prrho,prtime, &
@@ -116,6 +117,8 @@
       real, intent(inout), dimension(ib:ie,jb:je+1,kb:ke) :: va
       real, intent(inout), dimension(ib:ie,jb:je,kb:ke+1) :: wa
       real, intent(in), dimension(ibc:iec,jbc:jec,kbc:kec) :: khh,khv
+      real, intent(in), dimension(ibt:iet,jbt:jet,kbt:ket) :: tkea
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: dissten
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
 
       real, intent(inout), dimension(jmp,kmp) :: pw1,pw2,pe1,pe2
@@ -150,6 +153,7 @@
 
       real :: uval,vval,wval,qval,prsval,tval,rhoval,rhval
       real :: khhval,khvval,dkhvdzval
+      real :: sigsgsval,dsgsdxval,dsgsdyval,dsgsdzval,epssgsval,lsgsval
       real :: sigdot
 
       logical, parameter :: debug = .false.
@@ -461,10 +465,22 @@
       khhval = 0.0
       khvval = 0.0
       dkhvdzval = 0.0
+      sigsgsval = 0.0
+      dsgsdxval = 0.0
+      dsgsdyval = 0.0
+      dsgsdzval = 0.0
+      epssgsval = 0.0
+      lsgsval = 0.0
       if (drop_sgs_opt.eq.1) then
         call interpolate_sfs_position_fields(iflag,jflag,kflag,x3d,y3d,z3d,sig3d, &
                                              khhval,khvval,dkhvdzval, &
                                              xh,yh,zf,sigmaf,khh,khv)
+      endif
+      if (drop_sgs_opt.eq.2) then
+        call interpolate_sfs_velocity_fields(iflag,jflag,kflag,x3d,y3d,z3d,sig3d, &
+                                             sigsgsval,dsgsdxval,dsgsdyval,dsgsdzval, &
+                                             epssgsval,lsgsval, &
+                                             xh,yh,zf,sigmaf,tkea,dissten)
       endif
 
       call BE_integration (dt,dbldt,nstep,mtime,np,pdata,pdata_locind,xf,yf,zf, &
@@ -1765,6 +1781,87 @@
       dkhvdzval = (khv_top-khv_bot)/dzloc
 
       end subroutine interpolate_sfs_position_fields
+
+      subroutine interpolate_sfs_velocity_fields(iflag,jflag,kflag,x3d,y3d,z3d,sig3d, &
+                                                 sigsgsval,dsgsdxval,dsgsdyval,dsgsdzval, &
+                                                 epssgsval,lsgsval, &
+                                                 xh,yh,zf,sigmaf,tkea,dissten)
+      !$acc routine seq
+      use input, only : ib,ie,jb,je,kb,ke,ibt,iet,jbt,jet,kbt,ket,terrain_flag
+      implicit none
+
+      integer, intent(in) :: iflag,jflag,kflag
+      real, intent(in) :: x3d,y3d,z3d,sig3d
+      real, intent(out) :: sigsgsval,dsgsdxval,dsgsdyval,dsgsdzval
+      real, intent(out) :: epssgsval,lsgsval
+      real, intent(in), dimension(ib:ie) :: xh
+      real, intent(in), dimension(jb:je) :: yh
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: zf,dissten
+      real, intent(in), dimension(kb:ke+1) :: sigmaf
+      real, intent(in), dimension(ibt:iet,jbt:jet,kbt:ket) :: tkea
+
+      integer :: i,j,k
+      real :: rx,ry,rz,dxloc,dyloc,dzloc
+      real :: w1,w2,w3,w4,w5,w6,w7,w8
+      real :: s1,s2,s3,s4,s5,s6,s7,s8
+
+      i = iflag
+      j = jflag
+      k = kflag
+
+      if( x3d.lt.xh(i) )then
+        i = i-1
+      endif
+      if( y3d.lt.yh(j) )then
+        j = j-1
+      endif
+
+      ! CM1 locates tke and dissipation at w points: scalar x/y, full-level z/sigma.
+      dxloc = max(xh(i+1)-xh(i),1.0e-6)
+      dyloc = max(yh(j+1)-yh(j),1.0e-6)
+      dzloc = max(zf(iflag,jflag,k+1)-zf(iflag,jflag,k),1.0e-6)
+      rx = ( x3d-xh(i) )/dxloc
+      ry = ( y3d-yh(j) )/dyloc
+      if( .not. terrain_flag )then
+        rz = ( z3d-zf(iflag,jflag,k) )/dzloc
+      else
+        rz = ( sig3d-sigmaf(k) )/( sigmaf(k+1)-sigmaf(k) )
+      endif
+
+      w1 = (1.0-rx)*(1.0-ry)*(1.0-rz)
+      w2 = rx*(1.0-ry)*(1.0-rz)
+      w3 = (1.0-rx)*ry*(1.0-rz)
+      w4 = (1.0-rx)*(1.0-ry)*rz
+      w5 = rx*(1.0-ry)*rz
+      w6 = (1.0-rx)*ry*rz
+      w7 = rx*ry*(1.0-rz)
+      w8 = rx*ry*rz
+
+      s1 = (2.0/3.0)*max(tkea(i  ,j  ,k  ),0.0)
+      s2 = (2.0/3.0)*max(tkea(i+1,j  ,k  ),0.0)
+      s3 = (2.0/3.0)*max(tkea(i  ,j+1,k  ),0.0)
+      s4 = (2.0/3.0)*max(tkea(i  ,j  ,k+1),0.0)
+      s5 = (2.0/3.0)*max(tkea(i+1,j  ,k+1),0.0)
+      s6 = (2.0/3.0)*max(tkea(i  ,j+1,k+1),0.0)
+      s7 = (2.0/3.0)*max(tkea(i+1,j+1,k  ),0.0)
+      s8 = (2.0/3.0)*max(tkea(i+1,j+1,k+1),0.0)
+
+      sigsgsval = s1*w1 + s2*w2 + s3*w3 + s4*w4 + s5*w5 + s6*w6 + s7*w7 + s8*w8
+      dsgsdxval = ((1.0-ry)*(1.0-rz)*(s2-s1) + (1.0-ry)*rz*(s5-s4) &
+                 + ry*(1.0-rz)*(s7-s3) + ry*rz*(s8-s6))/dxloc
+      dsgsdyval = ((1.0-rx)*(1.0-rz)*(s3-s1) + (1.0-rx)*rz*(s6-s4) &
+                 + rx*(1.0-rz)*(s7-s2) + rx*rz*(s8-s5))/dyloc
+      dsgsdzval = ((1.0-rx)*(1.0-ry)*(s4-s1) + rx*(1.0-ry)*(s5-s2) &
+                 + (1.0-rx)*ry*(s6-s3) + rx*ry*(s8-s7))/dzloc
+
+      epssgsval = dissten(i  ,j  ,k  )*w1 + dissten(i+1,j  ,k  )*w2 &
+                + dissten(i  ,j+1,k  )*w3 + dissten(i  ,j  ,k+1)*w4 &
+                + dissten(i+1,j  ,k+1)*w5 + dissten(i  ,j+1,k+1)*w6 &
+                + dissten(i+1,j+1,k  )*w7 + dissten(i+1,j+1,k+1)*w8
+      epssgsval = max(epssgsval,0.0)
+      lsgsval = (2.25*dxloc*dyloc*dzloc)**(1.0/3.0)
+
+      end subroutine interpolate_sfs_velocity_fields
 
       subroutine sfs_position_update(dt,nstep,mtime,np,pdata, &
                                      x3d,y3d,z3d,khhval,khvval,dkhvdzval)
@@ -4151,7 +4248,8 @@
       !Here use the sea spray generation function (SSGF) of Andreas (1998)
       use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
-                        prusgs,prvsgs,prwsgs,prrp,prrp0,prtp,prms,prkap,pract,prtime, &
+                        prusgs,prvsgs,prwsgs,prsigsgs, &
+                        prrp,prrp0,prtp,prms,prkap,pract,prtime, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive,numprocs,nparcelsMax, &
                         time_phys_H2D,time_phys_D2H,time_droplet,timestats,mytime, &
                         drop_mult,tsk0,pi_sp,myid,nx,ny,dx,dy
@@ -4369,6 +4467,7 @@
             pdata(np,prusgs) = 0.0
             pdata(np,prvsgs) = 0.0
             pdata(np,prwsgs) = 0.0
+            pdata(np,prsigsgs) = 0.0
             pdata(np,prrp) = rad_init
             pdata(np,prrp0) = rad_init
             salinity = 0.034
@@ -4447,7 +4546,8 @@
       !Here use the pi chamber protocol: uniform aerosols at centerplane
       use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
-                        prusgs,prvsgs,prwsgs,prrp,prrp0,prtp,prms,prkap,pract,prtime, &
+                        prusgs,prvsgs,prwsgs,prsigsgs, &
+                        prrp,prrp0,prtp,prms,prkap,pract,prtime, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive,numprocs,nparcelsMax, &
                         time_phys_H2D,time_phys_D2H,time_droplet,timestats,mytime, &
                         drop_mult,tsk0,pi_sp,myid,nx,ny,nz,dx,dy,dz
@@ -4550,6 +4650,7 @@
             pdata(np,prusgs) = 0.0
             pdata(np,prvsgs) = 0.0
             pdata(np,prwsgs) = 0.0
+            pdata(np,prsigsgs) = 0.0
             pdata(np,prrp) = rad_init
             pdata(np,prrp0) = rad_init
             salinity = 0.066
@@ -4600,7 +4701,8 @@
       !Re-inject one testcase 17 droplet for each droplet removed on this MPI rank.
       use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
-                        prusgs,prvsgs,prwsgs,prrp,prrp0,prtp,prms,prkap,pract,prtime, &
+                        prusgs,prvsgs,prwsgs,prsigsgs, &
+                        prrp,prrp0,prtp,prms,prkap,pract,prtime, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive, &
                         drop_mult,pi_sp,maxz
       use constants
@@ -4675,6 +4777,7 @@
             pdata(np,prusgs) = 0.0
             pdata(np,prvsgs) = 0.0
             pdata(np,prwsgs) = 0.0
+            pdata(np,prsigsgs) = 0.0
             pdata(np,prkap) = 0.6
             call lognormal_droplet(pdata(np,prrp),pdata(np,prms),pdata(np,prkap),randomNumbers)
             pdata(np,prrp0) = pdata(np,prrp)

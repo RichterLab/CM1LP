@@ -5935,7 +5935,7 @@
       prcl_qsat     = max(0,min(1,prcl_qsat))
       prcl_sfc      = max(0,min(1,prcl_sfc))
       prcl_droplet  = max(0,min(1,prcl_droplet))
-      drop_sgs_opt  = max(0,min(1,drop_sgs_opt))
+      drop_sgs_opt  = max(0,min(2,drop_sgs_opt))
 
       if( imoist.eq.1 .and. ptype.eq.7 )then
         if( iprcl.ne.1 .or. prcl_droplet.ne.1 )then
@@ -6096,6 +6096,7 @@
       prusgs = 0
       prvsgs = 0
       prwsgs = 0
+      prsigsgs = 0
 
       ! for parcels:
       if(iprcl.eq.1)then
@@ -6135,6 +6136,10 @@
           npvals = npvals+1
           npvars = npvars+1
           prwsgs = npvals  !Droplet SGS z-velocity
+
+          npvals = npvals+1
+          npvars = npvars+1
+          prsigsgs = npvals  !Previous droplet SGS velocity variance
 
           npvals = npvals+1
           npvars = npvars+1
@@ -6376,6 +6381,7 @@
       if(dowr) write(outfile,*) '    prusgs   = ',prusgs
       if(dowr) write(outfile,*) '    prvsgs   = ',prvsgs
       if(dowr) write(outfile,*) '    prwsgs   = ',prwsgs
+      if(dowr) write(outfile,*) '    prsigsgs = ',prsigsgs
       if(dowr) write(outfile,*) '    prrp     = ',prrp
       if(dowr) write(outfile,*) '    prms     = ',prms
       if(dowr) write(outfile,*) '    prkap    = ',prkap
@@ -6384,9 +6390,9 @@
       if(dowr) write(outfile,*) '    pract    = ',pract
       if(dowr) write(outfile,*)
 
-      !$acc update device (prvpx,prvpy,prvpz,prusgs,prvsgs,prwsgs,prrp, &
-      !$acc                prms,prkap,prtp,prx,pry,prz,prsig,prmult,    &
-      !$acc                pract,prtime)
+      !$acc update device (prvpx,prvpy,prvpz,prusgs,prvsgs,prwsgs,      &
+      !$acc                prsigsgs,prrp,prms,prkap,prtp,prx,pry,prz,   &
+      !$acc                prsig,prmult,pract,prtime)
 
 !--------------------------------------------------------------
 !  Get identity
