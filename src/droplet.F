@@ -487,6 +487,8 @@
                            iflag,jflag, &
                            x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
                            khhval,khvval,dkhvdzval, &
+                           sigsgsval,dsgsdxval,dsgsdyval,dsgsdzval, &
+                           epssgsval,lsgsval, &
                            rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                            part_grav1,part_grav2,part_grav3,debug, &
                            neighbor,num_fallout,errcode)
@@ -1342,6 +1344,8 @@
                              iflag,jflag, &
                              x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
                              khhval,khvval,dkhvdzval, &
+                             sigsgsval,dsgsdxval,dsgsdyval,dsgsdzval, &
+                             epssgsval,lsgsval, &
                              rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                              part_grav1,part_grav2,part_grav3,debug, &
                              neighbor,num_fallout,errcode)
@@ -1350,7 +1354,8 @@
 
       use input, only : ib,ie,jb,je,kb,ke,numq,npvals,nx,ny,viscosity, &
           pr_num,sc_num,axisymm,terrain_flag,maxz,minx,maxx,miny,maxy, &
-          prvpx,prvpy,prvpz,prrp,prrp0,prms,prkap,prtp,prx,pry,prsig, &
+          prvpx,prvpy,prvpz,prusgs,prvsgs,prwsgs,prsigsgs, &
+          prrp,prrp0,prms,prkap,prtp,prx,pry,prsig, &
           prz,pru,prv, &
           prw,prt,prqv,prprs,prrho,pract,prtime,prmult,ni,nj,mywest, &
           mysw,mynw,myeast,myse,myne,mysouth,mynorth,nparcelsLocal, &
@@ -1371,6 +1376,8 @@
       real, intent(inout) :: x3d,y3d,z3d,sig3d
       real, intent(in) :: uval,vval,wval,qval,rhoval,prsval,tval
       real, intent(in) :: khhval,khvval,dkhvdzval
+      real, intent(in) :: sigsgsval,dsgsdxval,dsgsdyval,dsgsdzval
+      real, intent(in) :: epssgsval,lsgsval
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
       integer, intent(inout), dimension(nparcelsLocal,3) :: pdata_locind
       real, intent(out) :: Nup
@@ -1454,6 +1461,12 @@
       if (drop_sgs_opt.eq.1) then
         call sfs_position_update(dt,nstep,mtime,np,pdata, &
                                  x3d,y3d,z3d,khhval,khvval,dkhvdzval)
+      endif
+      if (drop_sgs_opt.eq.2) then
+        call sfs_velocity_update(dt,nstep,mtime,np,pdata, &
+                                 x3d,y3d,z3d,sigsgsval, &
+                                 dsgsdxval,dsgsdyval,dsgsdzval, &
+                                 epssgsval,lsgsval)
       endif
 
       pdata(np,prvpx) = (pdata(np,prvpx) + uval*(dbldt/taup) + dbldt*part_grav1)/(1.0d0 + dbldt/taup)
@@ -1847,6 +1860,8 @@
       s8 = (2.0/3.0)*max(tkea(i+1,j+1,k+1),0.0)
 
       sigsgsval = s1*w1 + s2*w2 + s3*w3 + s4*w4 + s5*w5 + s6*w6 + s7*w7 + s8*w8
+      ! These are derivatives of the local trilinear sigsgs interpolant,
+      ! evaluated at the particle position, not interpolated gradient fields.
       dsgsdxval = ((1.0-ry)*(1.0-rz)*(s2-s1) + (1.0-ry)*rz*(s5-s4) &
                  + ry*(1.0-rz)*(s7-s3) + ry*rz*(s8-s6))/dxloc
       dsgsdyval = ((1.0-rx)*(1.0-rz)*(s3-s1) + (1.0-rx)*rz*(s6-s4) &
@@ -1921,6 +1936,128 @@
       z3d = z3d + normz*sqrt(2.0*khv_eff*dt) + dkhvdzval*dt
 
       end subroutine sfs_position_update
+
+      subroutine sfs_velocity_update(dt,nstep,mtime,np,pdata, &
+                                     x3d,y3d,z3d,sigsgsval, &
+                                     dsgsdxval,dsgsdyval,dsgsdzval, &
+                                     epssgsval,lsgsval)
+      !$acc routine seq
+      use input, only : nparcelsLocal,npvals,nx,ny,axisymm, &
+                        prusgs,prvsgs,prwsgs,prsigsgs, &
+                        prpidx,prprocidx
+      use constants, only : i8,pi
+      implicit none
+
+      real, intent(in) :: dt,sigsgsval,dsgsdxval,dsgsdyval,dsgsdzval
+      real, intent(in) :: epssgsval,lsgsval
+      double precision, intent(in) :: mtime
+      integer, intent(in) :: nstep,np
+      real, intent(inout) :: x3d,y3d,z3d
+      real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
+
+      integer :: pidx,procidx
+      integer(i8) :: seed,state
+      integer(i8), parameter :: im = 2147483647_i8
+      real, parameter :: c0 = 6.0
+      real, parameter :: fs = 1.0
+      real :: sig_eff,sig_prev,eps_eff,l_eff,noise_amp
+      real :: normx,normy,normz
+      real :: us_old,vs_old,ws_old
+      real :: a1,a2,a3
+      double precision :: u1,u2,fac,theta
+
+      if( dt.le.0.0 ) return
+
+      if( sigsgsval.le.0.0 )then
+        pdata(np,prusgs) = 0.0
+        pdata(np,prvsgs) = 0.0
+        pdata(np,prwsgs) = 0.0
+        pdata(np,prsigsgs) = 0.0
+        return
+      endif
+
+      sig_eff = max(abs(sigsgsval),1.0e-4)
+      sig_prev = pdata(np,prsigsgs)
+      if( sig_prev.le.0.0 )then
+        sig_prev = sig_eff
+      else
+        sig_prev = max(abs(sig_prev),1.0e-4)
+      endif
+
+      l_eff = max(lsgsval,1.0e-6)
+      eps_eff = epssgsval
+      if( eps_eff.le.0.0 )then
+        eps_eff = (0.93/l_eff)*(1.5*sig_eff)**1.5
+      endif
+      if( eps_eff.le.0.0 )then
+        pdata(np,prusgs) = 0.0
+        pdata(np,prvsgs) = 0.0
+        pdata(np,prwsgs) = 0.0
+        pdata(np,prsigsgs) = sig_eff
+        return
+      endif
+
+      ! Deterministic per-particle seed, offset from the position SGS sequence.
+      pidx = transfer(pdata(np,prpidx),0)
+      procidx = transfer(pdata(np,prprocidx),0)
+      seed = 104729_i8
+      seed = mod(seed + abs(int(pidx,i8))*1000003_i8,im)
+      seed = mod(seed + abs(int(procidx,i8))*9176_i8,im)
+      seed = mod(seed + abs(int(nstep,i8))*1013_i8,im)
+      seed = mod(seed + abs(int(1000.0d0*mtime+0.5d0,i8))*37_i8,im)
+      if( seed.le.0_i8 ) seed = 1_i8
+      state = seed
+
+      ! Box-Muller transform: two uniform draws give x/y standard normals.
+      u1 = max(sfs_uniform(state),1.0d-12)
+      u2 = sfs_uniform(state)
+      fac = sqrt(-2.0d0*log(u1))
+      theta = 2.0d0*dble(pi)*u2
+      normx = real(fac*cos(theta))
+      normy = real(fac*sin(theta))
+
+      ! A second Box-Muller pair supplies the vertical standard normal.
+      u1 = max(sfs_uniform(state),1.0d-12)
+      u2 = sfs_uniform(state)
+      fac = sqrt(-2.0d0*log(u1))
+      theta = 2.0d0*dble(pi)*u2
+      normz = real(fac*cos(theta))
+
+      noise_amp = sqrt(max(fs*c0*eps_eff*dt,0.0))
+
+      us_old = pdata(np,prusgs)
+      a1 = -0.5*fs*c0*eps_eff*us_old/sig_eff
+      a2 = 0.5*(fs/sig_eff)*us_old*(sig_eff-sig_prev)/dt
+      a3 = 0.5*fs*dsgsdxval
+      pdata(np,prusgs) = us_old + (a1+a2+a3)*dt + noise_amp*normx
+
+      vs_old = pdata(np,prvsgs)
+      a1 = -0.5*fs*c0*eps_eff*vs_old/sig_eff
+      a2 = 0.5*(fs/sig_eff)*vs_old*(sig_eff-sig_prev)/dt
+      a3 = 0.5*fs*dsgsdyval
+      pdata(np,prvsgs) = vs_old + (a1+a2+a3)*dt + noise_amp*normy
+
+      ws_old = pdata(np,prwsgs)
+      a1 = -0.5*fs*c0*eps_eff*ws_old/sig_eff
+      a2 = 0.5*(fs/sig_eff)*ws_old*(sig_eff-sig_prev)/dt
+      a3 = 0.5*fs*dsgsdzval
+      pdata(np,prwsgs) = ws_old + (a1+a2+a3)*dt + noise_amp*normz
+
+      if( nx.gt.1 .and. axisymm.ne.1 )then
+        x3d = x3d + pdata(np,prusgs)*dt
+      else
+        pdata(np,prusgs) = 0.0
+      endif
+      if( ny.gt.1 .and. axisymm.ne.1 )then
+        y3d = y3d + pdata(np,prvsgs)*dt
+      else
+        pdata(np,prvsgs) = 0.0
+      endif
+      z3d = z3d + pdata(np,prwsgs)*dt
+
+      pdata(np,prsigsgs) = sig_eff
+
+      end subroutine sfs_velocity_update
 
       double precision function sfs_uniform(state)
       !$acc routine seq
