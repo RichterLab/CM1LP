@@ -94,11 +94,6 @@
 
     if(myid.eq.0)then
 #endif
-      write(6,100) amax,fmax,imax,jmax,kmax,    &
-                   amin,fmin,imin,jmin,kmin
-100   format(2x,'stat:: ',a6,':',1x,g13.6,i5,i5,i5,    &
-             4x,a6,':',1x,g13.6,i5,i5,i5)
-
       nstat = nstat + 1
       rstat(nstat) = fmax
       nstat = nstat + 1
@@ -260,11 +255,6 @@
     if(myid.eq.0)then
 #endif
       print *,'maxmin_fold: MPI rank: ',nmin(2),nmax(2)
-      write(6,100) amax,fmax,imax,jmax,kmax,    &
-                   amin,fmin,imin,jmin,kmin
-100   format(2x,'stat:: ',a6,':',1x,g13.6,i5,i5,i5,    &
-             4x,a6,':',1x,g13.6,i5,i5,i5)
-
       nstat = nstat + 1
       rstat(nstat) = fmax
       nstat = nstat + 1
@@ -366,11 +356,6 @@
     if(myid.eq.0)then
       print *,'maxmin_host: MPI rank: ',nmin(2),nmax(2)
 #endif
-      write(6,100) amax,fmax,imax,jmax,kmax,    &
-                   amin,fmin,imin,jmin,kmin
-100   format(2x,'stat:: ',a6,':',1x,g13.6,i5,i5,i5,    &
-             4x,a6,':',1x,g13.6,i5,i5,i5)
-
       nstat = nstat + 1
       rstat(nstat) = fmax
       nstat = nstat + 1
@@ -467,11 +452,6 @@
 
     if(myid.eq.0)then
 #endif
-      write(6,100) amax,fmax,imax,jmax,1,    &
-                   amin,fmin,imin,jmin,1
-100   format(2x,'stat:: ',a6,':',1x,g13.6,i5,i5,i5,    &
-             4x,a6,':',1x,g13.6,i5,i5,i5)
-
       nstat = nstat + 1
       rstat(nstat) = fmax
       nstat = nstat + 1
@@ -561,11 +541,6 @@
 
     if(myid.eq.0)then
 #endif
-      write(6,100) amax,fmax,imax,jmax,1,    &
-                   amin,fmin,imin,jmin,1
-100   format(2x,'stat:: ',a6,':',1x,g13.6,i5,i5,i5,    &
-             4x,a6,':',1x,g13.6,i5,i5,i5)
-
 #ifdef MPI
     endif
 #endif

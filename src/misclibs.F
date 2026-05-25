@@ -2625,11 +2625,6 @@
 
       if(bot.eq.maxz) bot=0.0
 
-      write(6,100) 'QCTOP ',top,1,1,1,   &
-                   'QCBOT ',bot,1,1,1
-100   format(2x,'stat:: ',a6,':',1x,f13.6,i5,i5,i5,   &
-             4x,a6,':',1x,f13.6,i5,i5,i5)
- 
       nstat = nstat + 1
       rstat(nstat) = top
       nstat = nstat + 1
@@ -2804,15 +2799,12 @@
         vmax=var
         if(myid.eq.0)then
 #endif
-        write(6,100) text,vmax
         nstat = nstat + 1
         rstat(nstat) = vmax
 #ifdef MPI
         endif
 #endif
       ENDDO
-
-100   format(2x,'stat:: ',a6,':',1x,e13.6)
 
       if(timestats.ge.1) time_stat=time_stat+mytime()
  
@@ -2971,13 +2963,10 @@
     IF(writeit.eq.1)THEN
       nstat = nstat + 1
       IF( adapt_dt.eq.1 )THEN
-        write(6,100) 'CFLMAX',sngl(acfl),imax,jmax,kmax
         rstat(nstat) = sngl(acfl)
       ELSE
-        write(6,100) 'CFLMAX',fmax,imax,jmax,kmax
         rstat(nstat) = fmax
       ENDIF
-100   format(2x,'stat:: ',a6,':',1x,f13.6,i6,1x,i6,1x,i6)
     ENDIF
 
 #ifdef MPI
@@ -3156,13 +3145,10 @@
     IF(writeit.eq.1)THEN
       nstat = nstat + 1
       IF( adapt_dt.eq.1 )THEN
-        write(6,100) 'CFLMAX',sngl(acfl),imax,jmax,kmax
         rstat(nstat) = sngl(acfl)
       ELSE
-        write(6,100) 'CFLMAX',fmax,imax,jmax,kmax
         rstat(nstat) = fmax
       ENDIF
-100   format(2x,'stat:: ',a6,':',1x,f13.6,i6,1x,i6,1x,i6)
     ENDIF
 
 #ifdef MPI
@@ -3555,17 +3541,11 @@
       if(myid.eq.0)then
 #endif
 
-      write(6,100) 'KSHMAX',fhmax,imaxh,jmaxh,kmaxh
-
       nstat = nstat + 1
       rstat(nstat) = fhmax
 
-      write(6,100) 'KSVMAX',fvmax,imaxv,jmaxv,kmaxv
-
       nstat = nstat + 1
       rstat(nstat) = fvmax
-
-100   format(2x,'stat:: ',a6,':',1x,g13.6,i5,i5,i5)
 
 #ifdef MPI
       endif
@@ -3762,17 +3742,11 @@
       if(myid.eq.0)then
 #endif
 
-      write(6,100) 'KSHMAX',fhmax,imaxh,jmaxh,kmaxh
-
       nstat = nstat + 1
       rstat(nstat) = fhmax
 
-      write(6,100) 'KSVMAX',fvmax,imaxv,jmaxv,kmaxv
-
       nstat = nstat + 1
       rstat(nstat) = fvmax
-
-100   format(2x,'stat:: ',a6,':',1x,g13.6,i5,i5,i5)
 
 #ifdef MPI
       endif
@@ -3849,10 +3823,6 @@
 
       jmax = 1
 
-      write(6,131) 'RMW   ',rmax,imax,jmax,kmax
-      write(6,131) 'ZMW   ',zmax,imax,jmax,kmax
-131   format(2x,'stat:: ',a6,':',1x,f13.6,i5,i5,i5)
-
       nstat = nstat + 1
       rstat(nstat) = rmax
       nstat = nstat + 1
@@ -3911,9 +3881,6 @@
 #endif
 
       tmass=tmass*(dx*dy*dz)
- 
-      write(6,100) 'TMASS ',tmass
-100   format(2x,'stat:: ',a6,':',1x,e13.6)
  
       nstat = nstat + 1
       rstat(nstat) = tmass
@@ -3982,9 +3949,6 @@
       ! cm1r18:  do not include rain:
       tmass=tmass*(dx*dy*dz)
 
-      write(6,100) 'TMOIS ',tmass
-100   format(2x,'stat:: ',a6,':',1x,e13.6)
- 
       nstat = nstat + 1
       rstat(nstat) = tmass
 
@@ -4050,9 +4014,6 @@
 #endif
 
       tmass=tmass*(dx*dy*dz)
-
-      write(6,100) aname,tmass
-100   format(2x,'stat:: ',a6,':',1x,e13.6)
 
       nstat = nstat + 1
       rstat(nstat) = tmass
@@ -4176,9 +4137,6 @@
 
       et=ek+ei+ep+le
  
-      write(6,100) 'TENERG',et
-100   format(2x,'stat:: ',a6,':',1x,e13.6)
-
       nstat = nstat + 1
       rstat(nstat) = ek
       nstat = nstat + 1
@@ -4293,13 +4251,6 @@
       if(myid.eq.0)then
 #endif
  
-      write(6,100) 'TMU   ',tmu
-      write(6,100) 'TMV   ',tmv
-      write(6,100) 'TMW   ',tmw
-      write(6,100) 'QL   ',qltmp
-      write(6,100) 'VR   ',vrtmp
-100   format(2x,'stat:: ',a6,':',1x,e13.6)
- 
       nstat = nstat + 1
       rstat(nstat) = tmu
       nstat = nstat + 1
@@ -4372,10 +4323,6 @@
 #endif
       tmfu=tmfu*dx*dy
       tmfd=tmfd*dx*dy
-
-      write(6,100) 'TMFU  ',tmfu
-      write(6,100) 'TMFD  ',tmfd
-100   format(2x,'stat:: ',a6,':',1x,e13.6)
 
       nstat = nstat + 1
       rstat(nstat) = tmfu

@@ -3198,36 +3198,10 @@
                qfsat(iz) = 0.0
                qstarmean(iz) = 0.0
             end if
-            write(6,100) 'dumzh(',iz,'):',dumzh(iz)
-            write(6,100) 'numconc(',iz,'):',numconc(iz)
          end do
 #ifdef MPI
       end if
 #endif
-      !WRITE IT OUT:
-
-      !Dump to screen for debugging purposes
-#ifdef MPI
-      if ( myid == 0 ) then
-#endif
-         write(6,200) 'rtime', rtime
-         write(6,200) 'tnumpart',sngl(tnumpart)
-         write(6,200) 'radavg',radavg
-         write(6,200) 'radmin',radmin
-         write(6,200) 'radmax',radmax
-         write(6,200) 'Tpavg',Tpavg
-         write(6,200) 'Tpmin',Tpmin
-         write(6,200) 'Tpmax',Tpmax
-         write(6,200) 'Tfavg',Tfavg
-         write(6,200) 'qfavg',qfavg
-         write(6,200) 'prsavg',prsavg
-         write(6,200) 'rhoavg',rhoavg
-#ifdef MPI
-      end if
-#endif
-
-
-
 
       !!!!!!! 2nd order  !!!!!!!!
 
@@ -3460,9 +3434,6 @@
       !$acc                mass_reentry,eng_reentry,m1_reentry,m2_reentry, &
       !$acc                m1_injected,m2_injected, &
       !$acc                num100,num1000)
-
-100     format(2x,'DROPLET_DIAG1:: ',A,I0,A,1x,e13.6,1x)
-200     format(2x,'DROPLET_DIAG:: ',A10,':',1x,e13.6)
 
       !$acc end data
 
@@ -4268,7 +4239,7 @@
     
       integer, parameter :: nbin = 100
       integer :: i,np,idx_tmp
-      integer(i8) :: tot_after_reintro
+      integer(i8) :: tot_after_reintro,total_reintro
       integer :: sum_buf(2)
       double precision :: dFssum(nbin+1)  !Discretized cumulative spray generation function (to be calculated)
       double precision :: binsdata(nbin),binsdata10(nbin)  !Discretized bins for SSGF; "10" is for the log10 value
@@ -4404,7 +4375,10 @@
       num_injected = num_injected + real(my_reintro)*drop_mult
       !$acc update device (num_injected)
 
-      if (myid==0) write(*,'(a15,i,9e15.6)')  'DROP INJECTION:',my_reintro,my_reintro_tmp,drop_mult,u10,totdrops,xrange,yrange,num_injected,mtime,time_since_inject
+      total_reintro = int(my_reintro,i8)
+#ifdef MPI
+      call mpi_allreduce(mpi_in_place,total_reintro,1,mpi_integer8,mpi_sum,mpi_comm_world,ierr)
+#endif
 
 #ifdef MPI
       !For deciding whether to inject more:
@@ -4419,6 +4393,11 @@
 
       if (tot_after_reintro .lt. nparcelsMax) then   !Only add particles if the total number injected
                                                      !does not make the global exceed nparcelsMax
+         if (myid==0 .and. total_reintro.gt.0_i8) then
+            write(*,'(a,1pe15.6,a,i18)') 'DROP INJECTION: mtime=',mtime, &
+                                         ' superdroplets=',total_reintro
+         end if
+
          !$acc data copyin(dFssum,binsdata,binsdata10) create(randomNumbers,randomNumbers%state)
          !$acc update device(ngidx)
          !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) private(randomNumbers,local_seed)
@@ -4565,7 +4544,7 @@
       integer, intent(out) :: my_reintro
     
       integer :: i,np,idx_tmp
-      integer(i8) :: tot_after_reintro
+      integer(i8) :: tot_after_reintro,total_reintro
       integer :: sum_buf(2)
 
       double precision :: rad_init  !Initial radius
@@ -4602,7 +4581,10 @@
       num_injected = num_injected + real(my_reintro)*drop_mult
       !$acc update device (num_injected)
 
-      if (myid==0) write(*,'(a15,i,8e15.6)')  'DROP INJECTION:',my_reintro,my_reintro_tmp,drop_mult,xrange,yrange,zrange,num_injected,mtime,time_since_inject
+      total_reintro = int(my_reintro,i8)
+#ifdef MPI
+      call mpi_allreduce(mpi_in_place,total_reintro,1,mpi_integer8,mpi_sum,mpi_comm_world,ierr)
+#endif
 
 #ifdef MPI
       !For deciding whether to inject more:
@@ -4617,6 +4599,11 @@
 
       if (tot_after_reintro .lt. nparcelsMax) then   !Only add particles if the total number injected
                                                      !does not make the global exceed nparcelsMax
+         if (myid==0 .and. total_reintro.gt.0_i8) then
+            write(*,'(a,1pe15.6,a,i18)') 'DROP INJECTION: mtime=',mtime, &
+                                         ' superdroplets=',total_reintro
+         end if
+
          !$acc data create(randomNumbers,randomNumbers%state)
          !$acc update device(ngidx)
          !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) private(randomNumbers,local_seed)

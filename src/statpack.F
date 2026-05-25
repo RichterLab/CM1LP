@@ -589,9 +589,7 @@
 
       IF(imoist.eq.1 .and. stat_pcn.eq.1)THEN
       if(myid.eq.0)then
-100     format(2x,'stat:: ',a6,':',1x,e13.6)
         do n=1,nbudget
-          write(6,100) budname(n),qbudget(n)
           nstat = nstat + 1
           rstat(nstat) = qbudget(n)
         enddo
@@ -603,14 +601,12 @@
         do n=1,numq
           text1='as    '
           write(text1(3:5),121) qname(n)
-          write(6,100) text1,asq(n)
           nstat = nstat + 1
           rstat(nstat) = asq(n)
         enddo
         do n=1,numq
           text1='bs    '
           write(text1(3:5),121) qname(n)
-          write(6,100) text1,bsq(n)
           nstat = nstat + 1
           rstat(nstat) = bsq(n)
         enddo
