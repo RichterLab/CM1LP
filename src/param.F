@@ -6093,6 +6093,9 @@
       przs = 0
       prsig = 0
       prkap = 0
+      prusgs = 0
+      prvsgs = 0
+      prwsgs = 0
 
       ! for parcels:
       if(iprcl.eq.1)then
@@ -6119,7 +6122,19 @@
 
           npvals = npvals+1
           npvars = npvars+1
-          prvpz = npvals  !Droplet y-velocity
+          prvpz = npvals  !Droplet z-velocity
+
+          npvals = npvals+1
+          npvars = npvars+1
+          prusgs = npvals  !Droplet SGS x-velocity
+
+          npvals = npvals+1
+          npvars = npvars+1
+          prvsgs = npvals  !Droplet SGS y-velocity
+
+          npvals = npvals+1
+          npvars = npvars+1
+          prwsgs = npvals  !Droplet SGS z-velocity
 
           npvals = npvals+1
           npvars = npvars+1
@@ -6358,6 +6373,9 @@
       if(dowr) write(outfile,*) '    prvpx    = ',prvpx
       if(dowr) write(outfile,*) '    prvpy    = ',prvpy
       if(dowr) write(outfile,*) '    prvpz    = ',prvpz
+      if(dowr) write(outfile,*) '    prusgs   = ',prusgs
+      if(dowr) write(outfile,*) '    prvsgs   = ',prvsgs
+      if(dowr) write(outfile,*) '    prwsgs   = ',prwsgs
       if(dowr) write(outfile,*) '    prrp     = ',prrp
       if(dowr) write(outfile,*) '    prms     = ',prms
       if(dowr) write(outfile,*) '    prkap    = ',prkap
@@ -6366,8 +6384,9 @@
       if(dowr) write(outfile,*) '    pract    = ',pract
       if(dowr) write(outfile,*)
 
-      !$acc update device (prvpx,prvpy,prvpz,prrp,prms,prkap,prtp,prx, &
-      !$acc                pry,prz,prsig,prmult,pract,prtime)
+      !$acc update device (prvpx,prvpy,prvpz,prusgs,prvsgs,prwsgs,prrp, &
+      !$acc                prms,prkap,prtp,prx,pry,prz,prsig,prmult,    &
+      !$acc                pract,prtime)
 
 !--------------------------------------------------------------
 !  Get identity

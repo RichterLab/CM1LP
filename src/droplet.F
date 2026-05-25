@@ -4146,7 +4146,8 @@
       !Inject new particles according to some rule
       !Here use the sea spray generation function (SSGF) of Andreas (1998)
       use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
-                        prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz,prrp,prrp0,prtp,prms,prkap,pract,prtime, &
+                        prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
+                        prusgs,prvsgs,prwsgs,prrp,prrp0,prtp,prms,prkap,pract,prtime, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive,numprocs,nparcelsMax, &
                         time_phys_H2D,time_phys_D2H,time_droplet,timestats,mytime, &
                         drop_mult,tsk0,pi_sp,myid,nx,ny,dx,dy
@@ -4361,6 +4362,9 @@
             pdata(np,prvpx) = 0.0
             pdata(np,prvpy) = 0.0
             pdata(np,prvpz) = 3.0 
+            pdata(np,prusgs) = 0.0
+            pdata(np,prvsgs) = 0.0
+            pdata(np,prwsgs) = 0.0
             pdata(np,prrp) = rad_init
             pdata(np,prrp0) = rad_init
             salinity = 0.034
@@ -4438,7 +4442,8 @@
       !Inject new particles according to some rule
       !Here use the pi chamber protocol: uniform aerosols at centerplane
       use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
-                        prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz,prrp,prrp0,prtp,prms,prkap,pract,prtime, &
+                        prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
+                        prusgs,prvsgs,prwsgs,prrp,prrp0,prtp,prms,prkap,pract,prtime, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive,numprocs,nparcelsMax, &
                         time_phys_H2D,time_phys_D2H,time_droplet,timestats,mytime, &
                         drop_mult,tsk0,pi_sp,myid,nx,ny,nz,dx,dy,dz
@@ -4538,6 +4543,9 @@
             pdata(np,prvpx) = 0.0
             pdata(np,prvpy) = 0.0
             pdata(np,prvpz) = 0.0   !Specified in namelist file
+            pdata(np,prusgs) = 0.0
+            pdata(np,prvsgs) = 0.0
+            pdata(np,prwsgs) = 0.0
             pdata(np,prrp) = rad_init
             pdata(np,prrp0) = rad_init
             salinity = 0.066
@@ -4587,7 +4595,8 @@
     subroutine droplet_fallout_reinjection(pdata,xf,yf,num_fallout,mtime,my_reintro)
       !Re-inject one testcase 17 droplet for each droplet removed on this MPI rank.
       use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
-                        prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz,prrp,prrp0,prtp,prms,prkap,pract,prtime, &
+                        prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
+                        prusgs,prvsgs,prwsgs,prrp,prrp0,prtp,prms,prkap,pract,prtime, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive, &
                         drop_mult,pi_sp,maxz
       use constants
@@ -4659,6 +4668,9 @@
             pdata(np,prvpx) = 0.0
             pdata(np,prvpy) = 0.0
             pdata(np,prvpz) = 0.0
+            pdata(np,prusgs) = 0.0
+            pdata(np,prvsgs) = 0.0
+            pdata(np,prwsgs) = 0.0
             pdata(np,prkap) = 0.6
             call lognormal_droplet(pdata(np,prrp),pdata(np,prms),pdata(np,prkap),randomNumbers)
             pdata(np,prrp0) = pdata(np,prrp)
