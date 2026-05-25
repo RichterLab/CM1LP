@@ -177,6 +177,7 @@
 
       integer :: numHoles                                  ! total number of empty holes in pdata 
       integer :: numBackfill                               ! total number of droplets to backfill into "pdata" array holes
+      integer :: numDepartAlloc,numHolesAlloc,numBackfillAlloc
 
       integer, dimension(:), allocatable :: backfill_ind   ! indicies of valid droplets to backfill into 
                                                            ! holes  in "pdata" array created by droplet 
@@ -569,10 +570,12 @@
     Depart(ise)    = numDepartSE
 
     numDepart=SUM(Depart)
-    if(numDepart .gt. 0) allocate(Depart_ind(numDepart))
+    numDepartAlloc = max(1,numDepart)
+    allocate(Depart_ind(numDepartAlloc))
     !$acc enter data create(Depart_ind)
 
     numHoles = numDepart + num_fallout + (nparcelsLocal-nparcelsLocalActive)
+    numHolesAlloc = max(1,numHoles)
 
 !----------------------------------------------------------------------
 !  communicate data  (for MPI runs)
@@ -585,7 +588,7 @@
      ! Step 1: Allocate and assign the "hole" index array and initialize it !
      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-     allocate(holes_ind(numHoles))
+     allocate(holes_ind(numHolesAlloc))
      !$acc enter data create(holes_ind)
 
      !$acc parallel loop gang vector default(present) 
@@ -678,11 +681,12 @@
     ! number of holes in "pdata" to fill after the arrival droplets have
     ! been assigned a location
     numBackfill = sum(Depart) + num_fallout - sum(Arrive) 
+    numBackfillAlloc = max(1,numBackfill)
      ! Determine which droplets to relocated from the end of 
      ! the "pdata" array to the remaining holes
+     allocate(backfill_ind(numBackfillAlloc))
+     !$acc enter data create(backfill_ind)
      if (numBackfill .gt. 0) then 
-       allocate(backfill_ind(numBackfill))
-       !$acc enter data create(backfill_ind)
        if ((nparcelsLocalActive - numBackfill) .eq. 0) then
           ! Set backfill_ind to 1 to handle an exception case, 
           ! where all the active droplets fall out or leave
