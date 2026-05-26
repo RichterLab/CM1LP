@@ -2824,13 +2824,14 @@
               tnumaerosol,tnumpart,tmasspart
 
       real :: partnum(nk),multnum(nk),partmass(nk),numconc(nk),sd_numconc(nk),massconc(nk),vp1mean(nk),vp2mean(nk),vp3mean(nk),vp1msqr(nk),vp2msqr(nk),vp3msqr(nk),uf1mean(nk),uf2mean(nk),uf3mean(nk),Tpsrc(nk),qvsrc(nk),rhovsrc(nk),qf(nk),Tf(nk),radmean(nk),radmsqr(nk),Tpmean(nk),Tpmsqr(nk),qfsat(nk),m1src(nk),m2src(nk),m3src(nk),qstarmean(nk),kmoist(nk),mse(nk),wk(nk),wtmp(nk)
+      real :: usgsmean(nk),vsgsmean(nk),wsgsmean(nk),sigm_smean(nk)
       double precision, dimension(nk) :: qstardp,radmsqrdp
 
       real :: partnumrz(nk,nbins),multnumrz(nk,nbins),vp3meanrz(nk,nbins)
 
       real :: tnumpart_r(nbins)
 
-      integer, parameter :: num0 = 33, num1 = 30   !Number of 0th and 1st order statistics in droplet_diag
+      integer, parameter :: num0 = 33, num1 = 34   !Number of 0th and 1st order statistics in droplet_diag
       real :: rad10_tmp,dry_rad10_tmp
       double precision :: qstar_tmp
       integer :: ibin,ibin_dry
@@ -2853,6 +2854,7 @@
       !$acc              Tf,radmean,Tpmean,qfsat,vp1mean,vp2mean, &
       !$acc              vp3mean,vp1msqr,vp2msqr,vp3msqr,radmsqrdp, &
       !$acc              uf1mean,uf2mean,uf3mean, &
+      !$acc              usgsmean,vsgsmean,wsgsmean,sigm_smean, &
       !$acc              Tpmsqr,m1src,m2src,m3src,qstardp,kmoist,mse,wk,wtmp, &
       !$acc              partnumrz,multnumrz,vp3meanrz,tnumpart_r) 
 
@@ -3052,6 +3054,10 @@
          uf1mean(k) = 0.0
          uf2mean(k) = 0.0
          uf3mean(k) = 0.0
+         usgsmean(k) = 0.0
+         vsgsmean(k) = 0.0
+         wsgsmean(k) = 0.0
+         sigm_smean(k) = 0.0
          m1src(k) = 0.0
          m2src(k) = 0.0
          m3src(k) = 0.0
@@ -3111,6 +3117,14 @@
          uf2mean(k) = uf2mean(k) + pdata(np,prv)
          !$acc atomic update
          uf3mean(k) = uf3mean(k) + pdata(np,prw)
+         !$acc atomic update
+         usgsmean(k) = usgsmean(k) + pdata(np,prusgs)
+         !$acc atomic update
+         vsgsmean(k) = vsgsmean(k) + pdata(np,prvsgs)
+         !$acc atomic update
+         wsgsmean(k) = wsgsmean(k) + pdata(np,prwsgs)
+         !$acc atomic update
+         sigm_smean(k) = sigm_smean(k) + pdata(np,prsigsgs)
          !$acc atomic update
          Tf(k) = Tf(k) + pdata(np,prt)
          !$acc atomic update
@@ -3204,6 +3218,7 @@
       !$acc              Tf,radmean,Tpmean,qfsat,vp1mean,vp2mean, &
       !$acc              vp3mean,vp1msqr,vp2msqr,vp3msqr,radmsqrdp, &
       !$acc              uf1mean,uf2mean,uf3mean, &
+      !$acc              usgsmean,vsgsmean,wsgsmean,sigm_smean, &
       !$acc              Tpmsqr,m1src,m2src,m3src,qstardp,kmoist,mse,wk,wtmp)
 
 #ifdef MPI
@@ -3240,6 +3255,10 @@
          droplet_diag1(iz,28) = wtmp(iz)
          droplet_diag1(iz,29) = mse(iz)
          droplet_diag1(iz,30) = rhovsrc(iz)
+         droplet_diag1(iz,31) = usgsmean(iz)
+         droplet_diag1(iz,32) = vsgsmean(iz)
+         droplet_diag1(iz,33) = wsgsmean(iz)
+         droplet_diag1(iz,34) = sigm_smean(iz)
       end do
 
       ! The root rank will collect the diagnostic from different MPI ranks
@@ -3286,6 +3305,10 @@
             wtmp(iz) = droplet_diag1(iz,28)
             mse(iz) = droplet_diag1(iz,29)
             rhovsrc(iz) = droplet_diag1(iz,30)
+            usgsmean(iz) = droplet_diag1(iz,31)
+            vsgsmean(iz) = droplet_diag1(iz,32)
+            wsgsmean(iz) = droplet_diag1(iz,33)
+            sigm_smean(iz) = droplet_diag1(iz,34)
          end do
  
 #endif
@@ -3307,6 +3330,10 @@
                uf1mean(iz) = uf1mean(iz)/partnum(iz)
                uf2mean(iz) = uf2mean(iz)/partnum(iz)
                uf3mean(iz) = uf3mean(iz)/partnum(iz)
+               usgsmean(iz) = usgsmean(iz)/partnum(iz)
+               vsgsmean(iz) = vsgsmean(iz)/partnum(iz)
+               wsgsmean(iz) = wsgsmean(iz)/partnum(iz)
+               sigm_smean(iz) = sigm_smean(iz)/partnum(iz)
                Tf(iz) = Tf(iz)/partnum(iz)
                qf(iz) = qf(iz)/partnum(iz)
                Tpmean(iz) = Tpmean(iz)/partnum(iz)
@@ -3326,6 +3353,10 @@
                uf1mean(iz) = 0.0
                uf2mean(iz) = 0.0
                uf3mean(iz) = 0.0
+               usgsmean(iz) = 0.0
+               vsgsmean(iz) = 0.0
+               wsgsmean(iz) = 0.0
+               sigm_smean(iz) = 0.0
                Tf(iz) = 0.0
                qf(iz) = 0.0
                Tpmean(iz) = 0.0
@@ -3537,7 +3568,10 @@
 #endif
       call writedropdiag_nc(nrec,nbins, &
            rtime,tnumpart,tnummult,tnumaerosol,tnumdrop,tmasspart,radavg,radsqr,radmin,radmax,Tpavg,Tpsqr,Tpmin,Tpmax,Tfavg,qfavg,prsavg,rhoavg, &
-           dumzh,numconc,sd_numconc,massconc,vp1mean,vp2mean,vp3mean,uf1mean,uf2mean,uf3mean,vp1msqr,vp2msqr,vp3msqr,m1src,m2src,m3src,Tpsrc,qvsrc,rhovsrc,Tf,qf,Tpmean,Tpmsqr,radmean,radmsqr,qfsat,qstarmean,kmoist,mse,wk,multnumrz,vp3meanrz,tnumpart_r)
+           dumzh,numconc,sd_numconc,massconc,vp1mean,vp2mean,vp3mean,uf1mean,uf2mean,uf3mean, &
+           usgsmean,vsgsmean,wsgsmean,sigm_smean, &
+           vp1msqr,vp2msqr,vp3msqr,m1src,m2src,m3src,Tpsrc,qvsrc,rhovsrc,Tf,qf,Tpmean,Tpmsqr, &
+           radmean,radmsqr,qfsat,qstarmean,kmoist,mse,wk,multnumrz,vp3meanrz,tnumpart_r)
 #ifdef MPI
       end if
 #endif
@@ -5014,7 +5048,10 @@
 
       subroutine writedropdiag_nc(nrec,nbins,&
                                   rtime,tnumpart,tnummult,tnumaerosol,tnumdrop,tmasspart,radavg,radsqr,radmin,radmax,Tpavg,Tpsqr,Tpmin,Tpmax,Tfavg,qfavg,prsavg,rhoavg,&
-                                  zhvec,numconc,sd_numconc,massconc,vp1mean,vp2mean,vp3mean,uf1mean,uf2mean,uf3mean,vp1msqr,vp2msqr,vp3msqr,m1src,m2src,m3src,Tpsrc,qvsrc,rhovsrc,Tf,qf,Tpmean,Tpmsqr,radmean,radmsqr,qfsat,qstarmean,kmoist,mse,wk,multnumrz,vp3meanrz,tnumpart_r)
+                                  zhvec,numconc,sd_numconc,massconc,vp1mean,vp2mean,vp3mean,uf1mean,uf2mean,uf3mean,&
+                                  usgsmean,vsgsmean,wsgsmean,sigm_smean,&
+                                  vp1msqr,vp2msqr,vp3msqr,m1src,m2src,m3src,Tpsrc,qvsrc,rhovsrc,Tf,qf,Tpmean,Tpmsqr,&
+                                  radmean,radmsqr,qfsat,qstarmean,kmoist,mse,wk,multnumrz,vp3meanrz,tnumpart_r)
       use input
       use constants
       use netcdf
@@ -5024,6 +5061,7 @@
       integer, intent(inout) :: nrec
       real,    intent(in)    :: rtime,radavg,radsqr,radmin,radmax,Tpavg,Tpsqr,Tpmin,Tpmax,Tfavg,qfavg,prsavg,rhoavg,tnummult,tnumaerosol,tnumdrop,tmasspart
       real,    intent(in)    :: zhvec(nk),numconc(nk),sd_numconc(nk),massconc(nk),vp1mean(nk),vp2mean(nk),vp3mean(nk),vp1msqr(nk),vp2msqr(nk),vp3msqr(nk),m1src(nk),m2src(nk),m3src(nk),Tpsrc(nk),qvsrc(nk),rhovsrc(nk),Tf(nk),qf(nk),Tpmean(nk),Tpmsqr(nk),radmean(nk),radmsqr(nk),qfsat(nk),qstarmean(nk),uf1mean(nk),uf2mean(nk),uf3mean(nk),kmoist(nk),mse(nk),wk(nk)
+      real,    intent(in)    :: usgsmean(nk),vsgsmean(nk),wsgsmean(nk),sigm_smean(nk)
       real,    intent(in)    :: multnumrz(nk,nbins),vp3meanrz(nk,nbins)
       real,    intent(in)    :: tnumpart_r(nbins)
       integer, intent(in)    :: nbins
@@ -5274,6 +5312,22 @@
     call disp_err( nf90_def_var(ncid,"uf3mean",nf90_float,(/zhid,timeid/),varid) , .true. )
     call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet w-velocity seen by particle") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m/s") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"usgsmean",nf90_float,(/zhid,timeid/),varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet SGS u-velocity") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","m/s") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"vsgsmean",nf90_float,(/zhid,timeid/),varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet SGS v-velocity") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","m/s") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"wsgsmean",nf90_float,(/zhid,timeid/),varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet SGS w-velocity") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","m/s") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"sigm_smean",nf90_float,(/zhid,timeid/),varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet SGS velocity variance sigm_s") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","m^2/s^2") , .true. )
     
     call disp_err( nf90_def_var(ncid,"vp1msqr",nf90_float,(/zhid,timeid/),varid) , .true. )
     call disp_err( nf90_put_att(ncid,varid,"long_name","Droplet mean squared u-velocity <up^2>") , .true. )
@@ -5556,6 +5610,18 @@
 
     call disp_err( nf90_inq_varid(ncid,"uf3mean",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,uf3mean,(/1,time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"usgsmean",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,usgsmean,(/1,time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"vsgsmean",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,vsgsmean,(/1,time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"wsgsmean",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,wsgsmean,(/1,time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"sigm_smean",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,sigm_smean,(/1,time_index/)) , .true. )
 
     call disp_err( nf90_inq_varid(ncid,"vp1msqr",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,vp1msqr,(/1,time_index/)) , .true. )
