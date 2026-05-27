@@ -3404,6 +3404,14 @@
          enddo
       enddo
 
+! Shallow-domain guard: if all layers are tropospheric, the upper loop above
+! is skipped and sfluxzen is otherwise left uninitialized.
+      if (laytrop .eq. nlayers) then
+         do ig = 1, ng16
+            sfluxzen(ig) = sfluxref(ig)
+         enddo
+      endif
+
       end subroutine taumol16
 
 !----------------------------------------------------------------------------
@@ -3522,6 +3530,21 @@
             taur(lay,ngs16+ig) = tauray
          enddo
       enddo
+
+! Shallow-domain guard: use the topmost layer for the upper-atmosphere
+! H2O/CO2 source-function interpolation when the upper loop is skipped.
+      if (laytrop .eq. nlayers) then
+         speccomb = colh2o(nlayers) + strrat*colco2(nlayers)
+         specparm = colh2o(nlayers)/speccomb
+         if (specparm .ge. oneminus) specparm = oneminus
+         specmult = 4._rb*(specparm)
+         js = 1 + int(specmult)
+         fs = mod(specmult, 1._rb)
+         do ig = 1, ng17
+            sfluxzen(ngs16+ig) = sfluxref(ig,js) &
+               + fs * (sfluxref(ig,js+1) - sfluxref(ig,js))
+         enddo
+      endif
 
       end subroutine taumol17
 
@@ -4374,6 +4397,13 @@
          enddo
       enddo
 
+! Shallow-domain guard: band 27 uses a 1-D source-function reference.
+      if (laytrop .eq. nlayers) then
+         do ig = 1, ng27
+            sfluxzen(ngs26+ig) = scalekur * sfluxref(ig)
+         enddo
+      endif
+
       end subroutine taumol27
 
 !----------------------------------------------------------------------------
@@ -4479,6 +4509,21 @@
          enddo
       enddo
 
+! Shallow-domain guard: use the topmost layer for the upper-atmosphere
+! O3/O2 source-function interpolation when the upper loop is skipped.
+      if (laytrop .eq. nlayers) then
+         speccomb = colo3(nlayers) + strrat*colo2(nlayers)
+         specparm = colo3(nlayers)/speccomb
+         if (specparm .ge. oneminus) specparm = oneminus
+         specmult = 4._rb*(specparm)
+         js = 1 + int(specmult)
+         fs = mod(specmult, 1._rb)
+         do ig = 1, ng28
+            sfluxzen(ngs27+ig) = sfluxref(ig,js) &
+               + fs * (sfluxref(ig,js+1) - sfluxref(ig,js))
+         enddo
+      endif
+
       end subroutine taumol28
 
 !----------------------------------------------------------------------------
@@ -4556,6 +4601,13 @@
             taur(lay,ngs28+ig) = tauray
          enddo
       enddo
+
+! Shallow-domain guard: band 29 uses a 1-D source-function reference.
+      if (laytrop .eq. nlayers) then
+         do ig = 1, ng29
+            sfluxzen(ngs28+ig) = sfluxref(ig)
+         enddo
+      endif
 
       end subroutine taumol29
 
