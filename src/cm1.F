@@ -59,7 +59,7 @@ end module cuda_rt
       use azimavg_module
       use hifrq_module, only : writeout_hifrq
       use parcel_module
-      use droplet_module
+      use droplet_module, only : droplet_diag
       use init_physics_module
       use init_surface_module
       use ib_module
