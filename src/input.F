@@ -169,14 +169,18 @@
 
       !$acc declare create (ib,ie,jb,je,kb,ke,numq,nparcelsInit,npvals,nx,ny, &
       !$acc       axisymm,terrain_flag,ni,nj,nip1,njp1,nk,nkp1,nkm1,imoist,   &
-      !$acc                 nqv,bbc,imove,prvpx,prvpy,prvpz,prusgs,prvsgs,    &
-      !$acc                 prwsgs,prsigsgs,prrp,prms,prkap,prtp,             &
+      !$acc                 nqv,nqc,nqr,nqi,nqs,nqg,bbc,tbc,wbc,ebc,sbc,nbc,  &
+      !$acc                 imove,prvpx,prvpy,prvpz,prusgs,prvsgs,            &
+      !$acc                 prwsgs,prsigsgs,prrp,prrp0,prms,prkap,prtp,       &
       !$acc                 prx,pry,prz,prsig,ngxy,ngz,ptype,pru,prv,prw,     &
-      !$acc                 ibw,ibe,ibs,ibn,two_way_coupling,drop_evap,       &
-      !$acc                 drop_traj,drop_sgs_opt,                           &
-      !$acc                 prt,prqv,prprs,prrho,nparcelsLocal,mywest,        &
-      !$acc                 myeast,mynorth,mysouth,myne,myse,mysw,mynw,       &
-      !$acc                 prmult,pract,prtime)
+      !$acc                 ibw,ibe,ibs,ibn,ibc,iec,jbc,jec,kbc,kec,          &
+      !$acc                 ibt,iet,jbt,jet,kbt,ket,two_way_coupling,         &
+      !$acc                 drop_evap,drop_traj,drop_sgs_opt,                 &
+      !$acc                 prt,prqv,prprs,prrho,nparcelsLocal,               &
+      !$acc                 mywest,myeast,mynorth,mysouth,myne,myse,mysw,mynw,&
+      !$acc                 prmult,pract,prtime,prth,prpt1,prpt2,prq1,prq2,   &
+      !$acc                 prnc1,prnc2,prkm,prkh,prtke,prdbz,prb,prvpg,przv, &
+      !$acc                 prqsl,prqsi,prznt,prust,przs,prpidx,prprocidx)
 
 !-----------------------------------------------------------------------
 
@@ -217,7 +221,8 @@
 
       !$acc declare create (dx,dy,zt,rzt,umove,vmove,viscosity,pr_num,sc_num, &
       !$acc                 ptc_n,ptc_s,ptc_e,ptc_w,                          &
-      !$acc                 minx,maxx,miny,maxy,maxz)
+      !$acc                 minx,maxx,miny,maxy,maxz,tsk0,drop_mult,           &
+      !$acc                 drop_inject_elapse,drop_inject_time)
 
 !-----------------------------------------------------------------------
 

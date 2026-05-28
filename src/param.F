@@ -4352,6 +4352,8 @@
 
       if( ptype.eq.55 ) nqi = 4
 
+      !$acc update device(nqv,nqc,nqr,nqi,nqs,nqg)
+
       if(numq .gt. maxq)then
         if(dowr) write(outfile,*)
         if(dowr) write(outfile,*) '  WARNING!   numq > maxq'
@@ -4851,6 +4853,8 @@
         kbt=1
         ket=1
       endif
+
+      !$acc update device(ibc,iec,jbc,jec,kbc,kec,ibt,iet,jbt,jet,kbt,ket)
 
       if( sgsmodel.eq.5 .or. sgsmodel.eq.6 )then
         ibnba=ib
@@ -5935,7 +5939,6 @@
       prcl_qsat     = max(0,min(1,prcl_qsat))
       prcl_sfc      = max(0,min(1,prcl_sfc))
       prcl_droplet  = max(0,min(1,prcl_droplet))
-      drop_sgs_opt  = max(0,min(2,drop_sgs_opt))
 
       if( imoist.eq.1 .and. ptype.eq.7 )then
         if( iprcl.ne.1 .or. prcl_droplet.ne.1 )then
@@ -6337,7 +6340,14 @@
 
       endif
 
-      !$acc update device(nparcelsInit,npvals,pru,prv,prw,prt,prqv,prprs,prrho)
+      !$acc update device(nparcelsInit,npvals,prx,pry,prz,pru,prv,prw, &
+      !$acc               prt,prqv,prprs,prrho,prvpx,prvpy,prvpz,     &
+      !$acc               prusgs,prvsgs,prwsgs,prsigsgs,prrp,prrp0,   &
+      !$acc               prms,prkap,prtp,prmult,pract,prtime,        &
+      !$acc               prth,prpt1,prpt2,prq1,prq2,prnc1,prnc2,     &
+      !$acc               prkm,prkh,prtke,prdbz,prb,prvpg,przv,       &
+      !$acc               prqsl,prqsi,prznt,prust,przs,prsig,         &
+      !$acc               prpidx,prprocidx)
 
       if(dowr) write(outfile,*)
       if(dowr) write(outfile,*) ' nparcelsMax = ',nparcelsMax
