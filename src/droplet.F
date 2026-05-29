@@ -136,6 +136,8 @@
 !!!      real, dimension(ib:ie,jb:je,kb:ke) :: ta   ! GHB: now passed from solve3
 
       integer :: n,np,i,j,k,iflag,jflag,kflag
+      integer :: pidx,procidx
+      integer(i8) :: seed_base
       integer :: ix,iy,iz
       integer, dimension(2) :: numvec
       real :: x3d,y3d,z3d
@@ -483,7 +485,13 @@
                                              xh,yh,zf,sigmaf,tkea,dissten)
       endif
 
-      call BE_integration (dt,dbldt,nstep,mtime,np,pdata,pdata_locind,xf,yf,zf, &
+      ! NVHPC 23.1 cannot lower TRANSFER inside acc routine seq.
+      pidx = transfer(pdata(np,prpidx),0)
+      procidx = transfer(pdata(np,prprocidx),0)
+      seed_base = mod(abs(int(pidx,i8))*1000003_i8,2147483647_i8)
+      seed_base = mod(seed_base + abs(int(procidx,i8))*9176_i8,2147483647_i8)
+
+      call BE_integration (dt,dbldt,nstep,mtime,np,seed_base,pdata,pdata_locind,xf,yf,zf, &
                            iflag,jflag, &
                            x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
                            khhval,khvval,dkhvdzval, &
@@ -1340,7 +1348,7 @@
 
 !----------------------------------------------------------------------
 
-   subroutine BE_integration(dt,dbldt,nstep,mtime,np,pdata,pdata_locind,xf,yf,zf, &
+   subroutine BE_integration(dt,dbldt,nstep,mtime,np,seed_base,pdata,pdata_locind,xf,yf,zf, &
                              iflag,jflag, &
                              x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
                              khhval,khvval,dkhvdzval, &
@@ -1360,7 +1368,7 @@
           prw,prt,prqv,prprs,prrho,pract,prtime,prmult,ni,nj,mywest, &
           mysw,mynw,myeast,myse,myne,mysouth,mynorth,nparcelsLocal, &
           myid,dx,dy,pi_sp,pi_dp,ngxy,nbc,sbc,ebc,wbc,tsk0,drop_evap,drop_sgs_opt
-      use constants , only : rhow,rhow_dp,undefined_index,cpl,cpl_dp,cp_dp
+      use constants , only : rhow,rhow_dp,undefined_index,cpl,cpl_dp,cp_dp,i8
       use comm_module
       use parcel_module
       use mpi
@@ -1372,6 +1380,7 @@
       real, intent(in), dimension(jb:je+1) :: yf
       real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: zf
       integer, intent(in) :: nstep,np,iflag,jflag
+      integer(i8), intent(in) :: seed_base
       logical, intent(in) :: debug
       real, intent(inout) :: x3d,y3d,z3d,sig3d
       real, intent(in) :: uval,vval,wval,qval,rhoval,prsval,tval
@@ -1459,11 +1468,11 @@
       z3d = pdata(np,prz) + dt*pdata(np,prvpz)
 
       if (drop_sgs_opt.eq.1) then
-        call sfs_position_update(dt,nstep,mtime,np,pdata, &
+        call sfs_position_update(dt,nstep,mtime,np,seed_base,pdata, &
                                  x3d,y3d,z3d,khhval,khvval,dkhvdzval)
       endif
       if (drop_sgs_opt.eq.2) then
-        call sfs_velocity_update(dt,nstep,mtime,np,pdata, &
+        call sfs_velocity_update(dt,nstep,mtime,np,seed_base,pdata, &
                                  x3d,y3d,z3d,sigsgsval, &
                                  dsgsdxval,dsgsdyval,dsgsdzval, &
                                  epssgsval,lsgsval)
@@ -1878,20 +1887,20 @@
 
       end subroutine interpolate_sfs_velocity_fields
 
-      subroutine sfs_position_update(dt,nstep,mtime,np,pdata, &
+      subroutine sfs_position_update(dt,nstep,mtime,np,seed_base,pdata, &
                                      x3d,y3d,z3d,khhval,khvval,dkhvdzval)
       !$acc routine seq
-      use input, only : nparcelsLocal,npvals,nx,ny,axisymm,prpidx,prprocidx
+      use input, only : nparcelsLocal,npvals,nx,ny,axisymm
       use constants, only : i8,pi
       implicit none
 
       real, intent(in) :: dt,khhval,khvval,dkhvdzval
       double precision, intent(in) :: mtime
       integer, intent(in) :: nstep,np
+      integer(i8), intent(in) :: seed_base
       real, intent(inout) :: x3d,y3d,z3d
       real, intent(in), dimension(nparcelsLocal,npvals) :: pdata
 
-      integer :: pidx,procidx
       integer(i8) :: seed,state
       integer(i8), parameter :: im = 2147483647_i8
       real :: khh_eff,khv_eff
@@ -1899,11 +1908,7 @@
       double precision :: u1,u2,fac,theta
 
       ! Deterministic per-particle seed: particle ID, creator rank, step, and time.
-      pidx = transfer(pdata(np,prpidx),0)
-      procidx = transfer(pdata(np,prprocidx),0)
-      seed = 1_i8
-      seed = mod(seed + abs(int(pidx,i8))*1000003_i8,im)
-      seed = mod(seed + abs(int(procidx,i8))*9176_i8,im)
+      seed = mod(1_i8 + seed_base,im)
       seed = mod(seed + abs(int(nstep,i8))*1013_i8,im)
       seed = mod(seed + abs(int(1000.0d0*mtime+0.5d0,i8))*37_i8,im)
       if( seed.le.0_i8 ) seed = 1_i8
@@ -1937,14 +1942,13 @@
 
       end subroutine sfs_position_update
 
-      subroutine sfs_velocity_update(dt,nstep,mtime,np,pdata, &
+      subroutine sfs_velocity_update(dt,nstep,mtime,np,seed_base,pdata, &
                                      x3d,y3d,z3d,sigsgsval, &
                                      dsgsdxval,dsgsdyval,dsgsdzval, &
                                      epssgsval,lsgsval)
       !$acc routine seq
       use input, only : nparcelsLocal,npvals,nx,ny,axisymm, &
-                        prusgs,prvsgs,prwsgs,prsigsgs, &
-                        prpidx,prprocidx
+                        prusgs,prvsgs,prwsgs,prsigsgs
       use constants, only : i8,pi
       implicit none
 
@@ -1952,10 +1956,10 @@
       real, intent(in) :: epssgsval,lsgsval
       double precision, intent(in) :: mtime
       integer, intent(in) :: nstep,np
+      integer(i8), intent(in) :: seed_base
       real, intent(inout) :: x3d,y3d,z3d
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
 
-      integer :: pidx,procidx
       integer(i8) :: seed,state
       integer(i8), parameter :: im = 2147483647_i8
       real, parameter :: c0 = 6.0
@@ -1998,11 +2002,7 @@
       endif
 
       ! Deterministic per-particle seed, offset from the position SGS sequence.
-      pidx = transfer(pdata(np,prpidx),0)
-      procidx = transfer(pdata(np,prprocidx),0)
-      seed = 104729_i8
-      seed = mod(seed + abs(int(pidx,i8))*1000003_i8,im)
-      seed = mod(seed + abs(int(procidx,i8))*9176_i8,im)
+      seed = mod(104729_i8 + seed_base,im)
       seed = mod(seed + abs(int(nstep,i8))*1013_i8,im)
       seed = mod(seed + abs(int(1000.0d0*mtime+0.5d0,i8))*37_i8,im)
       if( seed.le.0_i8 ) seed = 1_i8
