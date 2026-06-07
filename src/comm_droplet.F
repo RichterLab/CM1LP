@@ -489,6 +489,7 @@ contains
           write(*,*) "Stop the program..."
           call stopcm1
        end if
+       !$acc wait
        n = n + 1
      end do
      !$acc wait
