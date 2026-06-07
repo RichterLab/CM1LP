@@ -4673,6 +4673,7 @@
          end do
          !$acc update host(ngidx)
          !$acc end data
+         !$acc wait
 
          !Then once the new droplets have been added, update nparcelsLocalActive
          nparcelsLocalActive = nparcelsLocalActive + my_reintro
@@ -4864,6 +4865,7 @@
          end do
          !$acc update host(ngidx)
          !$acc end data
+         !$acc wait
          !Then once the new droplets have been added, update nparcelsLocalActive
          nparcelsLocalActive = nparcelsLocalActive + my_reintro
       else
