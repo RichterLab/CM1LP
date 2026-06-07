@@ -641,7 +641,7 @@
      Cindx = count_prefix(mask=msk,exclusive=.true.)
 
      ! collect the location of the special values into a smaller array
-     !$acc parallel loop gang vector default(present)
+     !$acc parallel loop gang vector present(Cindx(1:nparcelsLocal),holes_ind(1:numHolesAlloc))
      do np = 1, nparcelsLocal-1
         if ( Cindx(np) .ne. Cindx(np+1) ) then 
            holes_ind(Cindx(np)+1) = np
@@ -650,11 +650,11 @@
      !$acc end parallel
 
      ! Special treatment for the last value in the array
-     !$acc kernels default(present) 
+     !$acc serial present(msk(1:nparcelsLocal),Cindx(1:nparcelsLocal),holes_ind(1:numHolesAlloc))
      if(msk(nparcelsLocal)) then
        holes_ind(Cindx(nparcelsLocal)+1) = nparcelsLocal
      endif
-     !$acc end kernels
+     !$acc end serial
 
      !$acc end data
 
