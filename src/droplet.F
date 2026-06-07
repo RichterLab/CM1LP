@@ -638,7 +638,9 @@
      ! C = COUNT_PREFIX(mask = (locind .eq. undefined), EXCLUSIVE=.true.)
      ! would generate the array 
      ! C = [0 0 0 0 0 1 1 1 1 2]
+     !$acc wait
      Cindx = count_prefix(mask=msk,exclusive=.true.)
+     !$acc wait
 
      ! collect the location of the special values into a smaller array
      !$acc parallel loop gang vector present(Cindx(1:nparcelsLocal),holes_ind(1:numHolesAlloc))
