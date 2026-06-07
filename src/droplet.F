@@ -771,6 +771,7 @@
     ! On the GPU, compress the new "pdata" to make sure that all the active
     !     droplets are contiguous (no "holes" between "pdata" slots)
     call makeContiguous(Depart,Arrive,num_fallout,holes_ind,backfill_ind,pdata,pdata_locind)
+    !$acc wait
 
 
     if(timestats.ge.1) time_dropC4=time_dropC4+mytime()
