@@ -491,6 +491,7 @@ contains
        end if
        n = n + 1
      end do
+     !$acc wait
      if(timestats.ge.1) time_dropC4d=time_dropC4d+mytime()
 
     ! make sure that all the non-blocking MPI send operations are complete
