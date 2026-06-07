@@ -1219,6 +1219,15 @@
         !This loop isn't strictly necessary, but populate the interpolated values to the newly injected particles
         !Doesn't affect solution at all! Since interpolation happens at start of droplet_driver
         !But makes sure that the interpolated mean quantities in droplet_diag are meaningful
+#ifdef _OPENACC
+        !$acc parallel loop gang vector default(present)
+        do np=nparcelsLocalActive-my_reintro+1,nparcelsLocalActive
+          pdata_locind(np,1) = undefined_index
+          pdata_locind(np,2) = undefined_index
+          pdata_locind(np,3) = undefined_index
+        enddo
+        !$acc wait
+#else
         !$acc parallel loop gang vector default(present)
         do np=nparcelsLocalActive-my_reintro+1,nparcelsLocalActive
           pdata_locind(np,1) = undefined_index
@@ -1269,6 +1278,7 @@
           pdata(np,prrho) = rhoval
         enddo
         !$acc wait
+#endif
       end if    !doinject
 
       np_tmp = int(nparcelsLocalActive,i8)
