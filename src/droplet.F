@@ -1221,6 +1221,9 @@
         !But makes sure that the interpolated mean quantities in droplet_diag are meaningful
         !$acc parallel loop gang vector default(present)
         do np=nparcelsLocalActive-my_reintro+1,nparcelsLocalActive
+          pdata_locind(np,1) = undefined_index
+          pdata_locind(np,2) = undefined_index
+          pdata_locind(np,3) = undefined_index
           x3d = pdata(np,prx)
           y3d = pdata(np,pry)
           if( .not. terrain_flag )then
@@ -1265,6 +1268,7 @@
           pdata(np,prprs) = prsval
           pdata(np,prrho) = rhoval
         enddo
+        !$acc wait
       end if    !doinject
 
       np_tmp = int(nparcelsLocalActive,i8)
