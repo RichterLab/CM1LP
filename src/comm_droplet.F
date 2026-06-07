@@ -805,7 +805,9 @@ contains
         !$acc data create(Cidx) present(pdata_neighbor)
 
         ptrdir = ptrDepart(dir)
+        !$acc wait
         Cidx = count_prefix(mask=(pdata_neighbor.eq.dir),exclusive=.true.)
+        !$acc wait
 
         !$acc parallel loop gang vector default(present)
         do np=1,nparcelsLocalActive-1
