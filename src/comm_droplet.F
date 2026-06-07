@@ -310,6 +310,8 @@ contains
      if(Depart(ise) .gt. 0) &
         call packDroplets(ise, Depart, ptrDepart, Depart_ind, pdata, droplet_se1)
 
+     !$acc wait
+
      if(timestats.ge.1) time_dropC4b=time_dropC4b+mytime()
 
 
