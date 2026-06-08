@@ -191,11 +191,21 @@
 #ifdef _OPENACC
       ! arrays used by count_prefix operator
       integer :: Cindx(nparcelsLocal)
+      integer :: numHolesMask
+      integer :: cidxMin,cidxMax,hidxMin,hidxMax
 #endif
       logical :: msk(nparcelsLocal)
 
       logical, parameter :: verbose=.false.
       integer :: errcode
+      integer(i8) :: nactive_new
+      integer :: badActive, firstBad, lastBad
+      integer :: badCompact, numArrive_dbg, badArrive, indx
+      integer :: badBackfillSearch, badThis
+      integer :: badArriveN,badArriveS,badArriveW,badArriveE
+      integer :: badArriveNW,badArriveNE,badArriveSW,badArriveSE
+      integer :: arrN0,arrN1,arrS0,arrS1,arrW0,arrW1,arrE0,arrE1
+      integer :: arrNW0,arrNW1,arrNE0,arrNE1,arrSW0,arrSW1,arrSE0,arrSE1
       ! 1) To match the initial and restart runs for total droplet number,
       !    use the following form to calculate the seed value so that it is 
       !    deterministic but varies between different MPI ranks and time steps
@@ -388,6 +398,10 @@
     !$acc reduction(+:num_destroyed,mass_destroyed,mass_evap,mass_dpten,eng_destroyed,m1_destroyed,m2_destroyed,mass_reentry,eng_reentry,m1_reentry,m2_reentry)
     nploop:  &
     DO np=1,nparcelsLocalActive
+      if (pdata(np,prrp).le.0.0 .or. pdata(np,prmult).le.0.0 .or. &
+          pdata(np,pract).lt.0.0) then
+        errcode = max(errcode,54323)
+      endif
 
 
       x3d = pdata(np,prx)
@@ -625,6 +639,17 @@
      enddo
 
 #ifdef _OPENACC
+     numHolesMask = 0
+     !$acc parallel loop gang vector default(present) reduction(+:numHolesMask)
+     do np=1,nparcelsLocal
+       if(msk(np)) numHolesMask = numHolesMask + 1
+     enddo
+     !$acc end parallel
+
+     if(numHolesMask .ne. numHoles) then
+       stop 'DROPLET HOLE MISMATCH'
+     endif
+
      !$acc data create(Cindx)
 
      !$acc parallel loop gang vector default(present)
@@ -642,6 +667,33 @@
      !$acc wait
      Cindx = count_prefix(mask=msk,exclusive=.true.)
      !$acc wait
+
+     cidxMin = huge(1)
+     cidxMax = -huge(1)
+     hidxMin = huge(1)
+     hidxMax = -huge(1)
+
+     !$acc parallel loop gang vector default(present) &
+     !$acc reduction(min:cidxMin,hidxMin) reduction(max:cidxMax,hidxMax)
+     do np=1,nparcelsLocal
+       cidxMin = min(cidxMin,Cindx(np))
+       cidxMax = max(cidxMax,Cindx(np))
+       if (np.lt.nparcelsLocal) then
+         if(Cindx(np) .ne. Cindx(np+1)) then
+           hidxMin = min(hidxMin,Cindx(np)+1)
+           hidxMax = max(hidxMax,Cindx(np)+1)
+         endif
+       elseif (msk(np)) then
+         hidxMin = min(hidxMin,Cindx(np)+1)
+         hidxMax = max(hidxMax,Cindx(np)+1)
+       endif
+     enddo
+     !$acc end parallel
+
+     if(cidxMin.lt.0 .or. cidxMax.gt.numHoles .or. &
+        hidxMin.lt.1 .or. hidxMax.gt.numHoles) then
+       stop 'DROPLET CINDX BAD'
+     endif
 
      ! collect the location of the special values into a smaller array
      !$acc parallel loop gang vector present(Cindx(1:nparcelsLocal),holes_ind(1:numHolesAlloc))
@@ -711,12 +763,21 @@
     ! number of holes in "pdata" to fill after the arrival droplets have
     ! been assigned a location
     numBackfill = sum(Depart) + num_fallout - sum(Arrive) 
+    nactive_new = nparcelsLocalActive + sum(Arrive) - sum(Depart) - num_fallout
     !$acc wait
+
+    if (nactive_new .lt. 0_i8 .or. &
+        nactive_new .gt. int(nparcelsLocal,i8) .or. &
+        int(numBackfill,i8) .gt. nparcelsLocalActive) then
+      stop 'DROPLET BAD BACKFILL COUNTS'
+    endif
+
     numBackfillAlloc = max(1,numBackfill)
      ! Determine which droplets to relocated from the end of 
      ! the "pdata" array to the remaining holes
      allocate(backfill_ind(numBackfillAlloc))
      !$acc enter data create(backfill_ind)
+     badBackfillSearch = 0
      if (numBackfill .gt. 0) then 
        if ((nparcelsLocalActive - numBackfill) .eq. 0) then
           ! Set backfill_ind to 1 to handle an exception case, 
@@ -751,7 +812,23 @@
           endif
        end if
      end if
+
+     if (numBackfill .gt. 0) then
+       badBackfillSearch = 0
+       !$acc parallel loop gang vector default(present) reduction(+:badBackfillSearch)
+       do n=1,numBackfill
+         if (backfill_ind(n) .lt. 1 .or. backfill_ind(n) .gt. nparcelsLocalActive) then
+           badBackfillSearch = badBackfillSearch + 1
+         endif
+       enddo
+       !$acc end parallel
+     endif
+
      !$acc wait
+
+     if (badBackfillSearch .gt. 0) then
+       stop 'DROPLET BACKFILL SEARCH EXHAUSTED'
+     endif
 
     if(verbose) then 
       write(*,'(f10.3,a6,i4,a8,8i6)') mtime, ' myid: ', myid, ' Depart: ', Depart
@@ -773,10 +850,129 @@
                             ptrDepart,ptrArrive, pdata)
     !$acc wait
 
+    numArrive_dbg = sum(Arrive)
+    nactive_new = nparcelsLocalActive + sum(Arrive) - sum(Depart) - num_fallout
+
+    badArrive = 0
+    badArriveN = 0
+    badArriveS = 0
+    badArriveW = 0
+    badArriveE = 0
+    badArriveNW = 0
+    badArriveNE = 0
+    badArriveSW = 0
+    badArriveSE = 0
+    arrN0  = ptrArrive(inorth)
+    arrN1  = arrN0  + Arrive(inorth)
+    arrS0  = ptrArrive(isouth)
+    arrS1  = arrS0  + Arrive(isouth)
+    arrW0  = ptrArrive(iwest)
+    arrW1  = arrW0  + Arrive(iwest)
+    arrE0  = ptrArrive(ieast)
+    arrE1  = arrE0  + Arrive(ieast)
+    arrNW0 = ptrArrive(inw)
+    arrNW1 = arrNW0 + Arrive(inw)
+    arrNE0 = ptrArrive(ine)
+    arrNE1 = arrNE0 + Arrive(ine)
+    arrSW0 = ptrArrive(isw)
+    arrSW1 = arrSW0 + Arrive(isw)
+    arrSE0 = ptrArrive(ise)
+    arrSE1 = arrSE0 + Arrive(ise)
+
+    if (numArrive_dbg.gt.0) then
+      !$acc parallel loop gang vector default(present) private(indx,badThis) &
+      !$acc reduction(+:badArrive,badArriveN,badArriveS,badArriveW,badArriveE) &
+      !$acc reduction(+:badArriveNW,badArriveNE,badArriveSW,badArriveSE)
+      do n=1,numArrive_dbg
+        indx = holes_ind(n)
+        badThis = 0
+
+        if (indx .lt. 1 .or. indx .gt. nparcelsLocal) then
+          badThis = 1
+        else
+          if (pdata(indx,prrp) .le. 0.0 .or. &
+              pdata(indx,prmult) .le. 0.0 .or. &
+              pdata(indx,pract) .lt. 0.0) then
+            badThis = 1
+          endif
+        endif
+
+        if (badThis .ne. 0) then
+          badArrive = badArrive + 1
+          if (n .ge. arrN0  .and. n .lt. arrN1)  badArriveN  = badArriveN  + 1
+          if (n .ge. arrS0  .and. n .lt. arrS1)  badArriveS  = badArriveS  + 1
+          if (n .ge. arrW0  .and. n .lt. arrW1)  badArriveW  = badArriveW  + 1
+          if (n .ge. arrE0  .and. n .lt. arrE1)  badArriveE  = badArriveE  + 1
+          if (n .ge. arrNW0 .and. n .lt. arrNW1) badArriveNW = badArriveNW + 1
+          if (n .ge. arrNE0 .and. n .lt. arrNE1) badArriveNE = badArriveNE + 1
+          if (n .ge. arrSW0 .and. n .lt. arrSW1) badArriveSW = badArriveSW + 1
+          if (n .ge. arrSE0 .and. n .lt. arrSE1) badArriveSE = badArriveSE + 1
+        endif
+      enddo
+      !$acc end parallel
+    endif
+
+    if (badArrive.gt.0) then
+      stop 'DROPLET BAD ARRIVAL AFTER COMM'
+    endif
+
+    badCompact = 0
+
+    if (numBackfill.gt.0) then
+      !$acc parallel loop gang vector default(present) private(indx,k) reduction(+:badCompact)
+      do n=1,numBackfill
+        indx = holes_ind(numArrive_dbg+n)
+        k = backfill_ind(n)
+
+        if (indx .lt. 1 .or. indx .gt. nparcelsLocal) then
+          badCompact = badCompact + 1
+        elseif (indx .lt. k) then
+          if (k .lt. 1 .or. k .gt. nparcelsLocalActive) then
+            badCompact = badCompact + 1
+          else
+            if (pdata(k,prrp) .le. 0.0 .or. &
+                pdata(k,prmult) .le. 0.0 .or. &
+                pdata(k,pract) .lt. 0.0) then
+              badCompact = badCompact + 1
+            endif
+          endif
+        endif
+      enddo
+      !$acc end parallel
+    end if
+
+    if (badCompact.gt.0) then
+      stop 'DROPLET BAD COMPACT INDEX'
+    endif
+
     ! On the GPU, compress the new "pdata" to make sure that all the active
     !     droplets are contiguous (no "holes" between "pdata" slots)
     call makeContiguous(Depart,Arrive,num_fallout,holes_ind,backfill_ind,pdata,pdata_locind)
     !$acc wait
+
+    nactive_new = nparcelsLocalActive + sum(Arrive) - sum(Depart) - num_fallout
+
+    badActive = 0
+    firstBad = nparcelsLocal + 1
+    lastBad = 0
+
+    !$acc parallel loop gang vector default(present) &
+    !$acc reduction(+:badActive) reduction(min:firstBad) reduction(max:lastBad)
+    do np=1,nactive_new
+      if (pdata(np,prrp).le.0.0 .or. pdata(np,prmult).le.0.0 .or. &
+          pdata(np,pract).lt.0.0) then
+        badActive = badActive + 1
+        firstBad = min(firstBad,np)
+        lastBad = max(lastBad,np)
+      endif
+    enddo
+    !$acc end parallel
+
+    if (badActive.gt.0) then
+      stop 'DROPLET BAD AFTER COMPACT'
+    endif
+
+    nparcelsLocalActive = nactive_new
 
 
     if(timestats.ge.1) time_dropC4=time_dropC4+mytime()
@@ -784,8 +980,6 @@
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     ! Step 5: Update the count of new active droplets with contiguous memory !
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-    nparcelsLocalActive = nparcelsLocalActive + sum(Arrive) - sum(Depart) - num_fallout
 
 #else
 
@@ -1225,15 +1419,6 @@
         !This loop isn't strictly necessary, but populate the interpolated values to the newly injected particles
         !Doesn't affect solution at all! Since interpolation happens at start of droplet_driver
         !But makes sure that the interpolated mean quantities in droplet_diag are meaningful
-#ifdef _OPENACC
-        !$acc parallel loop gang vector default(present)
-        do np=nparcelsLocalActive-my_reintro+1,nparcelsLocalActive
-          pdata_locind(np,1) = undefined_index
-          pdata_locind(np,2) = undefined_index
-          pdata_locind(np,3) = undefined_index
-        enddo
-        !$acc wait
-#else
         !$acc parallel loop gang vector default(present)
         do np=nparcelsLocalActive-my_reintro+1,nparcelsLocalActive
           pdata_locind(np,1) = undefined_index
@@ -1284,7 +1469,6 @@
           pdata(np,prrho) = rhoval
         enddo
         !$acc wait
-#endif
       end if    !doinject
 
       np_tmp = int(nparcelsLocalActive,i8)
@@ -1502,9 +1686,19 @@
                                  epssgsval,lsgsval)
       endif
 
+      if (x3d.ne.x3d .or. y3d.ne.y3d .or. z3d.ne.z3d) then
+        errcode = max(errcode,54321)
+      endif
+
       pdata(np,prvpx) = (pdata(np,prvpx) + uval*(dbldt/taup) + dbldt*part_grav1)/(1.0d0 + dbldt/taup)
       pdata(np,prvpy) = (pdata(np,prvpy) + vval*(dbldt/taup) + dbldt*part_grav2)/(1.0d0 + dbldt/taup)
       pdata(np,prvpz) = (pdata(np,prvpz) + wval*(dbldt/taup) + dbldt*part_grav3)/(1.0d0 + dbldt/taup)
+
+      if (pdata(np,prvpx).ne.pdata(np,prvpx) .or. &
+          pdata(np,prvpy).ne.pdata(np,prvpy) .or. &
+          pdata(np,prvpz).ne.pdata(np,prvpz)) then
+        errcode = max(errcode,54322)
+      endif
 
       !Nonlinear solver for the radius and temperature:
       !Only do this if the droplet evaporation is turned on
@@ -3749,8 +3943,6 @@
          !      this scheme would fail;
          ! - Switch back to the original linear search scheme 
          if ( ind .lt. 0 ) then
-            print *, 'Parcel x/y location searching fails...'
-            print *, 'Switch back to the original search scheme...'
             i = end_ind
             do while( ind .lt. 0 .and. i .gt. 1 )
                i = i - 1
@@ -3804,8 +3996,6 @@
          !      this scheme would fail;
          ! - Reset the lower bound in this case
          if ( loc .lt. dsize(i) ) then
-            print *, 'Parcel z location is outside search range...'
-            print *, 'Search from the input index instead...'
             i = ind
          end if
          if ( is_ge ) then
@@ -5816,62 +6006,50 @@
          if ( x3d .lt. xf(1) .and. y3d .ge. yf(1) .and. &
               y3d .le. yf(nj+1) ) then
             if ( x3d .lt. xf(1)-dx*ni ) then
-               print *, 'Droplet jumped over west nearest neighbor'
                errcode = 50
             end if
             neighbor = mywest
          else if ( x3d .lt. xf(1) .and. y3d .lt. yf(1) ) then
             if ( x3d .lt. xf(1)-dx*ni .or. y3d .lt. yf(1)-dy*nj ) then
-               print *, 'Droplet jumped over southwest nearest neighbor'
                errcode = 50
             end if
             neighbor = mysw
          else if ( x3d .lt. xf(1) .and. y3d .gt. yf(nj+1) ) then
             if ( x3d .lt. xf(1)-dx*ni .or. y3d .gt. yf(nj+1)+dy*nj ) then
-               print *, 'Droplet jumped over northwest nearest neighbor'
                errcode = 50
             end if
             neighbor = mynw
          else if ( x3d .gt. xf(ni+1) .and. y3d .ge. yf(1) .and. &
                    y3d .le. yf(nj+1) ) then
             if ( x3d .gt. xf(ni+1)+dx*ni ) then
-               print *, 'Droplet jumped over east nearest neighbor'
                errcode = 50
             end if
             neighbor = myeast
          else if ( x3d .gt. xf(ni+1) .and. y3d .lt. yf(1) ) then
             if ( x3d .gt. xf(ni+1)+dx*ni .or. y3d .lt. yf(1)-dy*nj ) then
-               print *, 'Droplet jumped over southeast nearest neighbor'
                errcode = 50
             end if
             neighbor = myse
          else if ( x3d .gt. xf(ni+1) .and. y3d .gt. yf(nj+1) ) then
             if ( x3d .gt. xf(ni+1)+dx*ni .or. y3d .gt. yf(nj+1)+dy*nj ) then
-               print *, 'Droplet jumped over northeast nearest neighbor'
                errcode = 50
             end if
             neighbor = myne
          else if ( x3d .ge. xf(1) .and. x3d .le. xf(ni+1) .and. &
                    y3d .lt. yf(1) ) then
             if ( y3d .lt. yf(1)-dy*nj ) then
-               print *, 'Droplet jumped over south nearest neighbor'
                errcode = 50
             end if
             neighbor = mysouth
          else if ( x3d .ge. xf(1) .and. x3d .le. xf(ni+1) .and. &
                    y3d .gt. yf(nj+1) ) then
             if ( y3d .gt. yf(nj+1)+dy*nj ) then
-               print *,'Droplet jumped over north nearest neighbor'
                errcode = 50
             end if
             neighbor = mynorth
          else
             ! This condition should never be entered
             errcode = 12345
-            if ( x3d .ne. x3d .or. y3d .ne. y3d ) then
-               print *, 'x or y position of droplet is invalid: x3d = ', &
-                        x3d, ', y3d = ', y3d
-            end if
          end if     ! if statement for neighbor check
       end if        ! if "neighbor" is present
 
