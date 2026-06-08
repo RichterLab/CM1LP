@@ -554,6 +554,7 @@
 
     END DO nploop
     !$acc end parallel
+    !$acc wait
     if (errcode .gt. 0) then 
        stop 'FATAL error occurred in the index search BE_integration'
     end if
@@ -700,6 +701,7 @@
 
     ! On the CPU determine the number of arriving droplet
     call comm_droplet_number(numHoles,Depart,Arrive)
+    !$acc wait
 
     
     ! On the CPU assigns pointers (ptrArrive) into indirect address 
@@ -709,6 +711,7 @@
     ! number of holes in "pdata" to fill after the arrival droplets have
     ! been assigned a location
     numBackfill = sum(Depart) + num_fallout - sum(Arrive) 
+    !$acc wait
     numBackfillAlloc = max(1,numBackfill)
      ! Determine which droplets to relocated from the end of 
      ! the "pdata" array to the remaining holes
@@ -748,6 +751,7 @@
           endif
        end if
      end if
+     !$acc wait
 
     if(verbose) then 
       write(*,'(f10.3,a6,i4,a8,8i6)') mtime, ' myid: ', myid, ' Depart: ', Depart
@@ -767,6 +771,7 @@
     ! On the GPU, move droplets between different MPI ranks.
     call comm_droplet_value(holes_ind,Depart_ind, Depart,Arrive, &
                             ptrDepart,ptrArrive, pdata)
+    !$acc wait
 
     ! On the GPU, compress the new "pdata" to make sure that all the active
     !     droplets are contiguous (no "holes" between "pdata" slots)
@@ -1215,6 +1220,7 @@
         if (testcase.eq.17) then
           call droplet_fallout_reinjection(pdata,xf,yf,num_fallout,mtime,my_reintro)
         end if
+        !$acc wait
 
         !This loop isn't strictly necessary, but populate the interpolated values to the newly injected particles
         !Doesn't affect solution at all! Since interpolation happens at start of droplet_driver
@@ -1313,6 +1319,7 @@
          rhomax = max(rhomax,pdata(np,prrho))
       end do
       !$acc end parallel
+      !$acc wait
 
 #ifdef MPI
       call mpi_allreduce(mpi_in_place,np_tmp,1,mpi_integer8,mpi_sum,mpi_comm_world,ierr)
