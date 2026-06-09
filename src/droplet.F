@@ -3078,7 +3078,7 @@
 
       !!!!!!! 0th order  !!!!!!!!
 
-      tnumpart = 0.0
+      tnumpart = real(nparcelsLocalActive)
       tnumaerosol = 0.0
       tnumdrop = 0.0
       tnummult = 0.0
@@ -3097,11 +3097,10 @@
       Tpmax = -1000.0
 
       !$acc parallel loop gang vector default(present) &
-      !$acc          reduction(+:tnumpart,tnummult,tnumaerosol,tnumdrop,radavg,radsqr,Tpavg,Tpsqr,Tfavg,qfavg,prsavg,rhoavg) &
+      !$acc          reduction(+:tnummult,tmasspart,tnumaerosol,tnumdrop,radavg,radsqr,Tpavg,Tpsqr,Tfavg,qfavg,prsavg,rhoavg) &
       !$acc          reduction(max:radmax,Tpmax) &
       !$acc          reduction(min:radmin,Tpmin)
       do np=1,nparcelsLocalActive
-         tnumpart = tnumpart + 1.0
          tnummult = tnummult + pdata(np,prmult)
          tmasspart = tmasspart + (rhow*4.0/3.0*pi*pdata(np,prrp)**3)*pdata(np,prmult)
          if (pdata(np,prrp) .lt. crit_radius(pdata(np,prms),pdata(np,prkap),pdata(np,prt))) then
@@ -3124,6 +3123,7 @@
          Tpmax = max(Tpmax, pdata(np,prtp))
       end do
       !$acc end parallel
+      !$acc wait
 
 #ifdef MPI
       droplet_diag0(1) = dble(tnumpart)
