@@ -3032,6 +3032,7 @@
 
       integer :: np,iz,i,j,k,ir
       integer :: kflag
+      integer(i8) :: np_tmp_diag
       !real :: dumzh(kb:ke),dumzf(kb:ke+1),dzf,xl,yl
       real :: dumzh(1:nk),dumzf(kb:ke+1),dzf,xl,yl
       real :: Tpsrc_tmp,qvsrc_tmp,m1src_tmp,m2src_tmp,m3src_tmp,rhovsrc_tmp
@@ -3078,7 +3079,8 @@
 
       !!!!!!! 0th order  !!!!!!!!
 
-      tnumpart = real(nparcelsLocalActive)
+      np_tmp_diag = nparcelsLocalActive
+      tnumpart = real(np_tmp_diag)
       tnumaerosol = 0.0
       tnumdrop = 0.0
       tnummult = 0.0
@@ -3126,6 +3128,8 @@
       !$acc wait
 
 #ifdef MPI
+      call mpi_allreduce(mpi_in_place,np_tmp_diag,1,mpi_integer8,mpi_sum,mpi_comm_world,ierr)
+
       droplet_diag0(1) = dble(tnumpart)
       droplet_diag0(2) = tnummult
       droplet_diag0(3) = tnumaerosol
@@ -3183,7 +3187,7 @@
                          MPI_MAX,0,MPI_COMM_WORLD,ierr)
       end if
       if ( myid == 0 ) then 
-         tnumpart = droplet_diag0(1)
+         tnumpart = real(np_tmp_diag)
          tnummult = droplet_diag0(2)
          tnumaerosol = droplet_diag0(3)
          tnumdrop = droplet_diag0(4)
