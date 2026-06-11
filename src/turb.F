@@ -4878,7 +4878,6 @@
       enddo
       enddo
       enddo
-      stop 'calcnm: point #2'
 
     ELSE  icecheck
 
