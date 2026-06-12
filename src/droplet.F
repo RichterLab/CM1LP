@@ -760,10 +760,23 @@
     ! array (holes_ind) for arriving droplets
     call setupIndexPointers(Arrive,ptrArrive)
 
-    ! number of holes in "pdata" to fill after the arrival droplets have
-    ! been assigned a location
-    numBackfill = sum(Depart) + num_fallout - sum(Arrive) 
     nactive_new = nparcelsLocalActive + sum(Arrive) - sum(Depart) - num_fallout
+    numArrive_dbg = sum(Arrive)
+
+    ! Only holes inside the new active prefix need donor backfill.
+    ! Holes above nactive_new become inactive tail slots.
+    numBackfill = 0
+#ifdef _OPENACC
+    !$acc parallel loop gang vector default(present) reduction(+:numBackfill)
+#endif
+    do n = numArrive_dbg + 1, numHoles
+      if (int(holes_ind(n),i8) .le. nactive_new) then
+        numBackfill = numBackfill + 1
+      endif
+    enddo
+#ifdef _OPENACC
+    !$acc end parallel
+#endif
     !$acc wait
 
     if (nactive_new .lt. 0_i8 .or. &
@@ -947,7 +960,8 @@
 
     ! On the GPU, compress the new "pdata" to make sure that all the active
     !     droplets are contiguous (no "holes" between "pdata" slots)
-    call makeContiguous(Depart,Arrive,num_fallout,holes_ind,backfill_ind,pdata,pdata_locind)
+    call makeContiguous(Depart,Arrive,num_fallout,numBackfill, &
+                         holes_ind,backfill_ind,pdata,pdata_locind)
     !$acc wait
 
     nactive_new = nparcelsLocalActive + sum(Arrive) - sum(Depart) - num_fallout

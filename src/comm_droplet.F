@@ -532,7 +532,8 @@ contains
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 
-      subroutine makeContiguous(Depart,Arrive,num_fallout,holes_ind,backfill_ind,pdata,pdata_locind)
+      subroutine makeContiguous(Depart,Arrive,num_fallout,numBackfill, &
+                                holes_ind,backfill_ind,pdata,pdata_locind)
       ! =================================================================
       ! The GPU-enabled makeCongiguous subroutine will fill in "holes" in
       ! the pdata array such that the all active droplets are
@@ -555,21 +556,24 @@ contains
                                                                          ! neighbor at different directions
       integer, intent(in), dimension(:) :: backfill_ind
       integer, intent(in) :: num_fallout
+      integer, intent(in) :: numBackfill
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata      ! droplet information
       integer, intent(inout), dimension(nparcelsLocal,3) :: pdata_locind ! x/y/z location index of each droplet
 
-      integer :: num_tmp,numArrive,numDepart,num_holes,indx,k,n
+      integer :: num_tmp,numArrive,num_holes,indx,k,n
       integer :: iv
       logical, parameter :: Debug=.false.
 
       !simplified code that fills the holes
-      numDepart = SUM(Depart)
+      num_tmp = SUM(Depart)+num_fallout
       numArrive = SUM(Arrive)
-      num_tmp = numDepart+num_fallout
-      if ( numArrive .lt. num_tmp ) then
-        num_holes = num_tmp - numArrive             ! number of remaining "holes" we need to fill
-                                                    ! to make the active dropelts in
+      if (numBackfill .lt. 0 .or. numBackfill .gt. max(0,num_tmp-numArrive)) then
+        stop 'DROPLET BAD NUMBACKFILL'
+      endif
+      num_holes = numBackfill                       ! number of remaining "holes" we need to fill
+                                                    ! to make the active droplets in
                                                     ! the "pdata" contiguous
+      if ( num_holes .gt. 0 ) then
 
         !$acc parallel loop gang vector default(present)
         do n=1,num_holes
