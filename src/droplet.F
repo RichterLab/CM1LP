@@ -2523,10 +2523,11 @@
       integer(i8) :: seed,state
       integer(i8), parameter :: im = 2147483647_i8
       real, parameter :: c0 = 6.0
+      real, parameter :: dsig_cap = 0.5
       real :: sig_eff,sig_prev,eps_eff,l_eff,fs_eff,noise_amp
       real :: normx,normy,normz
       real :: us_old,vs_old,ws_old
-      real :: a1,a2,a3
+      real :: a1,a2,a3,dsig_frac
       double precision :: u1,u2,fac,theta
 
       if( dt.le.0.0 ) return
@@ -2584,22 +2585,26 @@
       normz = real(fac*cos(theta))
 
       noise_amp = sqrt(max(fs_eff*c0*eps_eff*dt,0.0))
+      ! Bound the sigm_s change term to avoid one-step amplification
+      ! when particles cross sharp SGS-energy gradients.
+      dsig_frac = log(sig_eff/sig_prev)
+      dsig_frac = max(-dsig_cap,min(dsig_cap,dsig_frac))
 
       us_old = pdata(np,prusgs)
       a1 = -0.5*fs_eff*c0*eps_eff*us_old/sig_eff
-      a2 = 0.5*(fs_eff/sig_eff)*us_old*(sig_eff-sig_prev)/dt
+      a2 = 0.5*fs_eff*us_old*dsig_frac/dt
       a3 = 0.5*fs_eff*dsgsdxval
       pdata(np,prusgs) = us_old + (a1+a2+a3)*dt + noise_amp*normx
 
       vs_old = pdata(np,prvsgs)
       a1 = -0.5*fs_eff*c0*eps_eff*vs_old/sig_eff
-      a2 = 0.5*(fs_eff/sig_eff)*vs_old*(sig_eff-sig_prev)/dt
+      a2 = 0.5*fs_eff*vs_old*dsig_frac/dt
       a3 = 0.5*fs_eff*dsgsdyval
       pdata(np,prvsgs) = vs_old + (a1+a2+a3)*dt + noise_amp*normy
 
       ws_old = pdata(np,prwsgs)
       a1 = -0.5*fs_eff*c0*eps_eff*ws_old/sig_eff
-      a2 = 0.5*(fs_eff/sig_eff)*ws_old*(sig_eff-sig_prev)/dt
+      a2 = 0.5*fs_eff*ws_old*dsig_frac/dt
       a3 = 0.5*fs_eff*dsgsdzval
       pdata(np,prwsgs) = ws_old + (a1+a2+a3)*dt + noise_amp*normz
 
