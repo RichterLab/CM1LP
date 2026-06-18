@@ -630,10 +630,11 @@ contains
 
      iptr = ptrDepart(dir_idx)
      numDepart   = Depart(dir_idx)
-     !$acc parallel loop gang vector collapse(2) default(present)
+     !$acc parallel loop gang vector default(present) private(np)
      do i=1,numDepart
+       np = Depart_ind(iptr+i-1)
+       !$acc loop seq
        do iv=1,npvals
-         np = Depart_ind(iptr+i-1)
          droplet_buffer(i,iv) = pdata(np,iv)
          pdata(np,iv) = neg_huge
        enddo
@@ -859,10 +860,11 @@ contains
 
      ptr = ptrArrive(dir_idx)
      numArrive = Arrive(dir_idx)
-     !$acc parallel loop gang vector collapse(2) default(present)
+     !$acc parallel loop gang vector default(present) private(iptr)
      do i = 1, numArrive
+       iptr = holes_ind(ptr+i-1)
+       !$acc loop seq
        do iv=1,npvals
-         iptr = holes_ind(ptr+i-1)
          pdata(iptr,iv) = droplet_buffer(i,iv)
        end do
      end do
