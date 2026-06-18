@@ -203,8 +203,11 @@
       integer :: errcode
       integer(i8) :: nactive_new
       integer :: badActive, firstBad, lastBad
-      integer :: badCompact, numArrive_dbg, badArrive, indx
-      integer :: badBackfillSearch, badThis
+      integer :: badCompact, firstBadCompact, lastBadCompact
+      integer :: numArrive_dbg, badArrive, firstBadArrive, lastBadArrive, indx
+      integer :: badBackfillSearch, firstBadBackfill, lastBadBackfill, badThis
+      integer :: badDepart, firstBadDepart, lastBadDepart
+      integer :: badArriveHole, firstBadArriveHole, lastBadArriveHole
       integer :: badArriveN,badArriveS,badArriveW,badArriveE
       integer :: badArriveNW,badArriveNE,badArriveSW,badArriveSE
       integer :: arrN0,arrN1,arrS0,arrS1,arrW0,arrW1,arrE0,arrE1
@@ -806,46 +809,43 @@
      !$acc enter data create(backfill_ind)
      badBackfillSearch = 0
      if (numBackfill .gt. 0) then 
-       if ((nparcelsLocalActive - numBackfill) .eq. 0) then
-          ! Set backfill_ind to 1 to handle an exception case, 
-          ! where all the active droplets fall out or leave
-          ! the current MPI domain
-          !$acc parallel loop gang vector default(present)
-          do i = 1, numBackfill
-             backfill_ind(i) = 1
-          end do
-       else
-          !$acc parallel num_gangs(1) num_workers(1) default(present)
-          np = nparcelsLocalActive
-          i=0
-          do while (i.lt. numBackfill) 
-            if(np.le.0)then
-              ! GHB 220616: nothing will be done in this case; just give backfill_ind a 
-              !             harmless value and move on
-              i=i+1
-              backfill_ind(i) = nparcelsLocalActive+1
-            else
-            if (.not.msk(np)) then 
-              i=i+1
-              backfill_ind(i) = np
-            end if
-            np=np-1
-            endif
-          enddo
-          !$acc end parallel
-          if(verbose) then
-             !$acc update host(backfill_ind)
-             print *,'backfill_ind: ',backfill_ind(1:numBackfill)
-          endif
-       end if
+       !$acc parallel num_gangs(1) num_workers(1) default(present)
+       np = nparcelsLocalActive
+       i=0
+       do while (i.lt. numBackfill)
+         do while (np.gt.0)
+           if (int(np,i8).gt.nactive_new .and. .not.msk(np)) exit
+           np=np-1
+         enddo
+         i=i+1
+         if (np.gt.0) then
+           backfill_ind(i) = np
+           np=np-1
+         else
+           backfill_ind(i) = nparcelsLocalActive+1
+         endif
+       enddo
+       !$acc end parallel
+       if(verbose) then
+          !$acc update host(backfill_ind)
+          print *,'backfill_ind: ',backfill_ind(1:numBackfill)
+       endif
      end if
 
      if (numBackfill .gt. 0) then
        badBackfillSearch = 0
-       !$acc parallel loop gang vector default(present) reduction(+:badBackfillSearch)
+       firstBadBackfill = numBackfill + 1
+       lastBadBackfill = 0
+       !$acc parallel loop gang vector default(present) private(k) &
+       !$acc reduction(+:badBackfillSearch) &
+       !$acc reduction(min:firstBadBackfill) reduction(max:lastBadBackfill)
        do n=1,numBackfill
-         if (backfill_ind(n) .lt. 1 .or. backfill_ind(n) .gt. nparcelsLocalActive) then
+         k = backfill_ind(n)
+         if (k .lt. 1 .or. k .gt. nparcelsLocalActive .or. &
+             int(k,i8) .le. nactive_new) then
            badBackfillSearch = badBackfillSearch + 1
+           firstBadBackfill = min(firstBadBackfill,n)
+           lastBadBackfill = max(lastBadBackfill,n)
          endif
        enddo
        !$acc end parallel
@@ -854,6 +854,19 @@
      !$acc wait
 
      if (badBackfillSearch .gt. 0) then
+       !$acc update host(backfill_ind)
+       print *,'DROPLET BACKFILL SEARCH EXHAUSTED DETAIL myid=',myid, &
+               ' nstep=',nstep
+       print *,' active_old=',nparcelsLocalActive,' active_new=', &
+               nactive_new,' depart=',sum(Depart),' fallout=',num_fallout
+       print *,' arrive=',sum(Arrive),' backfill=',numBackfill, &
+               ' bad_donors=',badBackfillSearch
+       print *,' first_bad_backfill=',firstBadBackfill, &
+               ' last_bad_backfill=',lastBadBackfill
+       if (firstBadBackfill.ge.1 .and. firstBadBackfill.le.numBackfill) then
+         print *,' first_bad_donor=',backfill_ind(firstBadBackfill)
+       endif
+       call flush(6)
        stop 'DROPLET BACKFILL SEARCH EXHAUSTED'
      endif
 
@@ -864,6 +877,106 @@
     endif
 
     if(timestats.ge.1) time_dropC3=time_dropC3+mytime()
+
+    badArriveHole = 0
+    firstBadArriveHole = numArrive_dbg + 1
+    lastBadArriveHole = 0
+    if (numArrive_dbg.gt.0) then
+      !$acc parallel loop gang vector default(present) private(indx,badThis) &
+      !$acc reduction(+:badArriveHole) &
+      !$acc reduction(min:firstBadArriveHole) reduction(max:lastBadArriveHole)
+      do n=1,numArrive_dbg
+        indx = holes_ind(n)
+        badThis = 0
+        if (indx .lt. 1 .or. indx .gt. nparcelsLocal) then
+          badThis = 1
+        else
+          if (.not.msk(indx)) then
+            badThis = 1
+          endif
+          if (n.gt.1) then
+            if (holes_ind(n) .le. holes_ind(n-1)) then
+              badThis = 1
+            endif
+          endif
+        endif
+
+        if (badThis.ne.0) then
+          badArriveHole = badArriveHole + 1
+          firstBadArriveHole = min(firstBadArriveHole,n)
+          lastBadArriveHole = max(lastBadArriveHole,n)
+        endif
+      enddo
+      !$acc end parallel
+    endif
+
+    if (badArriveHole.gt.0) then
+      !$acc update host(holes_ind)
+      print *,'DROPLET BAD ARRIVAL HOLE BEFORE COMM DETAIL myid=', &
+              myid,' nstep=',nstep
+      print *,' active_old=',nparcelsLocalActive,' active_new=', &
+              nactive_new,' depart=',numDepart,' fallout=',num_fallout
+      print *,' arrive=',numArrive_dbg,' backfill=',numBackfill, &
+              ' bad_holes=',badArriveHole
+      print *,' first_bad_arrival_hole=',firstBadArriveHole, &
+              ' last_bad_arrival_hole=',lastBadArriveHole
+      if (firstBadArriveHole.ge.1 .and. &
+          firstBadArriveHole.le.numArrive_dbg) then
+        print *,' first_bad_hole_index=',holes_ind(firstBadArriveHole)
+      endif
+      print *,' Depart=',Depart
+      print *,' Arrive=',Arrive
+      call flush(6)
+      stop 'DROPLET BAD ARRIVAL HOLE BEFORE COMM'
+    endif
+
+    badDepart = 0
+    firstBadDepart = numDepart + 1
+    lastBadDepart = 0
+    if (numDepart.gt.0) then
+      !$acc parallel loop gang vector default(present) private(indx,badThis) &
+      !$acc reduction(+:badDepart) &
+      !$acc reduction(min:firstBadDepart) reduction(max:lastBadDepart)
+      do n=1,numDepart
+        indx = Depart_ind(n)
+        badThis = 0
+        if (indx .lt. 1 .or. indx .gt. nparcelsLocalActive) then
+          badThis = 1
+        else
+          if (pdata(indx,prrp) .le. 0.0 .or. &
+              pdata(indx,prmult) .le. 0.0 .or. &
+              pdata(indx,pract) .lt. 0.0) then
+            badThis = 1
+          endif
+        endif
+
+        if (badThis.ne.0) then
+          badDepart = badDepart + 1
+          firstBadDepart = min(firstBadDepart,n)
+          lastBadDepart = max(lastBadDepart,n)
+        endif
+      enddo
+      !$acc end parallel
+    endif
+
+    if (badDepart.gt.0) then
+      !$acc update host(Depart_ind)
+      print *,'DROPLET BAD DEPARTURE BEFORE COMM DETAIL myid=', &
+              myid,' nstep=',nstep
+      print *,' active_old=',nparcelsLocalActive,' active_new=', &
+              nactive_new,' depart=',numDepart,' fallout=',num_fallout
+      print *,' arrive=',numArrive_dbg,' backfill=',numBackfill, &
+              ' bad_depart=',badDepart
+      print *,' first_bad_depart_slot=',firstBadDepart, &
+              ' last_bad_depart_slot=',lastBadDepart
+      if (firstBadDepart.ge.1 .and. firstBadDepart.le.numDepart) then
+        print *,' first_bad_depart_index=',Depart_ind(firstBadDepart)
+      endif
+      print *,' Depart=',Depart
+      print *,' Arrive=',Arrive
+      call flush(6)
+      stop 'DROPLET BAD DEPARTURE BEFORE COMM'
+    endif
 
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     ! Step 4: Exchange the detailed information of the droplets that will  !
@@ -889,6 +1002,8 @@
     badArriveNE = 0
     badArriveSW = 0
     badArriveSE = 0
+    firstBadArrive = numArrive_dbg + 1
+    lastBadArrive = 0
     arrN0  = ptrArrive(inorth)
     arrN1  = arrN0  + Arrive(inorth)
     arrS0  = ptrArrive(isouth)
@@ -909,7 +1024,8 @@
     if (numArrive_dbg.gt.0) then
       !$acc parallel loop gang vector default(present) private(indx,badThis) &
       !$acc reduction(+:badArrive,badArriveN,badArriveS,badArriveW,badArriveE) &
-      !$acc reduction(+:badArriveNW,badArriveNE,badArriveSW,badArriveSE)
+      !$acc reduction(+:badArriveNW,badArriveNE,badArriveSW,badArriveSE) &
+      !$acc reduction(min:firstBadArrive) reduction(max:lastBadArrive)
       do n=1,numArrive_dbg
         indx = holes_ind(n)
         badThis = 0
@@ -926,6 +1042,8 @@
 
         if (badThis .ne. 0) then
           badArrive = badArrive + 1
+          firstBadArrive = min(firstBadArrive,n)
+          lastBadArrive = max(lastBadArrive,n)
           if (n .ge. arrN0  .and. n .lt. arrN1)  badArriveN  = badArriveN  + 1
           if (n .ge. arrS0  .and. n .lt. arrS1)  badArriveS  = badArriveS  + 1
           if (n .ge. arrW0  .and. n .lt. arrW1)  badArriveW  = badArriveW  + 1
@@ -940,35 +1058,83 @@
     endif
 
     if (badArrive.gt.0) then
+      !$acc update host(holes_ind)
+      print *,'DROPLET BAD ARRIVAL AFTER COMM DETAIL myid=', &
+              myid,' nstep=',nstep
+      print *,' active_old=',nparcelsLocalActive,' active_new=', &
+              nactive_new,' depart=',numDepart,' fallout=',num_fallout
+      print *,' arrive=',numArrive_dbg,' backfill=',numBackfill, &
+              ' bad_arrive=',badArrive
+      print *,' bad_dirs N S W E NW NE SW SE=',badArriveN,badArriveS, &
+              badArriveW,badArriveE,badArriveNW,badArriveNE, &
+              badArriveSW,badArriveSE
+      print *,' first_bad_arrive_slot=',firstBadArrive, &
+              ' last_bad_arrive_slot=',lastBadArrive
+      if (firstBadArrive.ge.1 .and. firstBadArrive.le.numArrive_dbg) then
+        print *,' first_bad_arrive_hole=',holes_ind(firstBadArrive)
+      endif
+      print *,' Depart=',Depart
+      print *,' Arrive=',Arrive
+      call flush(6)
       stop 'DROPLET BAD ARRIVAL AFTER COMM'
     endif
 
     badCompact = 0
+    firstBadCompact = numBackfill + 1
+    lastBadCompact = 0
 
     if (numBackfill.gt.0) then
-      !$acc parallel loop gang vector default(present) private(indx,k) reduction(+:badCompact)
+      !$acc parallel loop gang vector default(present) private(indx,k,badThis) &
+      !$acc reduction(+:badCompact) &
+      !$acc reduction(min:firstBadCompact) reduction(max:lastBadCompact)
       do n=1,numBackfill
         indx = holes_ind(numArrive_dbg+n)
         k = backfill_ind(n)
+        badThis = 0
 
         if (indx .lt. 1 .or. indx .gt. nparcelsLocal) then
-          badCompact = badCompact + 1
-        elseif (indx .lt. k) then
-          if (k .lt. 1 .or. k .gt. nparcelsLocalActive) then
-            badCompact = badCompact + 1
-          else
-            if (pdata(k,prrp) .le. 0.0 .or. &
-                pdata(k,prmult) .le. 0.0 .or. &
-                pdata(k,pract) .lt. 0.0) then
-              badCompact = badCompact + 1
-            endif
+          badThis = 1
+        elseif (int(indx,i8) .gt. nactive_new) then
+          badThis = 1
+        endif
+
+        if (k .lt. 1 .or. k .gt. nparcelsLocalActive .or. &
+            int(k,i8) .le. nactive_new) then
+          badThis = 1
+        else
+          if (pdata(k,prrp) .le. 0.0 .or. &
+              pdata(k,prmult) .le. 0.0 .or. &
+              pdata(k,pract) .lt. 0.0) then
+            badThis = 1
           endif
+        endif
+
+        if (badThis .ne. 0) then
+          badCompact = badCompact + 1
+          firstBadCompact = min(firstBadCompact,n)
+          lastBadCompact = max(lastBadCompact,n)
         endif
       enddo
       !$acc end parallel
     end if
 
     if (badCompact.gt.0) then
+      !$acc update host(holes_ind,backfill_ind)
+      print *,'DROPLET BAD COMPACT INDEX DETAIL myid=',myid, &
+              ' nstep=',nstep
+      print *,' active_old=',nparcelsLocalActive,' active_new=', &
+              nactive_new,' depart=',numDepart,' fallout=',num_fallout
+      print *,' arrive=',numArrive_dbg,' backfill=',numBackfill, &
+              ' bad_compact=',badCompact
+      print *,' first_bad_compact=',firstBadCompact, &
+              ' last_bad_compact=',lastBadCompact
+      if (firstBadCompact.ge.1 .and. firstBadCompact.le.numBackfill) then
+        print *,' first_bad_hole=',holes_ind(numArrive_dbg+firstBadCompact), &
+                ' first_bad_donor=',backfill_ind(firstBadCompact)
+      endif
+      print *,' Depart=',Depart
+      print *,' Arrive=',Arrive
+      call flush(6)
       stop 'DROPLET BAD COMPACT INDEX'
     endif
 
