@@ -166,6 +166,7 @@
       type(randomNumberSequence) :: randomNumbers
 
       integer :: num_fallout,idx                        !droplets which fell out of domain
+      integer :: sgs_dsig_clip_count,sgs_dsig_clip_flag,sgs_dsig_clip_total
       integer :: numDepart
       integer :: numDepartN, numDepartS, numDepartE, numDepartW, &
                  numDepartSW,numDepartSE,numDepartNE,numDepartNW
@@ -405,10 +406,11 @@
        call write_drop_traj(nstep,real(mtime),pdata)
     end if
 
+    sgs_dsig_clip_count = 0
 
     !JMD WARNING: Loop does not yet match CPU version.
     !$acc parallel default(present)
-    !$acc loop gang vector reduction(+:num_fallout) reduction(max:errcode) &
+    !$acc loop gang vector private(sgs_dsig_clip_flag) reduction(+:num_fallout,sgs_dsig_clip_count) reduction(max:errcode) &
     !$acc reduction(+:numDepartN,numDepartS,numDepartE,numDepartW) &
     !$acc reduction(+:numDepartNW,numDepartSW,numDepartNE,numDepartSE) &
     !$acc reduction(+:num_destroyed,mass_destroyed,mass_evap,mass_dpten,eng_destroyed,m1_destroyed,m2_destroyed,mass_reentry,eng_reentry,m1_reentry,m2_reentry)
@@ -530,7 +532,8 @@
                            epssgsval,lsgsval,fsval, &
                            rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                            part_grav1,part_grav2,part_grav3,debug, &
-                           neighbor,num_fallout,errcode)
+                           sgs_dsig_clip_flag,neighbor,num_fallout,errcode)
+      sgs_dsig_clip_count = sgs_dsig_clip_count + sgs_dsig_clip_flag
 
 #ifdef MPI
       if(neighbor .eq. mynorth) then 
@@ -586,6 +589,14 @@
     END DO nploop
     !$acc end parallel
     !$acc wait
+    sgs_dsig_clip_total = sgs_dsig_clip_count
+#ifdef MPI
+    call mpi_allreduce(mpi_in_place,sgs_dsig_clip_total,1,mpi_integer,mpi_sum,mpi_comm_world,ierr)
+#endif
+    if (drop_sgs_opt.eq.2 .and. myid.eq.0) then
+       write(*,'(a,i8,a,f12.4,a,i12)') 'SGS_DSIG_CLIP nstep=',nstep,' mtime=',real(mtime),' count=',sgs_dsig_clip_total
+       call flush(6)
+    endif
     if (errcode .gt. 0) then 
        stop 'FATAL error occurred in the index search BE_integration'
     end if
@@ -1787,7 +1798,7 @@
                              epssgsval,lsgsval,fsval, &
                              rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                              part_grav1,part_grav2,part_grav3,debug, &
-                             neighbor,num_fallout,errcode)
+                             sgs_dsig_clip_flag,neighbor,num_fallout,errcode)
 
       !$acc routine seq
 
@@ -1825,6 +1836,7 @@
       real, intent(in) :: dt,part_grav1,part_grav2,part_grav3
       integer, intent(out) :: neighbor  ! indicate which MPI region a droplet 
                                         ! stays after this time step 
+      integer, intent(out) :: sgs_dsig_clip_flag
       integer, intent(inout) :: num_fallout
       integer, intent(inout) :: errcode
 
@@ -1849,6 +1861,7 @@
       logical :: is_local
       integer :: mflag,flag
 
+      sgs_dsig_clip_flag = 0
 
       !Store interpolated quantities for the sake of statistics
       pdata(np,pru) = uval
@@ -1906,7 +1919,7 @@
         call sfs_velocity_update(dt,nstep,mtime,np,seed_base,pdata, &
                                  x3d,y3d,z3d,sigsgsval, &
                                  dsgsdxval,dsgsdyval,dsgsdzval, &
-                                 epssgsval,lsgsval,fsval)
+                                 epssgsval,lsgsval,fsval,sgs_dsig_clip_flag)
       endif
 
       if (x3d.ne.x3d .or. y3d.ne.y3d .or. z3d.ne.z3d) then
@@ -2505,7 +2518,7 @@
       subroutine sfs_velocity_update(dt,nstep,mtime,np,seed_base,pdata, &
                                      x3d,y3d,z3d,sigsgsval, &
                                      dsgsdxval,dsgsdyval,dsgsdzval, &
-                                     epssgsval,lsgsval,fsval)
+                                     epssgsval,lsgsval,fsval,dsig_clip_flag)
       !$acc routine seq
       use input, only : nparcelsLocal,npvals,nx,ny,axisymm, &
                         prusgs,prvsgs,prwsgs,prsigsgs
@@ -2517,6 +2530,7 @@
       double precision, intent(in) :: mtime
       integer, intent(in) :: nstep,np
       integer(i8), intent(in) :: seed_base
+      integer, intent(out) :: dsig_clip_flag
       real, intent(inout) :: x3d,y3d,z3d
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
 
@@ -2529,6 +2543,8 @@
       real :: us_old,vs_old,ws_old
       real :: a1,a2,a3,dsig_frac
       double precision :: u1,u2,fac,theta
+
+      dsig_clip_flag = 0
 
       if( dt.le.0.0 ) return
 
@@ -2588,6 +2604,7 @@
       ! Bound the sigm_s change term to avoid one-step amplification
       ! when particles cross sharp SGS-energy gradients.
       dsig_frac = log(sig_eff/sig_prev)
+      if( abs(dsig_frac).gt.dsig_cap ) dsig_clip_flag = 1
       dsig_frac = max(-dsig_cap,min(dsig_cap,dsig_frac))
 
       us_old = pdata(np,prusgs)
