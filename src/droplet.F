@@ -593,7 +593,7 @@
 #ifdef MPI
     call mpi_allreduce(mpi_in_place,sgs_dsig_clip_total,1,mpi_integer,mpi_sum,mpi_comm_world,ierr)
 #endif
-    if (drop_sgs_opt.eq.2 .and. myid.eq.0) then
+    if (drop_sgs_opt.eq.2 .and. myid.eq.0 .and. sgs_dsig_clip_total.gt.0) then
        write(*,'(a,i8,a,f12.4,a,i12)') 'SGS_DSIG_CLIP nstep=',nstep,' mtime=',real(mtime),' count=',sgs_dsig_clip_total
        call flush(6)
     endif
@@ -2537,7 +2537,7 @@
       integer(i8) :: seed,state
       integer(i8), parameter :: im = 2147483647_i8
       real, parameter :: c0 = 6.0
-      real, parameter :: dsig_cap = 0.5
+      real, parameter :: dsig_cap = 10.0
       real :: sig_eff,sig_prev,eps_eff,l_eff,fs_eff,noise_amp
       real :: normx,normy,normz
       real :: us_old,vs_old,ws_old
