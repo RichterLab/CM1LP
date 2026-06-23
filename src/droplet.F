@@ -7,7 +7,8 @@
             project_droplet_qc_effc, &
             droplet_diag,initialize_droplet_histograms, &
             check_droplet_ownership,particle_seed,ngidx, &
-            kohler_equil_radius,lognormal_droplet
+            kohler_equil_radius,lognormal_droplet, &
+            droplet_sgs_num_dropsub_next,droplet_sgs_dlogsig_sum
 
   !These are quantities which are needed in the droplet_diag output, so must be public
   real :: num100,num1000
@@ -25,6 +26,12 @@
   double precision :: mass_evap,mass_dpten
 
   real, allocatable, dimension(:) :: sfs_fs_profile
+  ! Lagged controller for SGS velocity substepping.  The target limits the
+  ! accumulated max abs(log(sigm_s_new/sigm_s_old)); the max is a safety guard.
+  real, parameter :: droplet_sgs_dlogsig_target = 0.5
+  integer, parameter :: droplet_sgs_num_dropsub_max = 20
+  real :: droplet_sgs_dlogsig_sum = 0.0
+  integer :: droplet_sgs_num_dropsub_next = 1
 
   integer :: particle_seed
 
@@ -622,6 +629,15 @@
           dlogsig_mean = real(dlogsig_sum/dble(dlogsig_count))
        else
           dlogsig_mean = 0.0
+       endif
+       ! Accumulate the globally reduced maximum over droplet substeps.  The
+       ! resulting lagged estimate sets the SGS substep count on the next call.
+       droplet_sgs_dlogsig_sum = droplet_sgs_dlogsig_sum + dlogsig_max
+       if (droplet_sgs_dlogsig_sum.gt.0.0) then
+          droplet_sgs_num_dropsub_next = max(1,min(droplet_sgs_num_dropsub_max, &
+               ceiling(droplet_sgs_dlogsig_sum/droplet_sgs_dlogsig_target)))
+       else
+          droplet_sgs_num_dropsub_next = 1
        endif
        if (myid.eq.0) then
           write(*,'(a,i8,a,f12.4,a,1pe12.4,a,1pe12.4,a,i12,a,i12,a,i12,a,i12,a,i12)') &
@@ -2577,8 +2593,7 @@
       real :: sig_eff,sig_prev,eps_eff,l_eff,fs_eff,noise_amp
       real :: normx,normy,normz
       real :: us_old,vs_old,ws_old
-      real :: us_base,vs_base,ws_base
-      real :: a1,a3,dsig_frac,sig_fac
+      real :: a1,a2,a3,dsig_frac
       double precision :: u1,u2,fac,theta
 
       dlogsig_abs = 0.0
@@ -2639,30 +2654,29 @@
       normz = real(fac*cos(theta))
 
       noise_amp = sqrt(max(fs_eff*c0*eps_eff*dt,0.0))
-      ! This exact multiplicative rescaling replaces the explicit Euler a2 update
-      ! for the sigm_s time-change term.
       dsig_frac = log(sig_eff/sig_prev)
       dlogsig_abs = abs(dsig_frac)
       dlogsig_valid = 1
-      sig_fac = exp(0.5*fs_eff*dsig_frac)
 
+      ! Advance all deterministic SFS velocity terms with the same Euler step;
+      ! droplet substepping is used to keep the sigm_s time-change term small.
       us_old = pdata(np,prusgs)
-      us_base = us_old*sig_fac
-      a1 = -0.5*fs_eff*c0*eps_eff*us_base/sig_eff
+      a1 = -0.5*fs_eff*c0*eps_eff*us_old/sig_eff
+      a2 = 0.5*fs_eff*us_old*dsig_frac/dt
       a3 = 0.5*fs_eff*dsgsdxval
-      pdata(np,prusgs) = us_base + (a1+a3)*dt + noise_amp*normx
+      pdata(np,prusgs) = us_old + (a1+a2+a3)*dt + noise_amp*normx
 
       vs_old = pdata(np,prvsgs)
-      vs_base = vs_old*sig_fac
-      a1 = -0.5*fs_eff*c0*eps_eff*vs_base/sig_eff
+      a1 = -0.5*fs_eff*c0*eps_eff*vs_old/sig_eff
+      a2 = 0.5*fs_eff*vs_old*dsig_frac/dt
       a3 = 0.5*fs_eff*dsgsdyval
-      pdata(np,prvsgs) = vs_base + (a1+a3)*dt + noise_amp*normy
+      pdata(np,prvsgs) = vs_old + (a1+a2+a3)*dt + noise_amp*normy
 
       ws_old = pdata(np,prwsgs)
-      ws_base = ws_old*sig_fac
-      a1 = -0.5*fs_eff*c0*eps_eff*ws_base/sig_eff
+      a1 = -0.5*fs_eff*c0*eps_eff*ws_old/sig_eff
+      a2 = 0.5*fs_eff*ws_old*dsig_frac/dt
       a3 = 0.5*fs_eff*dsgsdzval
-      pdata(np,prwsgs) = ws_base + (a1+a3)*dt + noise_amp*normz
+      pdata(np,prwsgs) = ws_old + (a1+a2+a3)*dt + noise_amp*normz
 
       if( nx.gt.1 .and. axisymm.ne.1 )then
         x3d = x3d + pdata(np,prusgs)*dt
