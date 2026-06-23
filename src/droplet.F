@@ -158,14 +158,18 @@
       real :: uval,vval,wval,qval,prsval,tval,rhoval,rhval
       real :: khhval,khvval,dkhvdzval
       real :: sigsgsval,dsgsdxval,dsgsdyval,dsgsdzval,epssgsval,lsgsval,fsval
+      real :: dlogsig_abs,dlogsig_max,dlogsig_mean
       real :: sigdot
       real :: fs_sgs(kb:ke+1)
+      double precision :: dlogsig_sum
 
       logical, parameter :: debug = .false.
 
       type(randomNumberSequence) :: randomNumbers
 
       integer :: num_fallout,idx                        !droplets which fell out of domain
+      integer :: dlogsig_valid,dlogsig_count
+      integer :: dlogsig_gt05,dlogsig_gt1,dlogsig_gt2,dlogsig_gt5
       integer :: numDepart
       integer :: numDepartN, numDepartS, numDepartE, numDepartW, &
                  numDepartSW,numDepartSE,numDepartNE,numDepartNW
@@ -405,9 +409,19 @@
        call write_drop_traj(nstep,real(mtime),pdata)
     end if
 
+    dlogsig_sum = 0.0d0
+    dlogsig_max = 0.0
+    dlogsig_count = 0
+    dlogsig_gt05 = 0
+    dlogsig_gt1 = 0
+    dlogsig_gt2 = 0
+    dlogsig_gt5 = 0
+
     !JMD WARNING: Loop does not yet match CPU version.
     !$acc parallel default(present)
-    !$acc loop gang vector reduction(+:num_fallout) reduction(max:errcode) &
+    !$acc loop gang vector private(dlogsig_abs,dlogsig_valid) reduction(+:num_fallout) reduction(max:errcode) &
+    !$acc reduction(+:dlogsig_sum,dlogsig_count,dlogsig_gt05,dlogsig_gt1,dlogsig_gt2,dlogsig_gt5) &
+    !$acc reduction(max:dlogsig_max) &
     !$acc reduction(+:numDepartN,numDepartS,numDepartE,numDepartW) &
     !$acc reduction(+:numDepartNW,numDepartSW,numDepartNE,numDepartSE) &
     !$acc reduction(+:num_destroyed,mass_destroyed,mass_evap,mass_dpten,eng_destroyed,m1_destroyed,m2_destroyed,mass_reentry,eng_reentry,m1_reentry,m2_reentry)
@@ -529,7 +543,16 @@
                            epssgsval,lsgsval,fsval, &
                            rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                            part_grav1,part_grav2,part_grav3,debug, &
-                           neighbor,num_fallout,errcode)
+                           dlogsig_abs,dlogsig_valid,neighbor,num_fallout,errcode)
+      if (dlogsig_valid.eq.1) then
+         dlogsig_sum = dlogsig_sum + dble(dlogsig_abs)
+         dlogsig_max = max(dlogsig_max,dlogsig_abs)
+         dlogsig_count = dlogsig_count + 1
+         if (dlogsig_abs.gt.0.5) dlogsig_gt05 = dlogsig_gt05 + 1
+         if (dlogsig_abs.gt.1.0) dlogsig_gt1 = dlogsig_gt1 + 1
+         if (dlogsig_abs.gt.2.0) dlogsig_gt2 = dlogsig_gt2 + 1
+         if (dlogsig_abs.gt.5.0) dlogsig_gt5 = dlogsig_gt5 + 1
+      endif
 
 #ifdef MPI
       if(neighbor .eq. mynorth) then 
@@ -585,6 +608,29 @@
     END DO nploop
     !$acc end parallel
     !$acc wait
+    if (drop_sgs_opt.eq.2) then
+#ifdef MPI
+       call mpi_allreduce(mpi_in_place,dlogsig_sum,1,mpi_double_precision,mpi_sum,mpi_comm_world,ierr)
+       call mpi_allreduce(mpi_in_place,dlogsig_max,1,mpi_real,mpi_max,mpi_comm_world,ierr)
+       call mpi_allreduce(mpi_in_place,dlogsig_count,1,mpi_integer,mpi_sum,mpi_comm_world,ierr)
+       call mpi_allreduce(mpi_in_place,dlogsig_gt05,1,mpi_integer,mpi_sum,mpi_comm_world,ierr)
+       call mpi_allreduce(mpi_in_place,dlogsig_gt1,1,mpi_integer,mpi_sum,mpi_comm_world,ierr)
+       call mpi_allreduce(mpi_in_place,dlogsig_gt2,1,mpi_integer,mpi_sum,mpi_comm_world,ierr)
+       call mpi_allreduce(mpi_in_place,dlogsig_gt5,1,mpi_integer,mpi_sum,mpi_comm_world,ierr)
+#endif
+       if (dlogsig_count.gt.0) then
+          dlogsig_mean = real(dlogsig_sum/dble(dlogsig_count))
+       else
+          dlogsig_mean = 0.0
+       endif
+       if (myid.eq.0) then
+          write(*,'(a,i8,a,f12.4,a,1pe12.4,a,1pe12.4,a,i12,a,i12,a,i12,a,i12,a,i12)') &
+               'SGS_DLOGSIG nstep=',nstep,' mtime=',real(mtime),' mean=',dlogsig_mean, &
+               ' max=',dlogsig_max,' n=',dlogsig_count,' n0p5=',dlogsig_gt05, &
+               ' n1=',dlogsig_gt1,' n2=',dlogsig_gt2,' n5=',dlogsig_gt5
+          call flush(6)
+       endif
+    endif
     if (errcode .gt. 0) then 
        stop 'FATAL error occurred in the index search BE_integration'
     end if
@@ -1786,7 +1832,7 @@
                              epssgsval,lsgsval,fsval, &
                              rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                              part_grav1,part_grav2,part_grav3,debug, &
-                             neighbor,num_fallout,errcode)
+                             dlogsig_abs,dlogsig_valid,neighbor,num_fallout,errcode)
 
       !$acc routine seq
 
@@ -1813,6 +1859,7 @@
       integer(i8), intent(in) :: seed_base
       logical, intent(in) :: debug
       real, intent(inout) :: x3d,y3d,z3d,sig3d
+      real, intent(out) :: dlogsig_abs
       real, intent(in) :: uval,vval,wval,qval,rhoval,prsval,tval
       real, intent(in) :: khhval,khvval,dkhvdzval
       real, intent(in) :: sigsgsval,dsgsdxval,dsgsdyval,dsgsdzval
@@ -1824,6 +1871,7 @@
       real, intent(in) :: dt,part_grav1,part_grav2,part_grav3
       integer, intent(out) :: neighbor  ! indicate which MPI region a droplet 
                                         ! stays after this time step 
+      integer, intent(out) :: dlogsig_valid
       integer, intent(inout) :: num_fallout
       integer, intent(inout) :: errcode
 
@@ -1847,6 +1895,9 @@
       double precision :: rt_zeros(2),rt_start(2)
       logical :: is_local
       integer :: mflag,flag
+
+      dlogsig_abs = 0.0
+      dlogsig_valid = 0
 
       !Store interpolated quantities for the sake of statistics
       pdata(np,pru) = uval
@@ -1904,7 +1955,7 @@
         call sfs_velocity_update(dt,nstep,mtime,np,seed_base,pdata, &
                                  x3d,y3d,z3d,sigsgsval, &
                                  dsgsdxval,dsgsdyval,dsgsdzval, &
-                                 epssgsval,lsgsval,fsval)
+                                 epssgsval,lsgsval,fsval,dlogsig_abs,dlogsig_valid)
       endif
 
       if (x3d.ne.x3d .or. y3d.ne.y3d .or. z3d.ne.z3d) then
@@ -2503,7 +2554,7 @@
       subroutine sfs_velocity_update(dt,nstep,mtime,np,seed_base,pdata, &
                                      x3d,y3d,z3d,sigsgsval, &
                                      dsgsdxval,dsgsdyval,dsgsdzval, &
-                                     epssgsval,lsgsval,fsval)
+                                     epssgsval,lsgsval,fsval,dlogsig_abs,dlogsig_valid)
       !$acc routine seq
       use input, only : nparcelsLocal,npvals,nx,ny,axisymm, &
                         prusgs,prvsgs,prwsgs,prsigsgs
@@ -2515,7 +2566,9 @@
       double precision, intent(in) :: mtime
       integer, intent(in) :: nstep,np
       integer(i8), intent(in) :: seed_base
+      integer, intent(out) :: dlogsig_valid
       real, intent(inout) :: x3d,y3d,z3d
+      real, intent(out) :: dlogsig_abs
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
 
       integer(i8) :: seed,state
@@ -2527,6 +2580,9 @@
       real :: us_base,vs_base,ws_base
       real :: a1,a3,dsig_frac,sig_fac
       double precision :: u1,u2,fac,theta
+
+      dlogsig_abs = 0.0
+      dlogsig_valid = 0
 
       if( dt.le.0.0 ) return
 
@@ -2586,6 +2642,8 @@
       ! This exact multiplicative rescaling replaces the explicit Euler a2 update
       ! for the sigm_s time-change term.
       dsig_frac = log(sig_eff/sig_prev)
+      dlogsig_abs = abs(dsig_frac)
+      dlogsig_valid = 1
       sig_fac = exp(0.5*fs_eff*dsig_frac)
 
       us_old = pdata(np,prusgs)
