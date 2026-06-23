@@ -166,7 +166,6 @@
       type(randomNumberSequence) :: randomNumbers
 
       integer :: num_fallout,idx                        !droplets which fell out of domain
-      integer :: sgs_dsig_clip_count,sgs_dsig_clip_flag,sgs_dsig_clip_total
       integer :: numDepart
       integer :: numDepartN, numDepartS, numDepartE, numDepartW, &
                  numDepartSW,numDepartSE,numDepartNE,numDepartNW
@@ -406,11 +405,9 @@
        call write_drop_traj(nstep,real(mtime),pdata)
     end if
 
-    sgs_dsig_clip_count = 0
-
     !JMD WARNING: Loop does not yet match CPU version.
     !$acc parallel default(present)
-    !$acc loop gang vector private(sgs_dsig_clip_flag) reduction(+:num_fallout,sgs_dsig_clip_count) reduction(max:errcode) &
+    !$acc loop gang vector reduction(+:num_fallout) reduction(max:errcode) &
     !$acc reduction(+:numDepartN,numDepartS,numDepartE,numDepartW) &
     !$acc reduction(+:numDepartNW,numDepartSW,numDepartNE,numDepartSE) &
     !$acc reduction(+:num_destroyed,mass_destroyed,mass_evap,mass_dpten,eng_destroyed,m1_destroyed,m2_destroyed,mass_reentry,eng_reentry,m1_reentry,m2_reentry)
@@ -532,8 +529,7 @@
                            epssgsval,lsgsval,fsval, &
                            rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                            part_grav1,part_grav2,part_grav3,debug, &
-                           sgs_dsig_clip_flag,neighbor,num_fallout,errcode)
-      sgs_dsig_clip_count = sgs_dsig_clip_count + sgs_dsig_clip_flag
+                           neighbor,num_fallout,errcode)
 
 #ifdef MPI
       if(neighbor .eq. mynorth) then 
@@ -589,14 +585,6 @@
     END DO nploop
     !$acc end parallel
     !$acc wait
-    sgs_dsig_clip_total = sgs_dsig_clip_count
-#ifdef MPI
-    call mpi_allreduce(mpi_in_place,sgs_dsig_clip_total,1,mpi_integer,mpi_sum,mpi_comm_world,ierr)
-#endif
-    if (drop_sgs_opt.eq.2 .and. myid.eq.0 .and. sgs_dsig_clip_total.gt.0) then
-       write(*,'(a,i8,a,f12.4,a,i12)') 'SGS_DSIG_CLIP nstep=',nstep,' mtime=',real(mtime),' count=',sgs_dsig_clip_total
-       call flush(6)
-    endif
     if (errcode .gt. 0) then 
        stop 'FATAL error occurred in the index search BE_integration'
     end if
@@ -1798,7 +1786,7 @@
                              epssgsval,lsgsval,fsval, &
                              rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                              part_grav1,part_grav2,part_grav3,debug, &
-                             sgs_dsig_clip_flag,neighbor,num_fallout,errcode)
+                             neighbor,num_fallout,errcode)
 
       !$acc routine seq
 
@@ -1836,7 +1824,6 @@
       real, intent(in) :: dt,part_grav1,part_grav2,part_grav3
       integer, intent(out) :: neighbor  ! indicate which MPI region a droplet 
                                         ! stays after this time step 
-      integer, intent(out) :: sgs_dsig_clip_flag
       integer, intent(inout) :: num_fallout
       integer, intent(inout) :: errcode
 
@@ -1860,8 +1847,6 @@
       double precision :: rt_zeros(2),rt_start(2)
       logical :: is_local
       integer :: mflag,flag
-
-      sgs_dsig_clip_flag = 0
 
       !Store interpolated quantities for the sake of statistics
       pdata(np,pru) = uval
@@ -1919,7 +1904,7 @@
         call sfs_velocity_update(dt,nstep,mtime,np,seed_base,pdata, &
                                  x3d,y3d,z3d,sigsgsval, &
                                  dsgsdxval,dsgsdyval,dsgsdzval, &
-                                 epssgsval,lsgsval,fsval,sgs_dsig_clip_flag)
+                                 epssgsval,lsgsval,fsval)
       endif
 
       if (x3d.ne.x3d .or. y3d.ne.y3d .or. z3d.ne.z3d) then
@@ -2518,7 +2503,7 @@
       subroutine sfs_velocity_update(dt,nstep,mtime,np,seed_base,pdata, &
                                      x3d,y3d,z3d,sigsgsval, &
                                      dsgsdxval,dsgsdyval,dsgsdzval, &
-                                     epssgsval,lsgsval,fsval,dsig_clip_flag)
+                                     epssgsval,lsgsval,fsval)
       !$acc routine seq
       use input, only : nparcelsLocal,npvals,nx,ny,axisymm, &
                         prusgs,prvsgs,prwsgs,prsigsgs
@@ -2530,21 +2515,18 @@
       double precision, intent(in) :: mtime
       integer, intent(in) :: nstep,np
       integer(i8), intent(in) :: seed_base
-      integer, intent(out) :: dsig_clip_flag
       real, intent(inout) :: x3d,y3d,z3d
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
 
       integer(i8) :: seed,state
       integer(i8), parameter :: im = 2147483647_i8
       real, parameter :: c0 = 6.0
-      real, parameter :: dsig_cap = 10.0
       real :: sig_eff,sig_prev,eps_eff,l_eff,fs_eff,noise_amp
       real :: normx,normy,normz
       real :: us_old,vs_old,ws_old
-      real :: a1,a2,a3,dsig_frac
+      real :: us_base,vs_base,ws_base
+      real :: a1,a3,dsig_frac,sig_fac
       double precision :: u1,u2,fac,theta
-
-      dsig_clip_flag = 0
 
       if( dt.le.0.0 ) return
 
@@ -2601,29 +2583,28 @@
       normz = real(fac*cos(theta))
 
       noise_amp = sqrt(max(fs_eff*c0*eps_eff*dt,0.0))
-      ! Bound the sigm_s change term to avoid one-step amplification
-      ! when particles cross sharp SGS-energy gradients.
+      ! This exact multiplicative rescaling replaces the explicit Euler a2 update
+      ! for the sigm_s time-change term.
       dsig_frac = log(sig_eff/sig_prev)
-      if( abs(dsig_frac).gt.dsig_cap ) dsig_clip_flag = 1
-      dsig_frac = max(-dsig_cap,min(dsig_cap,dsig_frac))
+      sig_fac = exp(0.5*fs_eff*dsig_frac)
 
       us_old = pdata(np,prusgs)
-      a1 = -0.5*fs_eff*c0*eps_eff*us_old/sig_eff
-      a2 = 0.5*fs_eff*us_old*dsig_frac/dt
+      us_base = us_old*sig_fac
+      a1 = -0.5*fs_eff*c0*eps_eff*us_base/sig_eff
       a3 = 0.5*fs_eff*dsgsdxval
-      pdata(np,prusgs) = us_old + (a1+a2+a3)*dt + noise_amp*normx
+      pdata(np,prusgs) = us_base + (a1+a3)*dt + noise_amp*normx
 
       vs_old = pdata(np,prvsgs)
-      a1 = -0.5*fs_eff*c0*eps_eff*vs_old/sig_eff
-      a2 = 0.5*fs_eff*vs_old*dsig_frac/dt
+      vs_base = vs_old*sig_fac
+      a1 = -0.5*fs_eff*c0*eps_eff*vs_base/sig_eff
       a3 = 0.5*fs_eff*dsgsdyval
-      pdata(np,prvsgs) = vs_old + (a1+a2+a3)*dt + noise_amp*normy
+      pdata(np,prvsgs) = vs_base + (a1+a3)*dt + noise_amp*normy
 
       ws_old = pdata(np,prwsgs)
-      a1 = -0.5*fs_eff*c0*eps_eff*ws_old/sig_eff
-      a2 = 0.5*fs_eff*ws_old*dsig_frac/dt
+      ws_base = ws_old*sig_fac
+      a1 = -0.5*fs_eff*c0*eps_eff*ws_base/sig_eff
       a3 = 0.5*fs_eff*dsgsdzval
-      pdata(np,prwsgs) = ws_old + (a1+a2+a3)*dt + noise_amp*normz
+      pdata(np,prwsgs) = ws_base + (a1+a3)*dt + noise_amp*normz
 
       if( nx.gt.1 .and. axisymm.ne.1 )then
         x3d = x3d + pdata(np,prusgs)*dt
