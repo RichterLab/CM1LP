@@ -7,8 +7,7 @@
             project_droplet_qc_effc, &
             droplet_diag,initialize_droplet_histograms, &
             check_droplet_ownership,particle_seed,ngidx, &
-            kohler_equil_radius,lognormal_droplet, &
-            droplet_sgs_num_dropsub_next,droplet_sgs_dlogsig_sum
+            kohler_equil_radius,lognormal_droplet
 
   !These are quantities which are needed in the droplet_diag output, so must be public
   real :: num100,num1000
@@ -26,12 +25,6 @@
   double precision :: mass_evap,mass_dpten
 
   real, allocatable, dimension(:) :: sfs_fs_profile
-  ! Lagged controller for SGS velocity substepping.  The target limits the
-  ! accumulated max abs(log(sigm_s_new/sigm_s_old)); the max is a safety guard.
-  real, parameter :: droplet_sgs_dlogsig_target = 0.5
-  integer, parameter :: droplet_sgs_num_dropsub_max = 20
-  real :: droplet_sgs_dlogsig_sum = 0.0
-  integer :: droplet_sgs_num_dropsub_next = 1
 
   integer :: particle_seed
 
@@ -629,15 +622,6 @@
           dlogsig_mean = real(dlogsig_sum/dble(dlogsig_count))
        else
           dlogsig_mean = 0.0
-       endif
-       ! Accumulate the globally reduced maximum over droplet substeps.  The
-       ! resulting lagged estimate sets the SGS substep count on the next call.
-       droplet_sgs_dlogsig_sum = droplet_sgs_dlogsig_sum + dlogsig_max
-       if (droplet_sgs_dlogsig_sum.gt.0.0) then
-          droplet_sgs_num_dropsub_next = max(1,min(droplet_sgs_num_dropsub_max, &
-               ceiling(droplet_sgs_dlogsig_sum/droplet_sgs_dlogsig_target)))
-       else
-          droplet_sgs_num_dropsub_next = 1
        endif
        if (myid.eq.0) then
           write(*,'(a,i8,a,f12.4,a,1pe12.4,a,1pe12.4,a,i12,a,i12,a,i12,a,i12,a,i12)') &
@@ -2658,8 +2642,8 @@
       dlogsig_abs = abs(dsig_frac)
       dlogsig_valid = 1
 
-      ! Advance all deterministic SFS velocity terms with the same Euler step;
-      ! droplet substepping is used to keep the sigm_s time-change term small.
+      ! Advance all deterministic SFS velocity terms with the same Euler step.
+      ! dlogsig_abs remains a diagnostic for the sigm_s time-change term.
       us_old = pdata(np,prusgs)
       a1 = -0.5*fs_eff*c0*eps_eff*us_old/sig_eff
       a2 = 0.5*fs_eff*us_old*dsig_frac/dt

@@ -162,8 +162,7 @@
           kd_turb,ud_rdamp,vd_rdamp,wd_rdamp,td_rdamp,td_hediff,td_vediff,qd_hediff,qd_vediff, &
           td_diss,td_rad,td_pbl,td_hturb,td_vturb,qd_hturb,qd_vturb,ud_pbl,vd_pbl,qd_pbl, &
           td_nudge,qd_nudge,prcl_droplet,ntwk,pdcomp,nbc,ebc,sbc,wbc,two_way_coupling, &
-          drop_sgs_opt,output_rain,output_sws,output_svs,output_sps,output_srs,output_sgs, &
-          output_sus,output_shs
+          output_rain,output_sws,output_svs,output_sps,output_srs,output_sgs,output_sus,output_shs
 
       use constants
       use bc_module, only: bc2d, bcs, bcu, bcv, bcw, bcwsfc, &
@@ -174,8 +173,7 @@
       use misclibs
       use parcel_module, only : parcel_driver
       use droplet_module, only : droplet_driver,droplet_injection_driver, &
-          compute_droplet_substeps,project_droplet_qc_effc, &
-          droplet_sgs_num_dropsub_next,droplet_sgs_dlogsig_sum
+          compute_droplet_substeps,project_droplet_qc_effc
       use pdcomp_module, only : pidcomp
       use lsnudge_module
       use ib_module
@@ -351,10 +349,9 @@
 #ifdef MPI
       integer :: reqp1,reqp2
 #endif
-      character(len=20) :: text1,text2,drop_substep_limiter
+      character(len=20) :: text1,text2
 
-      integer :: num_dropsub,num_dropsub_tauc,num_dropsub_sgs
-      integer :: i_dropsub,num_drop_fallout,num_drop_fallout_step
+      integer :: num_dropsub,i_dropsub,num_drop_fallout,num_drop_fallout_step
       real :: dt_dropsub
       double precision :: dbldt_dropsub,mtime_dropsub
 
@@ -962,41 +959,16 @@
         ifdroplet:  &
         if (prcl_droplet.ge.1) then
 
-          num_dropsub_tauc = 1
-          num_dropsub_sgs = 1
           if( ptype.eq.7 .and. two_way_coupling.eq.1 )then
-            call compute_droplet_substeps(dt,xf,yf,zf,sigmaf,pdata,pdata_locind,num_dropsub_tauc)
-          endif
-          if( drop_sgs_opt.eq.2 )then
-            num_dropsub_sgs = max(1,droplet_sgs_num_dropsub_next)
-            droplet_sgs_dlogsig_sum = 0.0
+            call compute_droplet_substeps(dt,xf,yf,zf,sigmaf,pdata,pdata_locind,num_dropsub)
           else
-            droplet_sgs_num_dropsub_next = 1
-            droplet_sgs_dlogsig_sum = 0.0
-          endif
-          num_dropsub = max(num_dropsub_tauc,num_dropsub_sgs)
-          ! Report which stability criterion set the droplet sub-loop count.
-          drop_substep_limiter = 'none'
-          if( num_dropsub.gt.1 )then
-            if( num_dropsub_tauc.eq.num_dropsub .and. num_dropsub_sgs.eq.num_dropsub )then
-              drop_substep_limiter = 'tauc+sgs'
-            elseif( num_dropsub_tauc.eq.num_dropsub )then
-              drop_substep_limiter = 'tauc'
-            elseif( num_dropsub_sgs.eq.num_dropsub )then
-              drop_substep_limiter = 'sgs'
-            endif
-          endif
-          if( drop_sgs_opt.eq.2 .and. num_dropsub_sgs.gt.1 .and. myid.eq.0 )then
-            write(*,'(a,i8,a,i8)') 'SGS drop substeps: ',num_dropsub_sgs, &
-                                   ' total drop substeps: ',num_dropsub
-            call flush(6)
+            num_dropsub = 1
           endif
           mtime_dropsub = mtime
           num_drop_fallout_step = 0
           do i_dropsub = 1,num_dropsub
 
-          if (myid.eq.0) write(*,'(a,i8,a,i8,a,a)') 'Drop sub-loop: ',i_dropsub, &
-                            ' out of ',num_dropsub,' limiter=',trim(drop_substep_limiter)
+          if (myid.eq.0) write(*,'(a,i8,a,i8)') 'Drop sub-loop: ',i_dropsub,' out of ',num_dropsub
 
           dt_dropsub = dt/real(num_dropsub)
           dbldt_dropsub = dbldt/dble(num_dropsub)
