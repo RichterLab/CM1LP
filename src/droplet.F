@@ -1424,7 +1424,7 @@
    subroutine droplet_coalescence_driver(dt,xf,yf,zf,sigmaf,pdata,pdata_locind)
 
       use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,npvals,nparcelsLocal, &
-          nparcelsLocalActive
+          nparcelsLocalActive,prrp,prmult,prms,prkap
       implicit none
 
       real, intent(in) :: dt
@@ -1442,9 +1442,14 @@
 
       integer :: nactive,nci,ncj,nck,ncoal_cells
       integer :: np,c,iflag,jflag,kflag,ci,cj,ck,cell,slot
+      integer :: first,last,p,j_idx,k_idx
       integer :: bad_cell_id,bad_pack_cursor,bad_pack_particles,packed_count
+      integer :: bad_pair
       integer, dimension(:), allocatable :: cell_id,cell_count,cell_start
       integer, dimension(:), allocatable :: cell_cursor,cell_particles
+      real :: xi_j,xi_k,remaining_j,gam_til,p_alpha
+      real :: r_j,r_k,ms_j,ms_k,kap_j,kap_k
+      real :: new_rad,new_ms,new_kap,new_mult_j,new_mult_k
 
       if( .not. coal_enabled ) return
       if( dt.le.0.0 ) return
@@ -1550,6 +1555,76 @@
 
       if( bad_pack_cursor.gt.0 .or. bad_pack_particles.gt.0 )then
         stop 'DROPLET COALESCENCE BAD PACKED LIST'
+      endif
+
+      bad_pair = 0
+      !$acc parallel loop gang default(present) &
+      !$acc private(first,last,p,j_idx,k_idx,xi_j,xi_k,remaining_j,gam_til,p_alpha) &
+      !$acc private(r_j,r_k,ms_j,ms_k,kap_j,kap_k,new_rad,new_ms,new_kap,new_mult_j,new_mult_k) &
+      !$acc reduction(+:bad_pair)
+      do c=1,ncoal_cells
+        first = cell_start(c)
+        last = cell_start(c+1)-1
+        do p=first,last-1,2
+          j_idx = cell_particles(p)
+          k_idx = cell_particles(p+1)
+
+          if( pdata(j_idx,prmult).lt.pdata(k_idx,prmult) )then
+            j_idx = cell_particles(p+1)
+            k_idx = cell_particles(p)
+          endif
+
+          xi_j = pdata(j_idx,prmult)
+          xi_k = pdata(k_idx,prmult)
+          r_j = pdata(j_idx,prrp)
+          r_k = pdata(k_idx,prrp)
+          ms_j = pdata(j_idx,prms)
+          ms_k = pdata(k_idx,prms)
+          kap_j = pdata(j_idx,prkap)
+          kap_k = pdata(k_idx,prkap)
+
+          if( xi_j.le.0.0 .or. xi_k.le.0.0 .or. r_j.le.0.0 .or. r_k.le.0.0 )then
+            bad_pair = bad_pair + 1
+          else
+            ! Prototype: force every candidate pair to coalesce once until
+            ! the physical collision kernel and probability are added.
+            p_alpha = 1.0
+            if( p_alpha.ge.1.0 )then
+              gam_til = 1.0
+              remaining_j = xi_j - gam_til*xi_k
+              new_rad = (gam_til*r_j**3 + r_k**3)**(1.0/3.0)
+              new_ms = gam_til*ms_j + ms_k
+              if( new_ms.gt.0.0 )then
+                new_kap = (gam_til*ms_j*kap_j + ms_k*kap_k)/new_ms
+              else
+                new_kap = 0.5*(kap_j + kap_k)
+              endif
+
+              if( remaining_j.gt.0.0 )then
+                pdata(j_idx,prmult) = remaining_j
+                pdata(k_idx,prrp) = new_rad
+                pdata(k_idx,prms) = new_ms
+                pdata(k_idx,prkap) = new_kap
+              else
+                new_mult_j = 0.5*xi_k
+                new_mult_k = xi_k - new_mult_j
+                pdata(j_idx,prmult) = new_mult_j
+                pdata(k_idx,prmult) = new_mult_k
+                pdata(j_idx,prrp) = new_rad
+                pdata(k_idx,prrp) = new_rad
+                pdata(j_idx,prms) = new_ms
+                pdata(k_idx,prms) = new_ms
+                pdata(j_idx,prkap) = new_kap
+                pdata(k_idx,prkap) = new_kap
+              endif
+            endif
+          endif
+        enddo
+      enddo
+      !$acc end parallel
+
+      if( bad_pair.gt.0 )then
+        stop 'DROPLET COALESCENCE BAD PAIR STATE'
       endif
 
       !$acc end data
