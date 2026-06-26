@@ -1002,7 +1002,7 @@
           num_drop_fallout_step = num_drop_fallout_step + num_drop_fallout
           if (i_dropsub.eq.num_dropsub) then
             if( ptype.eq.7 )then
-              call droplet_coalescence_driver(dt,xf,yf,zf,sigmaf,pdata,pdata_locind)
+              call droplet_coalescence_driver(dt,nstep,xf,yf,zf,sigmaf,pdata,pdata_locind)
             endif
             if( ptype.eq.7 .and. nqc.ge.1 )then
               call project_droplet_qc_effc(xf,yf,zf,sigmaf,rho,pdata,pdata_locind, &

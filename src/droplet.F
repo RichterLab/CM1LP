@@ -1421,15 +1421,16 @@
 
 !----------------------------------------------------------------------
 
-   subroutine droplet_coalescence_driver(dt,xf,yf,zf,sigmaf,pdata,pdata_locind)
+   subroutine droplet_coalescence_driver(dt,nstep,xf,yf,zf,sigmaf,pdata,pdata_locind)
 
       use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,npvals,nparcelsLocal, &
           nparcelsLocalActive,nx,ny,axisymm,terrain_flag, &
-          prx,pry,prz,prsig,prrp,prmult,prms,prkap
-      use constants, only : undefined_index
+          prx,pry,prz,prsig,prrp,prmult,prms,prkap,myid
+      use constants, only : undefined_index,i8
       implicit none
 
       real, intent(in) :: dt
+      integer, intent(in) :: nstep
       real, intent(in), dimension(ib:ie+1) :: xf
       real, intent(in), dimension(jb:je+1) :: yf
       real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: zf
@@ -1443,14 +1444,19 @@
       integer, parameter :: coal_nz = 1
       double precision, parameter :: coal_conservation_tol = 1.0d-4
       double precision, parameter :: coal_conservation_floor = 1.0d-30
+      integer(i8), parameter :: rng_im = 2147483647_i8
+      integer(i8), parameter :: rng_ia = 48271_i8
 
       integer :: nactive,nci,ncj,nck,ncoal_cells
       integer :: np,c,iflag,jflag,kflag,ci,cj,ck,cell,slot
-      integer :: first,last,p,j_idx,k_idx
+      integer :: first,last,j_idx,k_idx
+      integer :: ns_cell,npairs,pair,pos1,pos2,perm_a,perm_b
+      integer :: gcd_a,gcd_b,gcd_tmp
       integer :: bad_cell_id,bad_pack_cursor,bad_pack_particles,packed_count
       integer :: bad_pair
       integer, dimension(:), allocatable :: cell_id,cell_count,cell_start
       integer, dimension(:), allocatable :: cell_cursor,cell_particles
+      integer(i8) :: seed
       real :: xi_j,xi_k,remaining_j,gam_til,p_alpha
       real :: r_j,r_k,ms_j,ms_k,kap_j,kap_k
       real :: new_rad,new_ms,new_kap,new_mult_j,new_mult_k
@@ -1629,68 +1635,106 @@
       bad_pair = 0
       mult_loss = 0.0d0
       !$acc parallel loop gang default(present) &
-      !$acc private(first,last,p,j_idx,k_idx,xi_j,xi_k,remaining_j,gam_til,p_alpha) &
+      !$acc private(first,last,ns_cell,npairs,pair,pos1,pos2,perm_a,perm_b) &
+      !$acc private(gcd_a,gcd_b,gcd_tmp,seed,j_idx,k_idx,xi_j,xi_k,remaining_j,gam_til,p_alpha) &
       !$acc private(r_j,r_k,ms_j,ms_k,kap_j,kap_k,new_rad,new_ms,new_kap,new_mult_j,new_mult_k) &
       !$acc reduction(+:bad_pair) reduction(+:mult_loss)
       do c=1,ncoal_cells
         first = cell_start(c)
         last = cell_start(c+1)-1
-        do p=first,last-1,2
-          j_idx = cell_particles(p)
-          k_idx = cell_particles(p+1)
+        ns_cell = last - first + 1
+        npairs = ns_cell/2
+        if( npairs.gt.0 )then
+          seed = mod(104729_i8 + abs(int(nstep,i8))*1000003_i8, rng_im)
+          seed = mod(seed + abs(int(myid,i8))*9176_i8, rng_im)
+          seed = mod(seed + int(c,i8)*48271_i8, rng_im)
+          seed = mod(seed + int(ns_cell,i8)*69621_i8, rng_im)
+          if( seed.le.0_i8 ) seed = 1_i8
 
-          if( pdata(j_idx,prmult).lt.pdata(k_idx,prmult) )then
-            j_idx = cell_particles(p+1)
-            k_idx = cell_particles(p)
-          endif
+          seed = mod(rng_ia*seed, rng_im)
+          if( seed.le.0_i8 ) seed = seed + rng_im - 1_i8
+          perm_b = int(mod(seed,int(ns_cell,i8)))
 
-          xi_j = pdata(j_idx,prmult)
-          xi_k = pdata(k_idx,prmult)
-          r_j = pdata(j_idx,prrp)
-          r_k = pdata(k_idx,prrp)
-          ms_j = pdata(j_idx,prms)
-          ms_k = pdata(k_idx,prms)
-          kap_j = pdata(j_idx,prkap)
-          kap_k = pdata(k_idx,prkap)
+          seed = mod(rng_ia*seed, rng_im)
+          if( seed.le.0_i8 ) seed = seed + rng_im - 1_i8
+          perm_a = int(mod(seed,int(ns_cell,i8))) + 1
 
-          if( xi_j.le.0.0 .or. xi_k.le.0.0 .or. r_j.le.0.0 .or. r_k.le.0.0 )then
-            bad_pair = bad_pair + 1
-          else
-            ! Prototype: force every candidate pair to coalesce once until
-            ! the physical collision kernel and probability are added.
-            p_alpha = 1.0
-            if( p_alpha.ge.1.0 )then
-              gam_til = 1.0
-              remaining_j = xi_j - gam_til*xi_k
-              mult_loss = mult_loss + dble(gam_til*xi_k)
-              new_rad = (gam_til*r_j**3 + r_k**3)**(1.0/3.0)
-              new_ms = gam_til*ms_j + ms_k
-              if( new_ms.gt.0.0 )then
-                new_kap = (gam_til*ms_j*kap_j + ms_k*kap_k)/new_ms
-              else
-                new_kap = 0.5*(kap_j + kap_k)
-              endif
+          ! Affine permutation gives random non-overlapping pairs without
+          ! storing a shuffled particle list.
+          do
+            gcd_a = perm_a
+            gcd_b = ns_cell
+            do while( gcd_b.ne.0 )
+              gcd_tmp = mod(gcd_a,gcd_b)
+              gcd_a = gcd_b
+              gcd_b = gcd_tmp
+            enddo
+            if( gcd_a.eq.1 ) exit
+            perm_a = perm_a + 1
+            if( perm_a.gt.ns_cell ) perm_a = 1
+          enddo
 
-              if( remaining_j.gt.0.0 )then
-                pdata(j_idx,prmult) = remaining_j
-                pdata(k_idx,prrp) = new_rad
-                pdata(k_idx,prms) = new_ms
-                pdata(k_idx,prkap) = new_kap
-              else
-                new_mult_j = 0.5*xi_k
-                new_mult_k = xi_k - new_mult_j
-                pdata(j_idx,prmult) = new_mult_j
-                pdata(k_idx,prmult) = new_mult_k
-                pdata(j_idx,prrp) = new_rad
-                pdata(k_idx,prrp) = new_rad
-                pdata(j_idx,prms) = new_ms
-                pdata(k_idx,prms) = new_ms
-                pdata(j_idx,prkap) = new_kap
-                pdata(k_idx,prkap) = new_kap
+          do pair=0,npairs-1
+            pos1 = first + int(mod(int(perm_a,i8)*(2_i8*int(pair,i8)) &
+              + int(perm_b,i8),int(ns_cell,i8)))
+            pos2 = first + int(mod(int(perm_a,i8)*(2_i8*int(pair,i8)+1_i8) &
+              + int(perm_b,i8),int(ns_cell,i8)))
+            j_idx = cell_particles(pos1)
+            k_idx = cell_particles(pos2)
+
+            if( pdata(j_idx,prmult).lt.pdata(k_idx,prmult) )then
+              j_idx = cell_particles(pos2)
+              k_idx = cell_particles(pos1)
+            endif
+
+            xi_j = pdata(j_idx,prmult)
+            xi_k = pdata(k_idx,prmult)
+            r_j = pdata(j_idx,prrp)
+            r_k = pdata(k_idx,prrp)
+            ms_j = pdata(j_idx,prms)
+            ms_k = pdata(k_idx,prms)
+            kap_j = pdata(j_idx,prkap)
+            kap_k = pdata(k_idx,prkap)
+
+            if( xi_j.le.0.0 .or. xi_k.le.0.0 .or. r_j.le.0.0 .or. r_k.le.0.0 )then
+              bad_pair = bad_pair + 1
+            else
+              ! Prototype: force every candidate pair to coalesce once until
+              ! the physical collision kernel and probability are added.
+              p_alpha = 1.0
+              if( p_alpha.ge.1.0 )then
+                gam_til = 1.0
+                remaining_j = xi_j - gam_til*xi_k
+                mult_loss = mult_loss + dble(gam_til*xi_k)
+                new_rad = (gam_til*r_j**3 + r_k**3)**(1.0/3.0)
+                new_ms = gam_til*ms_j + ms_k
+                if( new_ms.gt.0.0 )then
+                  new_kap = (gam_til*ms_j*kap_j + ms_k*kap_k)/new_ms
+                else
+                  new_kap = 0.5*(kap_j + kap_k)
+                endif
+
+                if( remaining_j.gt.0.0 )then
+                  pdata(j_idx,prmult) = remaining_j
+                  pdata(k_idx,prrp) = new_rad
+                  pdata(k_idx,prms) = new_ms
+                  pdata(k_idx,prkap) = new_kap
+                else
+                  new_mult_j = 0.5*xi_k
+                  new_mult_k = xi_k - new_mult_j
+                  pdata(j_idx,prmult) = new_mult_j
+                  pdata(k_idx,prmult) = new_mult_k
+                  pdata(j_idx,prrp) = new_rad
+                  pdata(k_idx,prrp) = new_rad
+                  pdata(j_idx,prms) = new_ms
+                  pdata(k_idx,prms) = new_ms
+                  pdata(j_idx,prkap) = new_kap
+                  pdata(k_idx,prkap) = new_kap
+                endif
               endif
             endif
-          endif
-        enddo
+          enddo
+        endif
       enddo
       !$acc end parallel
 
