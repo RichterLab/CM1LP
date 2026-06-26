@@ -1439,6 +1439,8 @@
       integer, parameter :: coal_nx = 1
       integer, parameter :: coal_ny = 1
       integer, parameter :: coal_nz = 1
+      double precision, parameter :: coal_conservation_tol = 1.0d-4
+      double precision, parameter :: coal_conservation_floor = 1.0d-30
 
       integer :: nactive,nci,ncj,nck,ncoal_cells
       integer :: np,c,iflag,jflag,kflag,ci,cj,ck,cell,slot
@@ -1450,6 +1452,10 @@
       real :: xi_j,xi_k,remaining_j,gam_til,p_alpha
       real :: r_j,r_k,ms_j,ms_k,kap_j,kap_k
       real :: new_rad,new_ms,new_kap,new_mult_j,new_mult_k
+      double precision :: mult_before,mult_after,mult_loss
+      double precision :: water_before,water_after,solute_before,solute_after
+      double precision :: kappa_before,kappa_after
+      double precision :: mult_err,water_err,solute_err,kappa_err
 
       if( .not. coal_enabled ) return
       if( dt.le.0.0 ) return
@@ -1557,11 +1563,29 @@
         stop 'DROPLET COALESCENCE BAD PACKED LIST'
       endif
 
+      mult_before = 0.0d0
+      water_before = 0.0d0
+      solute_before = 0.0d0
+      kappa_before = 0.0d0
+      !$acc parallel loop gang vector default(present) &
+      !$acc reduction(+:mult_before,water_before,solute_before,kappa_before)
+      do np=1,nactive
+        mult_before = mult_before + dble(pdata(np,prmult))
+        water_before = water_before + dble(pdata(np,prmult)) &
+          *dble(pdata(np,prrp))**3
+        solute_before = solute_before + dble(pdata(np,prmult)) &
+          *dble(pdata(np,prms))
+        kappa_before = kappa_before + dble(pdata(np,prmult)) &
+          *dble(pdata(np,prms))*dble(pdata(np,prkap))
+      enddo
+      !$acc end parallel
+
       bad_pair = 0
+      mult_loss = 0.0d0
       !$acc parallel loop gang default(present) &
       !$acc private(first,last,p,j_idx,k_idx,xi_j,xi_k,remaining_j,gam_til,p_alpha) &
       !$acc private(r_j,r_k,ms_j,ms_k,kap_j,kap_k,new_rad,new_ms,new_kap,new_mult_j,new_mult_k) &
-      !$acc reduction(+:bad_pair)
+      !$acc reduction(+:bad_pair) reduction(+:mult_loss)
       do c=1,ncoal_cells
         first = cell_start(c)
         last = cell_start(c+1)-1
@@ -1592,6 +1616,7 @@
             if( p_alpha.ge.1.0 )then
               gam_til = 1.0
               remaining_j = xi_j - gam_til*xi_k
+              mult_loss = mult_loss + dble(gam_til*xi_k)
               new_rad = (gam_til*r_j**3 + r_k**3)**(1.0/3.0)
               new_ms = gam_til*ms_j + ms_k
               if( new_ms.gt.0.0 )then
@@ -1625,6 +1650,39 @@
 
       if( bad_pair.gt.0 )then
         stop 'DROPLET COALESCENCE BAD PAIR STATE'
+      endif
+
+      mult_after = 0.0d0
+      water_after = 0.0d0
+      solute_after = 0.0d0
+      kappa_after = 0.0d0
+      !$acc parallel loop gang vector default(present) &
+      !$acc reduction(+:mult_after,water_after,solute_after,kappa_after)
+      do np=1,nactive
+        mult_after = mult_after + dble(pdata(np,prmult))
+        water_after = water_after + dble(pdata(np,prmult)) &
+          *dble(pdata(np,prrp))**3
+        solute_after = solute_after + dble(pdata(np,prmult)) &
+          *dble(pdata(np,prms))
+        kappa_after = kappa_after + dble(pdata(np,prmult)) &
+          *dble(pdata(np,prms))*dble(pdata(np,prkap))
+      enddo
+      !$acc end parallel
+
+      mult_err = abs((mult_before-mult_after)-mult_loss) &
+        /max(abs(mult_before),coal_conservation_floor)
+      water_err = abs(water_after-water_before) &
+        /max(abs(water_before),coal_conservation_floor)
+      solute_err = abs(solute_after-solute_before) &
+        /max(abs(solute_before),coal_conservation_floor)
+      kappa_err = abs(kappa_after-kappa_before) &
+        /max(abs(kappa_before),coal_conservation_floor)
+
+      if( mult_err.gt.coal_conservation_tol .or. &
+          water_err.gt.coal_conservation_tol .or. &
+          solute_err.gt.coal_conservation_tol .or. &
+          kappa_err.gt.coal_conservation_tol )then
+        stop 'DROPLET COALESCENCE CONSERVATION CHECK FAILED'
       endif
 
       !$acc end data
