@@ -1425,8 +1425,8 @@
 
       use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,npvals,nparcelsLocal, &
           nparcelsLocalActive,nx,ny,axisymm,terrain_flag, &
-          prx,pry,prz,prsig,prrp,prmult,prms,prkap,myid
-      use constants, only : undefined_index,i8
+          prx,pry,prz,prsig,prrp,prmult,prms,prkap,prvpx,prvpy,prvpz,myid
+      use constants, only : undefined_index,i8,pi
       implicit none
 
       real, intent(in) :: dt
@@ -1451,16 +1451,20 @@
       integer :: np,c,iflag,jflag,kflag,ci,cj,ck,cell,slot
       integer :: first,last,j_idx,k_idx
       integer :: ns_cell,npairs,pair,pos1,pos2,perm_a,perm_b
+      integer :: ii,jj,kk,ilo,ihi,jlo,jhi,klo,khi
       integer :: gcd_a,gcd_b,gcd_tmp
       integer :: bad_cell_id,bad_pack_cursor,bad_pack_particles,packed_count
-      integer :: bad_pair
+      integer :: bad_cell_volume,bad_pair
       integer, dimension(:), allocatable :: cell_id,cell_count,cell_start
       integer, dimension(:), allocatable :: cell_cursor,cell_particles
+      real, dimension(:), allocatable :: cell_volume
       integer(i8) :: seed
-      real :: xi_j,xi_k,remaining_j,gam_til,p_alpha
+      real :: xi_j,xi_k,remaining_j,gam_til
       real :: r_j,r_k,ms_j,ms_k,kap_j,kap_k
       real :: new_rad,new_ms,new_kap,new_mult_j,new_mult_k
-      real :: x3d,y3d,z3d,sig3d
+      real :: x3d,y3d,z3d,sig3d,vol_tmp
+      double precision :: p_alpha,phi,frac_p,gm_real,gamma_cap
+      double precision :: veldiff,kernel,cell_dv,pair_factor
       double precision :: mult_before,mult_after,mult_loss
       double precision :: water_before,water_after,solute_before,solute_after
       double precision :: kappa_before,kappa_after
@@ -1482,9 +1486,9 @@
 
       allocate(cell_id(nactive),cell_count(ncoal_cells), &
                cell_start(ncoal_cells+1),cell_cursor(ncoal_cells), &
-               cell_particles(nactive))
+               cell_particles(nactive),cell_volume(ncoal_cells))
 
-      !$acc data create(cell_id,cell_count,cell_start,cell_cursor,cell_particles) &
+      !$acc data create(cell_id,cell_count,cell_start,cell_cursor,cell_particles,cell_volume) &
       !$acc      present(pdata,pdata_locind)
 
       !$acc parallel loop gang vector default(present)
@@ -1498,8 +1502,45 @@
       do c=1,ncoal_cells
         cell_count(c) = 0
         cell_cursor(c) = 0
+        cell_volume(c) = 0.0
       enddo
       !$acc end parallel
+
+      bad_cell_volume = 0
+      !$acc parallel loop gang vector default(present) &
+      !$acc private(ci,cj,ck,ii,jj,kk,ilo,ihi,jlo,jhi,klo,khi,vol_tmp) &
+      !$acc reduction(+:bad_cell_volume)
+      do c=1,ncoal_cells
+        ck = (c-1)/(nci*ncj) + 1
+        cj = ((c-1) - nci*ncj*(ck-1))/nci + 1
+        ci = c - nci*(cj-1) - nci*ncj*(ck-1)
+
+        ilo = (ci-1)*coal_nx + 1
+        ihi = min(ni,ci*coal_nx)
+        jlo = (cj-1)*coal_ny + 1
+        jhi = min(nj,cj*coal_ny)
+        klo = (ck-1)*coal_nz + 1
+        khi = min(nk,ck*coal_nz)
+
+        vol_tmp = 0.0
+        do kk=klo,khi
+        do jj=jlo,jhi
+        do ii=ilo,ihi
+          vol_tmp = vol_tmp + (xf(ii+1)-xf(ii))*(yf(jj+1)-yf(jj)) &
+            *(zf(ii,jj,kk+1)-zf(ii,jj,kk))
+        enddo
+        enddo
+        enddo
+        cell_volume(c) = vol_tmp
+        if( vol_tmp.le.0.0 )then
+          bad_cell_volume = bad_cell_volume + 1
+        endif
+      enddo
+      !$acc end parallel
+
+      if( bad_cell_volume.gt.0 )then
+        stop 'DROPLET COALESCENCE BAD CELL VOLUME'
+      endif
 
       bad_cell_id = 0
       !$acc parallel loop gang vector default(present) &
@@ -1637,6 +1678,7 @@
       !$acc parallel loop gang default(present) &
       !$acc private(first,last,ns_cell,npairs,pair,pos1,pos2,perm_a,perm_b) &
       !$acc private(gcd_a,gcd_b,gcd_tmp,seed,j_idx,k_idx,xi_j,xi_k,remaining_j,gam_til,p_alpha) &
+      !$acc private(phi,frac_p,gm_real,gamma_cap,veldiff,kernel,cell_dv,pair_factor) &
       !$acc private(r_j,r_k,ms_j,ms_k,kap_j,kap_k,new_rad,new_ms,new_kap,new_mult_j,new_mult_k) &
       !$acc reduction(+:bad_pair) reduction(+:mult_loss)
       do c=1,ncoal_cells
@@ -1699,11 +1741,27 @@
             if( xi_j.le.0.0 .or. xi_k.le.0.0 .or. r_j.le.0.0 .or. r_k.le.0.0 )then
               bad_pair = bad_pair + 1
             else
-              ! Prototype: force every candidate pair to coalesce once until
-              ! the physical collision kernel and probability are added.
-              p_alpha = 1.0
-              if( p_alpha.ge.1.0 )then
-                gam_til = 1.0
+              cell_dv = dble(cell_volume(c))
+              veldiff = sqrt( dble(pdata(j_idx,prvpx)-pdata(k_idx,prvpx))**2 &
+                + dble(pdata(j_idx,prvpy)-pdata(k_idx,prvpy))**2 &
+                + dble(pdata(j_idx,prvpz)-pdata(k_idx,prvpz))**2 )
+              kernel = dble(pi)*(dble(r_j)+dble(r_k))**2*veldiff
+              pair_factor = (dble(ns_cell)*(dble(ns_cell)-1.0d0)/2.0d0) &
+                /dble(npairs)
+              p_alpha = max(0.0d0,kernel*dble(dt)/cell_dv*dble(xi_j)*pair_factor)
+
+              seed = mod(rng_ia*seed, rng_im)
+              if( seed.le.0_i8 ) seed = seed + rng_im - 1_i8
+              phi = dble(seed)/dble(rng_im)
+              gm_real = aint(p_alpha)
+              frac_p = p_alpha - gm_real
+              if( phi.lt.frac_p )then
+                gm_real = gm_real + 1.0d0
+              endif
+              gamma_cap = aint(dble(xi_j)/dble(xi_k))
+
+              if( gm_real.gt.0.0d0 .and. gamma_cap.gt.0.0d0 )then
+                gam_til = real(min(gm_real,gamma_cap))
                 remaining_j = xi_j - gam_til*xi_k
                 mult_loss = mult_loss + dble(gam_til*xi_k)
                 new_rad = (gam_til*r_j**3 + r_k**3)**(1.0/3.0)
@@ -1777,7 +1835,7 @@
 
       !$acc end data
 
-      deallocate(cell_id,cell_count,cell_start,cell_cursor,cell_particles)
+      deallocate(cell_id,cell_count,cell_start,cell_cursor,cell_particles,cell_volume)
 
    end subroutine droplet_coalescence_driver
 
