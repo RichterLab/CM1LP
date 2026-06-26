@@ -1424,7 +1424,9 @@
    subroutine droplet_coalescence_driver(dt,xf,yf,zf,sigmaf,pdata,pdata_locind)
 
       use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,npvals,nparcelsLocal, &
-          nparcelsLocalActive,prrp,prmult,prms,prkap
+          nparcelsLocalActive,nx,ny,axisymm,terrain_flag, &
+          prx,pry,prz,prsig,prrp,prmult,prms,prkap
+      use constants, only : undefined_index
       implicit none
 
       real, intent(in) :: dt
@@ -1452,6 +1454,7 @@
       real :: xi_j,xi_k,remaining_j,gam_til,p_alpha
       real :: r_j,r_k,ms_j,ms_k,kap_j,kap_k
       real :: new_rad,new_ms,new_kap,new_mult_j,new_mult_k
+      real :: x3d,y3d,z3d,sig3d
       double precision :: mult_before,mult_after,mult_loss
       double precision :: water_before,water_after,solute_before,solute_after
       double precision :: kappa_before,kappa_after
@@ -1494,22 +1497,65 @@
 
       bad_cell_id = 0
       !$acc parallel loop gang vector default(present) &
-      !$acc private(iflag,jflag,kflag,ci,cj,ck,cell) reduction(+:bad_cell_id)
+      !$acc private(iflag,jflag,kflag,ci,cj,ck,cell,x3d,y3d,z3d,sig3d) &
+      !$acc reduction(+:bad_cell_id)
       do np=1,nactive
-        iflag = pdata_locind(np,1)
-        jflag = pdata_locind(np,2)
-        kflag = pdata_locind(np,3)
+        x3d = pdata(np,prx)
+        y3d = pdata(np,pry)
+        if( .not. terrain_flag )then
+          z3d = pdata(np,prz)
+        else
+          sig3d = pdata(np,prsig)
+        endif
 
-        if( iflag.ge.1 .and. iflag.le.ni .and. &
-            jflag.ge.1 .and. jflag.le.nj .and. &
-            kflag.ge.1 .and. kflag.le.nk )then
-          ci = (iflag-1)/coal_nx + 1
-          cj = (jflag-1)/coal_ny + 1
-          ck = (kflag-1)/coal_nz + 1
-          cell = ci + nci*(cj-1) + nci*ncj*(ck-1)
-          cell_id(np) = cell
-          !$acc atomic update
-          cell_count(cell) = cell_count(cell) + 1
+        iflag = undefined_index
+        jflag = undefined_index
+        kflag = undefined_index
+
+        IF(nx.eq.1)THEN
+          iflag = 1
+          pdata_locind(np,1) = iflag
+        ELSE
+          call find_horizontal_location_index (pdata_locind(np,1), x3d, ib, ie+1, xf, ni+1, iflag)
+        ENDIF
+
+        IF(axisymm.eq.1.or.ny.eq.1)THEN
+          jflag = 1
+          pdata_locind(np,2) = jflag
+        ELSE
+          call find_horizontal_location_index (pdata_locind(np,2), y3d, jb, je+1, yf, nj+1, jflag)
+        ENDIF
+
+        if( iflag.ge.1 .and. iflag.le.ni .and. jflag.ge.1 .and. jflag.le.nj )then
+          kflag = 1
+          if( .not. terrain_flag )then
+            if( z3d.ge.zf(iflag,jflag,kb) .and. z3d.le.zf(iflag,jflag,ke+1) )then
+              do while( z3d.gt.zf(iflag,jflag,kflag+1) )
+                kflag = kflag+1
+              enddo
+              pdata_locind(np,3) = kflag
+            else
+              kflag = undefined_index
+            endif
+          else
+            if( sig3d.ge.sigmaf(kb) .and. sig3d.le.sigmaf(ke+1) )then
+              call find_vertical_location_index (pdata_locind(np,3), sig3d, kb, ke+1, sigmaf, kflag, .TRUE.)
+            else
+              kflag = undefined_index
+            endif
+          endif
+
+          if( kflag.ge.1 .and. kflag.le.nk )then
+            ci = (iflag-1)/coal_nx + 1
+            cj = (jflag-1)/coal_ny + 1
+            ck = (kflag-1)/coal_nz + 1
+            cell = ci + nci*(cj-1) + nci*ncj*(ck-1)
+            cell_id(np) = cell
+            !$acc atomic update
+            cell_count(cell) = cell_count(cell) + 1
+          else
+            bad_cell_id = bad_cell_id + 1
+          endif
         else
           bad_cell_id = bad_cell_id + 1
         endif
