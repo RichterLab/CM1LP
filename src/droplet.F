@@ -4,7 +4,7 @@
 
   private
   public :: droplet_driver,droplet_injection_driver,compute_droplet_substeps, &
-            project_droplet_qc_effc, &
+            droplet_coalescence_driver,project_droplet_qc_effc, &
             droplet_diag,initialize_droplet_histograms, &
             check_droplet_ownership,particle_seed,ngidx, &
             kohler_equil_radius,lognormal_droplet
@@ -1418,6 +1418,45 @@
       endif
 
    end subroutine compute_droplet_substeps
+
+!----------------------------------------------------------------------
+
+   subroutine droplet_coalescence_driver(dt,xf,yf,zf,sigmaf,pdata,pdata_locind)
+
+      use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,npvals,nparcelsLocal, &
+          nparcelsLocalActive
+      implicit none
+
+      real, intent(in) :: dt
+      real, intent(in), dimension(ib:ie+1) :: xf
+      real, intent(in), dimension(jb:je+1) :: yf
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: zf
+      real, intent(in), dimension(kb:ke+1) :: sigmaf
+      real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
+      integer, intent(inout), dimension(nparcelsLocal,3) :: pdata_locind
+
+      logical, parameter :: coal_enabled = .true.
+      integer, parameter :: coal_nx = 1
+      integer, parameter :: coal_ny = 1
+      integer, parameter :: coal_nz = 1
+
+      integer :: nci,ncj,nck,ncoal_cells
+
+      if( .not. coal_enabled ) return
+      if( dt.le.0.0 ) return
+      if( nparcelsLocalActive.le.1 ) return
+
+      nci = max(1,(ni+coal_nx-1)/coal_nx)
+      ncj = max(1,(nj+coal_ny-1)/coal_ny)
+      nck = max(1,(nk+coal_nz-1)/coal_nz)
+      ncoal_cells = nci*ncj*nck
+
+      ! Placeholder for collision-cell binning.
+      if( ncoal_cells.lt.1 )then
+        stop 'DROPLET COALESCENCE BAD PROTOTYPE STATE'
+      endif
+
+   end subroutine droplet_coalescence_driver
 
 
    subroutine project_droplet_qc_effc(xf,yf,zf,sigmaf,rho,pdata,pdata_locind,q3d,qa,effc)

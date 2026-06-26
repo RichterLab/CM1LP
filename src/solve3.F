@@ -173,7 +173,8 @@
       use misclibs
       use parcel_module, only : parcel_driver
       use droplet_module, only : droplet_driver,droplet_injection_driver, &
-          compute_droplet_substeps,project_droplet_qc_effc
+          compute_droplet_substeps,droplet_coalescence_driver, &
+          project_droplet_qc_effc
       use pdcomp_module, only : pidcomp
       use lsnudge_module
       use ib_module
@@ -1000,6 +1001,9 @@
                                dpten,pdata_locind,nstep,num_drop_fallout)
           num_drop_fallout_step = num_drop_fallout_step + num_drop_fallout
           if (i_dropsub.eq.num_dropsub) then
+            if( ptype.eq.7 )then
+              call droplet_coalescence_driver(dt,xf,yf,zf,sigmaf,pdata,pdata_locind)
+            endif
             if( ptype.eq.7 .and. nqc.ge.1 )then
               call project_droplet_qc_effc(xf,yf,zf,sigmaf,rho,pdata,pdata_locind, &
                                            q3d,qa,effc)
