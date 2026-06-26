@@ -1440,21 +1440,121 @@
       integer, parameter :: coal_ny = 1
       integer, parameter :: coal_nz = 1
 
-      integer :: nci,ncj,nck,ncoal_cells
+      integer :: nactive,nci,ncj,nck,ncoal_cells
+      integer :: np,c,iflag,jflag,kflag,ci,cj,ck,cell,slot
+      integer :: bad_cell_id,bad_pack_cursor,bad_pack_particles,packed_count
+      integer, dimension(:), allocatable :: cell_id,cell_count,cell_start
+      integer, dimension(:), allocatable :: cell_cursor,cell_particles
 
       if( .not. coal_enabled ) return
       if( dt.le.0.0 ) return
       if( nparcelsLocalActive.le.1 ) return
 
+      nactive = nparcelsLocalActive
       nci = max(1,(ni+coal_nx-1)/coal_nx)
       ncj = max(1,(nj+coal_ny-1)/coal_ny)
       nck = max(1,(nk+coal_nz-1)/coal_nz)
       ncoal_cells = nci*ncj*nck
 
-      ! Placeholder for collision-cell binning.
       if( ncoal_cells.lt.1 )then
         stop 'DROPLET COALESCENCE BAD PROTOTYPE STATE'
       endif
+
+      allocate(cell_id(nactive),cell_count(ncoal_cells), &
+               cell_start(ncoal_cells+1),cell_cursor(ncoal_cells), &
+               cell_particles(nactive))
+
+      !$acc data create(cell_id,cell_count,cell_start,cell_cursor,cell_particles) &
+      !$acc      present(pdata,pdata_locind)
+
+      !$acc parallel loop gang vector default(present)
+      do np=1,nactive
+        cell_id(np) = 0
+        cell_particles(np) = 0
+      enddo
+      !$acc end parallel
+
+      !$acc parallel loop gang vector default(present)
+      do c=1,ncoal_cells
+        cell_count(c) = 0
+        cell_cursor(c) = 0
+      enddo
+      !$acc end parallel
+
+      bad_cell_id = 0
+      !$acc parallel loop gang vector default(present) &
+      !$acc private(iflag,jflag,kflag,ci,cj,ck,cell) reduction(+:bad_cell_id)
+      do np=1,nactive
+        iflag = pdata_locind(np,1)
+        jflag = pdata_locind(np,2)
+        kflag = pdata_locind(np,3)
+
+        if( iflag.ge.1 .and. iflag.le.ni .and. &
+            jflag.ge.1 .and. jflag.le.nj .and. &
+            kflag.ge.1 .and. kflag.le.nk )then
+          ci = (iflag-1)/coal_nx + 1
+          cj = (jflag-1)/coal_ny + 1
+          ck = (kflag-1)/coal_nz + 1
+          cell = ci + nci*(cj-1) + nci*ncj*(ck-1)
+          cell_id(np) = cell
+          !$acc atomic update
+          cell_count(cell) = cell_count(cell) + 1
+        else
+          bad_cell_id = bad_cell_id + 1
+        endif
+      enddo
+      !$acc end parallel
+
+      if( bad_cell_id.gt.0 )then
+        stop 'DROPLET COALESCENCE BAD CELL ID'
+      endif
+
+      !$acc serial present(cell_count,cell_start,cell_cursor)
+      packed_count = 1
+      do c=1,ncoal_cells
+        cell_start(c) = packed_count
+        cell_cursor(c) = packed_count
+        packed_count = packed_count + cell_count(c)
+      enddo
+      cell_start(ncoal_cells+1) = packed_count
+      !$acc end serial
+
+      !$acc parallel loop gang vector default(present) private(cell,slot)
+      do np=1,nactive
+        cell = cell_id(np)
+        !$acc atomic capture
+        slot = cell_cursor(cell)
+        cell_cursor(cell) = cell_cursor(cell) + 1
+        !$acc end atomic
+        cell_particles(slot) = np
+      enddo
+      !$acc end parallel
+
+      bad_pack_cursor = 0
+      !$acc parallel loop gang vector default(present) reduction(+:bad_pack_cursor)
+      do c=1,ncoal_cells
+        if( cell_cursor(c).ne.cell_start(c+1) )then
+          bad_pack_cursor = bad_pack_cursor + 1
+        endif
+      enddo
+      !$acc end parallel
+
+      bad_pack_particles = 0
+      !$acc parallel loop gang vector default(present) reduction(+:bad_pack_particles)
+      do np=1,nactive
+        if( cell_particles(np).lt.1 .or. cell_particles(np).gt.nactive )then
+          bad_pack_particles = bad_pack_particles + 1
+        endif
+      enddo
+      !$acc end parallel
+
+      if( bad_pack_cursor.gt.0 .or. bad_pack_particles.gt.0 )then
+        stop 'DROPLET COALESCENCE BAD PACKED LIST'
+      endif
+
+      !$acc end data
+
+      deallocate(cell_id,cell_count,cell_start,cell_cursor,cell_particles)
 
    end subroutine droplet_coalescence_driver
 
