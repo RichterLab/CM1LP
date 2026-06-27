@@ -1446,7 +1446,7 @@
       integer, parameter :: coal_nx = 1
       integer, parameter :: coal_ny = 1
       integer, parameter :: coal_nz = 1
-      integer, parameter :: coal_kernel = 0 ! 0: Golovin, 1: geometric E=1
+      integer, parameter :: coal_kernel = 2 ! 0: Golovin, 1: geometric E=1, 2: Long
       double precision, parameter :: coal_conservation_tol = 1.0d-4
       double precision, parameter :: coal_conservation_floor = 1.0d-30
       double precision, parameter :: coal_golovin_b = 1.5d3
@@ -1471,7 +1471,7 @@
       real :: x3d,y3d,z3d,sig3d,vol_tmp
       double precision :: p_alpha,phi,frac_p,gm_real,gamma_cap
       double precision :: veldiff,kernel,cell_dv,pair_factor
-      double precision :: pvol_j,pvol_k
+      double precision :: pvol_j,pvol_k,effic,rbig_um,rsmall_um
       double precision :: coal_pair_attempts_step,coal_pair_successes_step
       double precision :: coal_collision_mult_step,coal_palpha_sum_step
       double precision :: coal_palpha_max_step,coal_gamtil_max_step
@@ -1493,7 +1493,7 @@
       if( ncoal_cells.lt.1 )then
         stop 'DROPLET COALESCENCE BAD PROTOTYPE STATE'
       endif
-      if( coal_kernel.lt.0 .or. coal_kernel.gt.1 )then
+      if( coal_kernel.lt.0 .or. coal_kernel.gt.2 )then
         stop 'DROPLET COALESCENCE BAD KERNEL'
       endif
 
@@ -1698,6 +1698,7 @@
       !$acc private(first,last,ns_cell,npairs,pair,pos1,pos2,perm_a,perm_b) &
       !$acc private(gcd_a,gcd_b,gcd_tmp,seed,j_idx,k_idx,xi_j,xi_k,remaining_j,gam_til,p_alpha) &
       !$acc private(phi,frac_p,gm_real,gamma_cap,veldiff,kernel,cell_dv,pair_factor,pvol_j,pvol_k) &
+      !$acc private(effic,rbig_um,rsmall_um) &
       !$acc private(r_j,r_k,ms_j,ms_k,kap_j,kap_k,new_rad,new_ms,new_kap,new_mult_j,new_mult_k) &
       !$acc reduction(+:bad_pair) reduction(+:mult_loss) &
       !$acc reduction(+:coal_pair_attempts_step,coal_pair_successes_step,coal_collision_mult_step,coal_palpha_sum_step) &
@@ -1773,6 +1774,19 @@
                   + dble(pdata(j_idx,prvpy)-pdata(k_idx,prvpy))**2 &
                   + dble(pdata(j_idx,prvpz)-pdata(k_idx,prvpz))**2 )
                 kernel = dble(pi)*(dble(r_j)+dble(r_k))**2*veldiff
+              elseif( coal_kernel.eq.2 )then
+                veldiff = sqrt( dble(pdata(j_idx,prvpx)-pdata(k_idx,prvpx))**2 &
+                  + dble(pdata(j_idx,prvpy)-pdata(k_idx,prvpy))**2 &
+                  + dble(pdata(j_idx,prvpz)-pdata(k_idx,prvpz))**2 )
+                rbig_um = 1.0d6*max(dble(r_j),dble(r_k))
+                rsmall_um = 1.0d6*min(dble(r_j),dble(r_k))
+                if( rbig_um.le.50.0d0 )then
+                  effic = 4.5d-4*rbig_um**2 &
+                    *(1.0d0 - 3.0d0/(max(3.0d0,rsmall_um)+1.0d-2))
+                else
+                  effic = 1.0d0
+                endif
+                kernel = dble(pi)*effic*(dble(r_j)+dble(r_k))**2*veldiff
               else
                 kernel = 0.0d0
               endif
