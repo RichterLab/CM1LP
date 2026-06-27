@@ -1429,7 +1429,8 @@
 
       use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,npvals,nparcelsLocal, &
           nparcelsLocalActive,nx,ny,axisymm,terrain_flag, &
-          prx,pry,prz,prsig,prrp,prmult,prms,prkap,prvpx,prvpy,prvpz,myid
+          prx,pry,prz,prsig,prrp,prmult,prms,prkap,prvpx,prvpy,prvpz, &
+          coal_enabled,coal_kernel,myid
       use constants, only : undefined_index,i8,pi
       implicit none
 
@@ -1442,11 +1443,9 @@
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
       integer, intent(inout), dimension(nparcelsLocal,3) :: pdata_locind
 
-      logical, parameter :: coal_enabled = .true.
       integer, parameter :: coal_nx = 1
       integer, parameter :: coal_ny = 1
       integer, parameter :: coal_nz = 1
-      integer, parameter :: coal_kernel = 2 ! 0: Golovin, 1: geometric E=1, 2: Long
       double precision, parameter :: coal_conservation_tol = 1.0d-4
       double precision, parameter :: coal_conservation_floor = 1.0d-30
       double precision, parameter :: coal_golovin_b = 1.5d3
