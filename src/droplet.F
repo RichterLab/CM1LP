@@ -1446,8 +1446,10 @@
       integer, parameter :: coal_nx = 1
       integer, parameter :: coal_ny = 1
       integer, parameter :: coal_nz = 1
+      integer, parameter :: coal_kernel = 0 ! 0: Golovin, 1: geometric E=1
       double precision, parameter :: coal_conservation_tol = 1.0d-4
       double precision, parameter :: coal_conservation_floor = 1.0d-30
+      double precision, parameter :: coal_golovin_b = 1.5d3
       integer(i8), parameter :: rng_im = 2147483647_i8
       integer(i8), parameter :: rng_ia = 48271_i8
 
@@ -1469,6 +1471,7 @@
       real :: x3d,y3d,z3d,sig3d,vol_tmp
       double precision :: p_alpha,phi,frac_p,gm_real,gamma_cap
       double precision :: veldiff,kernel,cell_dv,pair_factor
+      double precision :: pvol_j,pvol_k
       double precision :: coal_pair_attempts_step,coal_pair_successes_step
       double precision :: coal_collision_mult_step,coal_palpha_sum_step
       double precision :: coal_palpha_max_step,coal_gamtil_max_step
@@ -1489,6 +1492,9 @@
 
       if( ncoal_cells.lt.1 )then
         stop 'DROPLET COALESCENCE BAD PROTOTYPE STATE'
+      endif
+      if( coal_kernel.lt.0 .or. coal_kernel.gt.1 )then
+        stop 'DROPLET COALESCENCE BAD KERNEL'
       endif
 
       allocate(cell_id(nactive),cell_count(ncoal_cells), &
@@ -1691,7 +1697,7 @@
       !$acc parallel loop gang default(present) &
       !$acc private(first,last,ns_cell,npairs,pair,pos1,pos2,perm_a,perm_b) &
       !$acc private(gcd_a,gcd_b,gcd_tmp,seed,j_idx,k_idx,xi_j,xi_k,remaining_j,gam_til,p_alpha) &
-      !$acc private(phi,frac_p,gm_real,gamma_cap,veldiff,kernel,cell_dv,pair_factor) &
+      !$acc private(phi,frac_p,gm_real,gamma_cap,veldiff,kernel,cell_dv,pair_factor,pvol_j,pvol_k) &
       !$acc private(r_j,r_k,ms_j,ms_k,kap_j,kap_k,new_rad,new_ms,new_kap,new_mult_j,new_mult_k) &
       !$acc reduction(+:bad_pair) reduction(+:mult_loss) &
       !$acc reduction(+:coal_pair_attempts_step,coal_pair_successes_step,coal_collision_mult_step,coal_palpha_sum_step) &
@@ -1758,10 +1764,18 @@
               bad_pair = bad_pair + 1
             else
               cell_dv = dble(cell_volume(c))
-              veldiff = sqrt( dble(pdata(j_idx,prvpx)-pdata(k_idx,prvpx))**2 &
-                + dble(pdata(j_idx,prvpy)-pdata(k_idx,prvpy))**2 &
-                + dble(pdata(j_idx,prvpz)-pdata(k_idx,prvpz))**2 )
-              kernel = dble(pi)*(dble(r_j)+dble(r_k))**2*veldiff
+              if( coal_kernel.eq.0 )then
+                pvol_j = (4.0d0/3.0d0)*dble(pi)*dble(r_j)**3
+                pvol_k = (4.0d0/3.0d0)*dble(pi)*dble(r_k)**3
+                kernel = coal_golovin_b*(pvol_j + pvol_k)
+              elseif( coal_kernel.eq.1 )then
+                veldiff = sqrt( dble(pdata(j_idx,prvpx)-pdata(k_idx,prvpx))**2 &
+                  + dble(pdata(j_idx,prvpy)-pdata(k_idx,prvpy))**2 &
+                  + dble(pdata(j_idx,prvpz)-pdata(k_idx,prvpz))**2 )
+                kernel = dble(pi)*(dble(r_j)+dble(r_k))**2*veldiff
+              else
+                kernel = 0.0d0
+              endif
               pair_factor = (dble(ns_cell)*(dble(ns_cell)-1.0d0)/2.0d0) &
                 /dble(npairs)
               p_alpha = max(0.0d0,kernel*dble(dt)/cell_dv*dble(xi_j)*pair_factor)
