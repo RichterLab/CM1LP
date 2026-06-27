@@ -1450,6 +1450,7 @@
       double precision, parameter :: coal_conservation_tol = 1.0d-4
       double precision, parameter :: coal_conservation_floor = 1.0d-30
       double precision, parameter :: coal_golovin_b = 1.5d3
+      real, parameter :: coal_real_huge = huge(1.0)
       integer(i8), parameter :: rng_im = 2147483647_i8
       integer(i8), parameter :: rng_ia = 48271_i8
 
@@ -1460,16 +1461,17 @@
       integer :: ii,jj,kk,ilo,ihi,jlo,jhi,klo,khi
       integer :: gcd_a,gcd_b,gcd_tmp
       integer :: bad_cell_id,bad_pack_cursor,bad_pack_particles,packed_count
-      integer :: bad_cell_volume,bad_pair
+      integer :: bad_cell_volume,bad_pair,bad_kernel,bad_state
       integer, dimension(:), allocatable :: cell_id,cell_count,cell_start
       integer, dimension(:), allocatable :: cell_cursor,cell_particles
       real, dimension(:), allocatable :: cell_volume
       integer(i8) :: seed
-      real :: xi_j,xi_k,remaining_j,gam_til
+      real :: xi_j,xi_k
       real :: r_j,r_k,ms_j,ms_k,kap_j,kap_k
-      real :: new_rad,new_ms,new_kap,new_mult_j,new_mult_k
       real :: x3d,y3d,z3d,sig3d,vol_tmp
       double precision :: p_alpha,phi,frac_p,gm_real,gamma_cap
+      double precision :: remaining_j,gam_til
+      double precision :: new_rad,new_ms,new_kap,new_mult_j,new_mult_k
       double precision :: veldiff,kernel,cell_dv,pair_factor
       double precision :: pvol_j,pvol_k,effic,rbig_um,rsmall_um
       double precision :: coal_pair_attempts_step,coal_pair_successes_step
@@ -1687,6 +1689,7 @@
       !$acc end parallel
 
       bad_pair = 0
+      bad_kernel = 0
       mult_loss = 0.0d0
       coal_pair_attempts_step = 0.0d0
       coal_pair_successes_step = 0.0d0
@@ -1700,7 +1703,7 @@
       !$acc private(phi,frac_p,gm_real,gamma_cap,veldiff,kernel,cell_dv,pair_factor,pvol_j,pvol_k) &
       !$acc private(effic,rbig_um,rsmall_um) &
       !$acc private(r_j,r_k,ms_j,ms_k,kap_j,kap_k,new_rad,new_ms,new_kap,new_mult_j,new_mult_k) &
-      !$acc reduction(+:bad_pair) reduction(+:mult_loss) &
+      !$acc reduction(+:bad_pair,bad_kernel) reduction(+:mult_loss) &
       !$acc reduction(+:coal_pair_attempts_step,coal_pair_successes_step,coal_collision_mult_step,coal_palpha_sum_step) &
       !$acc reduction(max:coal_palpha_max_step,coal_gamtil_max_step)
       do c=1,ncoal_cells
@@ -1761,7 +1764,15 @@
             kap_k = pdata(k_idx,prkap)
             coal_pair_attempts_step = coal_pair_attempts_step + 1.0d0
 
-            if( xi_j.le.0.0 .or. xi_k.le.0.0 .or. r_j.le.0.0 .or. r_k.le.0.0 )then
+            if( xi_j.ne.xi_j .or. xi_k.ne.xi_k .or. &
+                r_j.ne.r_j .or. r_k.ne.r_k .or. &
+                ms_j.ne.ms_j .or. ms_k.ne.ms_k .or. &
+                kap_j.ne.kap_j .or. kap_k.ne.kap_k .or. &
+                abs(dble(xi_j)).gt.huge(1.0d0) .or. &
+                abs(dble(xi_k)).gt.huge(1.0d0) .or. &
+                abs(dble(r_j)).gt.huge(1.0d0) .or. &
+                abs(dble(r_k)).gt.huge(1.0d0) .or. &
+                xi_j.le.0.0 .or. xi_k.le.0.0 .or. r_j.le.0.0 .or. r_k.le.0.0 )then
               bad_pair = bad_pair + 1
             else
               cell_dv = dble(cell_volume(c))
@@ -1786,6 +1797,7 @@
                 else
                   effic = 1.0d0
                 endif
+                effic = min(1.0d0,max(0.0d0,effic))
                 kernel = dble(pi)*effic*(dble(r_j)+dble(r_k))**2*veldiff
               else
                 kernel = 0.0d0
@@ -1793,50 +1805,75 @@
               pair_factor = (dble(ns_cell)*(dble(ns_cell)-1.0d0)/2.0d0) &
                 /dble(npairs)
               p_alpha = max(0.0d0,kernel*dble(dt)/cell_dv*dble(xi_j)*pair_factor)
-              coal_palpha_sum_step = coal_palpha_sum_step + p_alpha
-              coal_palpha_max_step = max(coal_palpha_max_step,p_alpha)
 
-              seed = mod(rng_ia*seed, rng_im)
-              if( seed.le.0_i8 ) seed = seed + rng_im - 1_i8
-              phi = dble(seed)/dble(rng_im)
-              gm_real = aint(p_alpha)
-              frac_p = p_alpha - gm_real
-              if( phi.lt.frac_p )then
-                gm_real = gm_real + 1.0d0
-              endif
-              gamma_cap = aint(dble(xi_j)/dble(xi_k))
+              if( kernel.ne.kernel .or. p_alpha.ne.p_alpha .or. &
+                  abs(kernel).gt.huge(1.0d0) .or. &
+                  abs(p_alpha).gt.huge(1.0d0) .or. &
+                  cell_dv.le.0.0d0 .or. kernel.lt.0.0d0 )then
+                bad_kernel = bad_kernel + 1
+              else
+                coal_palpha_sum_step = coal_palpha_sum_step + p_alpha
+                coal_palpha_max_step = max(coal_palpha_max_step,p_alpha)
 
-              if( gm_real.gt.0.0d0 .and. gamma_cap.gt.0.0d0 )then
-                gam_til = real(min(gm_real,gamma_cap))
-                remaining_j = xi_j - gam_til*xi_k
-                mult_loss = mult_loss + dble(gam_til*xi_k)
-                coal_pair_successes_step = coal_pair_successes_step + 1.0d0
-                coal_collision_mult_step = coal_collision_mult_step + dble(gam_til*xi_k)
-                coal_gamtil_max_step = max(coal_gamtil_max_step,dble(gam_til))
-                new_rad = (gam_til*r_j**3 + r_k**3)**(1.0/3.0)
-                new_ms = gam_til*ms_j + ms_k
-                if( new_ms.gt.0.0 )then
-                  new_kap = (gam_til*ms_j*kap_j + ms_k*kap_k)/new_ms
-                else
-                  new_kap = 0.5*(kap_j + kap_k)
+                seed = mod(rng_ia*seed, rng_im)
+                if( seed.le.0_i8 ) seed = seed + rng_im - 1_i8
+                phi = dble(seed)/dble(rng_im)
+                gm_real = aint(p_alpha)
+                frac_p = p_alpha - gm_real
+                if( phi.lt.frac_p )then
+                  gm_real = gm_real + 1.0d0
                 endif
+                gamma_cap = aint(dble(xi_j)/dble(xi_k))
 
-                if( remaining_j.gt.0.0 )then
-                  pdata(j_idx,prmult) = remaining_j
-                  pdata(k_idx,prrp) = new_rad
-                  pdata(k_idx,prms) = new_ms
-                  pdata(k_idx,prkap) = new_kap
+                if( gm_real.ne.gm_real .or. gamma_cap.ne.gamma_cap .or. &
+                    abs(gm_real).gt.huge(1.0d0) .or. &
+                    abs(gamma_cap).gt.huge(1.0d0) .or. &
+                    min(gm_real,gamma_cap).gt.dble(coal_real_huge) )then
+                  bad_kernel = bad_kernel + 1
                 else
-                  new_mult_j = 0.5*xi_k
-                  new_mult_k = xi_k - new_mult_j
-                  pdata(j_idx,prmult) = new_mult_j
-                  pdata(k_idx,prmult) = new_mult_k
-                  pdata(j_idx,prrp) = new_rad
-                  pdata(k_idx,prrp) = new_rad
-                  pdata(j_idx,prms) = new_ms
-                  pdata(k_idx,prms) = new_ms
-                  pdata(j_idx,prkap) = new_kap
-                  pdata(k_idx,prkap) = new_kap
+                  if( gm_real.gt.0.0d0 .and. gamma_cap.gt.0.0d0 )then
+                    gam_til = min(gm_real,gamma_cap)
+                    remaining_j = dble(xi_j) - gam_til*dble(xi_k)
+                    mult_loss = mult_loss + gam_til*dble(xi_k)
+                    coal_pair_successes_step = coal_pair_successes_step + 1.0d0
+                    coal_collision_mult_step = coal_collision_mult_step + gam_til*dble(xi_k)
+                    coal_gamtil_max_step = max(coal_gamtil_max_step,gam_til)
+                    new_rad = (gam_til*dble(r_j)**3 + dble(r_k)**3)**(1.0d0/3.0d0)
+                    new_ms = gam_til*dble(ms_j) + dble(ms_k)
+                    if( new_ms.gt.0.0d0 )then
+                      new_kap = (gam_til*dble(ms_j)*dble(kap_j) &
+                        + dble(ms_k)*dble(kap_k))/new_ms
+                    else
+                      new_kap = 0.5d0*(dble(kap_j) + dble(kap_k))
+                    endif
+
+                    if( new_rad.ne.new_rad .or. new_ms.ne.new_ms .or. &
+                        new_kap.ne.new_kap .or. &
+                        abs(new_rad).gt.dble(coal_real_huge) .or. &
+                        abs(new_ms).gt.dble(coal_real_huge) .or. &
+                        abs(new_kap).gt.dble(coal_real_huge) .or. &
+                        new_rad.le.0.0d0 )then
+                      bad_kernel = bad_kernel + 1
+                    else
+                      if( remaining_j.gt.0.0d0 )then
+                        pdata(j_idx,prmult) = remaining_j
+                        pdata(k_idx,prrp) = new_rad
+                        pdata(k_idx,prms) = new_ms
+                        pdata(k_idx,prkap) = new_kap
+                      else
+                        new_mult_j = 0.5d0*dble(xi_k)
+                        new_mult_k = dble(xi_k) - new_mult_j
+                        pdata(j_idx,prmult) = new_mult_j
+                        pdata(k_idx,prmult) = new_mult_k
+                        pdata(j_idx,prrp) = new_rad
+                        pdata(k_idx,prrp) = new_rad
+                        pdata(j_idx,prms) = new_ms
+                        pdata(k_idx,prms) = new_ms
+                        pdata(j_idx,prkap) = new_kap
+                        pdata(k_idx,prkap) = new_kap
+                      endif
+                    endif
+                  endif
                 endif
               endif
             endif
@@ -1853,7 +1890,41 @@
       coal_gamtil_max = max(coal_gamtil_max,coal_gamtil_max_step)
 
       if( bad_pair.gt.0 )then
+        print *,'DROPLET COALESCENCE BAD PAIR STATE DETAIL myid=',myid, &
+                ' nstep=',nstep,' bad_pair=',bad_pair
+        call flush(6)
         stop 'DROPLET COALESCENCE BAD PAIR STATE'
+      endif
+
+      if( bad_kernel.gt.0 )then
+        print *,'DROPLET COALESCENCE BAD KERNEL STATE DETAIL myid=',myid, &
+                ' nstep=',nstep,' bad_kernel=',bad_kernel
+        call flush(6)
+        stop 'DROPLET COALESCENCE BAD KERNEL STATE'
+      endif
+
+      bad_state = 0
+      !$acc parallel loop gang vector default(present) reduction(+:bad_state)
+      do np=1,nactive
+        if( pdata(np,prmult).ne.pdata(np,prmult) .or. &
+            pdata(np,prrp).ne.pdata(np,prrp) .or. &
+            pdata(np,prms).ne.pdata(np,prms) .or. &
+            pdata(np,prkap).ne.pdata(np,prkap) .or. &
+            abs(dble(pdata(np,prmult))).gt.huge(1.0d0) .or. &
+            abs(dble(pdata(np,prrp))).gt.huge(1.0d0) .or. &
+            abs(dble(pdata(np,prms))).gt.huge(1.0d0) .or. &
+            abs(dble(pdata(np,prkap))).gt.huge(1.0d0) .or. &
+            pdata(np,prmult).le.0.0 .or. pdata(np,prrp).le.0.0 )then
+          bad_state = bad_state + 1
+        endif
+      enddo
+      !$acc end parallel
+
+      if( bad_state.gt.0 )then
+        print *,'DROPLET COALESCENCE BAD OUTPUT STATE DETAIL myid=',myid, &
+                ' nstep=',nstep,' bad_state=',bad_state
+        call flush(6)
+        stop 'DROPLET COALESCENCE BAD OUTPUT STATE'
       endif
 
       mult_after = 0.0d0
