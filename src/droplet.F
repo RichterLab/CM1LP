@@ -23,6 +23,8 @@
   double precision :: eng_destroyed,eng_injected,m1_destroyed,m2_destroyed,m1_injected,m2_injected   !Same but for droplet internal energy and momentum
   double precision :: mass_reentry,eng_reentry,m1_reentry,m2_reentry
   double precision :: mass_evap,mass_dpten
+  double precision :: coal_pair_attempts,coal_pair_successes,coal_collision_mult
+  double precision :: coal_palpha_sum,coal_palpha_mean,coal_palpha_max,coal_gamtil_max
 
   real, allocatable, dimension(:) :: sfs_fs_profile
 
@@ -48,6 +50,8 @@
   !$acc                 num_injected,mass_destroyed,mass_injected, &
   !$acc                 mass_reentry,eng_reentry,m1_reentry,m2_reentry, &
   !$acc                 eng_destroyed,eng_injected,m1_destroyed,m2_destroyed,m1_injected,m2_injected, &
+  !$acc                 coal_pair_attempts,coal_pair_successes,coal_collision_mult, &
+  !$acc                 coal_palpha_sum,coal_palpha_mean,coal_palpha_max,coal_gamtil_max, &
   !$acc                 num100,num1000,ngidx)
 
   CONTAINS
@@ -1465,6 +1469,9 @@
       real :: x3d,y3d,z3d,sig3d,vol_tmp
       double precision :: p_alpha,phi,frac_p,gm_real,gamma_cap
       double precision :: veldiff,kernel,cell_dv,pair_factor
+      double precision :: coal_pair_attempts_step,coal_pair_successes_step
+      double precision :: coal_collision_mult_step,coal_palpha_sum_step
+      double precision :: coal_palpha_max_step,coal_gamtil_max_step
       double precision :: mult_before,mult_after,mult_loss
       double precision :: water_before,water_after,solute_before,solute_after
       double precision :: kappa_before,kappa_after
@@ -1675,12 +1682,20 @@
 
       bad_pair = 0
       mult_loss = 0.0d0
+      coal_pair_attempts_step = 0.0d0
+      coal_pair_successes_step = 0.0d0
+      coal_collision_mult_step = 0.0d0
+      coal_palpha_sum_step = 0.0d0
+      coal_palpha_max_step = 0.0d0
+      coal_gamtil_max_step = 0.0d0
       !$acc parallel loop gang default(present) &
       !$acc private(first,last,ns_cell,npairs,pair,pos1,pos2,perm_a,perm_b) &
       !$acc private(gcd_a,gcd_b,gcd_tmp,seed,j_idx,k_idx,xi_j,xi_k,remaining_j,gam_til,p_alpha) &
       !$acc private(phi,frac_p,gm_real,gamma_cap,veldiff,kernel,cell_dv,pair_factor) &
       !$acc private(r_j,r_k,ms_j,ms_k,kap_j,kap_k,new_rad,new_ms,new_kap,new_mult_j,new_mult_k) &
-      !$acc reduction(+:bad_pair) reduction(+:mult_loss)
+      !$acc reduction(+:bad_pair) reduction(+:mult_loss) &
+      !$acc reduction(+:coal_pair_attempts_step,coal_pair_successes_step,coal_collision_mult_step,coal_palpha_sum_step) &
+      !$acc reduction(max:coal_palpha_max_step,coal_gamtil_max_step)
       do c=1,ncoal_cells
         first = cell_start(c)
         last = cell_start(c+1)-1
@@ -1737,6 +1752,7 @@
             ms_k = pdata(k_idx,prms)
             kap_j = pdata(j_idx,prkap)
             kap_k = pdata(k_idx,prkap)
+            coal_pair_attempts_step = coal_pair_attempts_step + 1.0d0
 
             if( xi_j.le.0.0 .or. xi_k.le.0.0 .or. r_j.le.0.0 .or. r_k.le.0.0 )then
               bad_pair = bad_pair + 1
@@ -1749,6 +1765,8 @@
               pair_factor = (dble(ns_cell)*(dble(ns_cell)-1.0d0)/2.0d0) &
                 /dble(npairs)
               p_alpha = max(0.0d0,kernel*dble(dt)/cell_dv*dble(xi_j)*pair_factor)
+              coal_palpha_sum_step = coal_palpha_sum_step + p_alpha
+              coal_palpha_max_step = max(coal_palpha_max_step,p_alpha)
 
               seed = mod(rng_ia*seed, rng_im)
               if( seed.le.0_i8 ) seed = seed + rng_im - 1_i8
@@ -1764,6 +1782,9 @@
                 gam_til = real(min(gm_real,gamma_cap))
                 remaining_j = xi_j - gam_til*xi_k
                 mult_loss = mult_loss + dble(gam_til*xi_k)
+                coal_pair_successes_step = coal_pair_successes_step + 1.0d0
+                coal_collision_mult_step = coal_collision_mult_step + dble(gam_til*xi_k)
+                coal_gamtil_max_step = max(coal_gamtil_max_step,dble(gam_til))
                 new_rad = (gam_til*r_j**3 + r_k**3)**(1.0/3.0)
                 new_ms = gam_til*ms_j + ms_k
                 if( new_ms.gt.0.0 )then
@@ -1795,6 +1816,13 @@
         endif
       enddo
       !$acc end parallel
+
+      coal_pair_attempts = coal_pair_attempts + coal_pair_attempts_step
+      coal_pair_successes = coal_pair_successes + coal_pair_successes_step
+      coal_collision_mult = coal_collision_mult + coal_collision_mult_step
+      coal_palpha_sum = coal_palpha_sum + coal_palpha_sum_step
+      coal_palpha_max = max(coal_palpha_max,coal_palpha_max_step)
+      coal_gamtil_max = max(coal_gamtil_max,coal_gamtil_max_step)
 
       if( bad_pair.gt.0 )then
         stop 'DROPLET COALESCENCE BAD PAIR STATE'
@@ -3871,7 +3899,7 @@
 
       real :: tnumpart_r(nbins)
 
-      integer, parameter :: num0 = 33, num1 = 34   !Number of 0th and 1st order statistics in droplet_diag
+      integer, parameter :: num0 = 39, num1 = 34   !Number of 0th and 1st order statistics in droplet_diag
       real :: rad10_tmp,dry_rad10_tmp
       double precision :: qstar_tmp
       integer :: ibin,ibin_dry
@@ -3980,31 +4008,37 @@
       droplet_diag0(27) = eng_reentry
       droplet_diag0(28) = m1_reentry
       droplet_diag0(29) = m2_reentry
-      droplet_diag0(30) = radmin
-      droplet_diag0(31) = Tpmin
-      droplet_diag0(32) = radmax
-      droplet_diag0(33) = Tpmax
+      droplet_diag0(30) = coal_pair_attempts
+      droplet_diag0(31) = coal_pair_successes
+      droplet_diag0(32) = coal_collision_mult
+      droplet_diag0(33) = coal_palpha_sum
+      droplet_diag0(34) = radmin
+      droplet_diag0(35) = Tpmin
+      droplet_diag0(36) = radmax
+      droplet_diag0(37) = Tpmax
+      droplet_diag0(38) = coal_palpha_max
+      droplet_diag0(39) = coal_gamtil_max
 
       ! The root rank will collect the diagnostic from different MPI ranks
       if ( myid == 0 ) then
-         call mpi_reduce(MPI_IN_PLACE,droplet_diag0(1),num0-4,MPI_DOUBLE_PRECISION, &
+         call mpi_reduce(MPI_IN_PLACE,droplet_diag0(1),num0-6,MPI_DOUBLE_PRECISION, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
       else
-         call mpi_reduce(droplet_diag0(1),droplet_diag0(1),num0-4,MPI_DOUBLE_PRECISION, &
+         call mpi_reduce(droplet_diag0(1),droplet_diag0(1),num0-6,MPI_DOUBLE_PRECISION, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
       end if
       if ( myid == 0 ) then
-         call mpi_reduce(MPI_IN_PLACE,droplet_diag0(num0-3),2,MPI_DOUBLE_PRECISION, &
+         call mpi_reduce(MPI_IN_PLACE,droplet_diag0(num0-5),2,MPI_DOUBLE_PRECISION, &
                          MPI_MIN,0,MPI_COMM_WORLD,ierr)
       else
-         call mpi_reduce(droplet_diag0(num0-3),droplet_diag0(num0-3),2,MPI_DOUBLE_PRECISION, &
+         call mpi_reduce(droplet_diag0(num0-5),droplet_diag0(num0-5),2,MPI_DOUBLE_PRECISION, &
                          MPI_MIN,0,MPI_COMM_WORLD,ierr)
       end if
       if ( myid == 0 ) then
-         call mpi_reduce(MPI_IN_PLACE,droplet_diag0(num0-1),2,MPI_DOUBLE_PRECISION, &
+         call mpi_reduce(MPI_IN_PLACE,droplet_diag0(num0-3),4,MPI_DOUBLE_PRECISION, &
                          MPI_MAX,0,MPI_COMM_WORLD,ierr)
       else
-         call mpi_reduce(droplet_diag0(num0-1),droplet_diag0(num0-1),2,MPI_DOUBLE_PRECISION, &
+         call mpi_reduce(droplet_diag0(num0-3),droplet_diag0(num0-3),4,MPI_DOUBLE_PRECISION, &
                          MPI_MAX,0,MPI_COMM_WORLD,ierr)
       end if
       if ( myid == 0 ) then 
@@ -4037,10 +4071,16 @@
          eng_reentry = droplet_diag0(27)
          m1_reentry = droplet_diag0(28)
          m2_reentry = droplet_diag0(29)
-         radmin = droplet_diag0(30)
-         Tpmin = droplet_diag0(31)
-         radmax = droplet_diag0(32)
-         Tpmax = droplet_diag0(33)
+         coal_pair_attempts = droplet_diag0(30)
+         coal_pair_successes = droplet_diag0(31)
+         coal_collision_mult = droplet_diag0(32)
+         coal_palpha_sum = droplet_diag0(33)
+         radmin = droplet_diag0(34)
+         Tpmin = droplet_diag0(35)
+         radmax = droplet_diag0(36)
+         Tpmax = droplet_diag0(37)
+         coal_palpha_max = droplet_diag0(38)
+         coal_gamtil_max = droplet_diag0(39)
 #endif
          if (tnumpart .gt. 0.0) then
             radavg = radavg/dble(tnumpart)
@@ -4063,6 +4103,26 @@
          end if
 #ifdef MPI
       end if
+#endif
+
+      coal_palpha_mean = 0.0d0
+      if( coal_pair_attempts.gt.0.0d0 )then
+         coal_palpha_mean = coal_palpha_sum/coal_pair_attempts
+      endif
+
+#ifdef MPI
+      if( myid.eq.0 )then
+#endif
+      if( coal_pair_attempts.gt.0.0d0 )then
+         write(*,*) 'DROPLET COALESCENCE DIAG: attempts=',coal_pair_attempts, &
+                    ' successes=',coal_pair_successes, &
+                    ' collision_mult=',coal_collision_mult
+         write(*,*) 'DROPLET COALESCENCE DIAG: palpha_mean=',coal_palpha_mean, &
+                    ' palpha_max=',coal_palpha_max, &
+                    ' gamtil_max=',coal_gamtil_max
+      endif
+#ifdef MPI
+      endif
 #endif
 
 
@@ -4647,6 +4707,13 @@
       m2_injected = 0.0
       num100 = 0.0
       num1000 = 0.0
+      coal_pair_attempts = 0.0d0
+      coal_pair_successes = 0.0d0
+      coal_collision_mult = 0.0d0
+      coal_palpha_sum = 0.0d0
+      coal_palpha_mean = 0.0d0
+      coal_palpha_max = 0.0d0
+      coal_gamtil_max = 0.0d0
       
 
       !$acc update device (hist_restime,hist_fallrad,num_destroyed, &
@@ -4654,6 +4721,8 @@
       !$acc                eng_destroyed,m1_destroyed,m2_destroyed,eng_injected, &
       !$acc                mass_reentry,eng_reentry,m1_reentry,m2_reentry, &
       !$acc                m1_injected,m2_injected, &
+      !$acc                coal_pair_attempts,coal_pair_successes,coal_collision_mult, &
+      !$acc                coal_palpha_sum,coal_palpha_mean,coal_palpha_max,coal_gamtil_max, &
       !$acc                num100,num1000)
 
       !$acc end data
@@ -6080,6 +6149,13 @@
     m2_injected = 0.0
     num100 = 0.0
     num1000 = 0.0
+    coal_pair_attempts = 0.0d0
+    coal_pair_successes = 0.0d0
+    coal_collision_mult = 0.0d0
+    coal_palpha_sum = 0.0d0
+    coal_palpha_mean = 0.0d0
+    coal_palpha_max = 0.0d0
+    coal_gamtil_max = 0.0d0
 
     !$acc update device(hist_restime,hist_fallrad,restime_min, &
     !$acc               restime_max,restime_min10,restime_max10, &
@@ -6087,6 +6163,8 @@
     !$acc               num_destroyed,mass_destroyed,mass_evap,mass_dpten,num_injected,mass_injected, &
     !$acc               eng_destroyed,m1_destroyed,m2_destroyed,eng_injected,m1_injected,m2_injected, &
     !$acc               mass_reentry,eng_reentry,m1_reentry,m2_reentry, &
+    !$acc               coal_pair_attempts,coal_pair_successes,coal_collision_mult, &
+    !$acc               coal_palpha_sum,coal_palpha_mean,coal_palpha_max,coal_gamtil_max, &
     !$acc               num100,num1000)
 
     end subroutine initialize_droplet_histograms
@@ -6322,6 +6400,32 @@
     call disp_err( nf90_def_var(ncid,"m2_injected",nf90_float,timeid,varid) , .true. )
     call disp_err( nf90_put_att(ncid,varid,"long_name","Total y-momentum of droplets injected since last entry") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","kg-m/s") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"coal_pair_attempts",nf90_double,timeid,varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Number of sampled coalescence candidate pairs since last entry") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"coal_pair_successes",nf90_double,timeid,varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "Number of sampled coalescence pairs with nonzero collision count since last entry") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"coal_collision_mult",nf90_double,timeid,varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity removed by droplet coalescence since last entry") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"coal_palpha_mean",nf90_double,timeid,varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Mean coalescence p_alpha over sampled pairs since last entry") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","1") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"coal_palpha_max",nf90_double,timeid,varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Maximum coalescence p_alpha over sampled pairs since last entry") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","1") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"coal_gamtil_max",nf90_double,timeid,varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "Maximum effective coalescence event count gam_til since last entry") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","1") , .true. )
 
 
     !!1st order (horizontal averages)
@@ -6634,6 +6738,24 @@
 
     call disp_err( nf90_inq_varid(ncid,"m2_injected",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,m2_injected,(/time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"coal_pair_attempts",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,coal_pair_attempts,(/time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"coal_pair_successes",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,coal_pair_successes,(/time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"coal_collision_mult",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,coal_collision_mult,(/time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"coal_palpha_mean",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,coal_palpha_mean,(/time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"coal_palpha_max",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,coal_palpha_max,(/time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"coal_gamtil_max",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,coal_gamtil_max,(/time_index/)) , .true. )
 
     !!1st order
     call disp_err( nf90_inq_varid(ncid,"numconc",varid) , .true. )
