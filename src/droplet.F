@@ -43,6 +43,51 @@
   !For testing: set this parameter to ".false." to make droplet injection deterministic (not random)
   logical, parameter :: random_droplets = .true.
 
+  integer, parameter :: hall_nr = 15
+  integer, parameter :: hall_nq = 21
+  double precision, dimension(hall_nr), save :: hall_r0 = (/ &
+       6.0d0,  8.0d0, 10.0d0, 15.0d0, 20.0d0, &
+      25.0d0, 30.0d0, 40.0d0, 50.0d0, 60.0d0, &
+      70.0d0,100.0d0,150.0d0,200.0d0,300.0d0 /)
+  double precision, dimension(hall_nq), save :: hall_rat = (/ &
+      0.0d0, 0.05d0, 0.10d0, 0.15d0, 0.20d0, &
+      0.25d0,0.30d0, 0.35d0, 0.40d0, 0.45d0, &
+      0.50d0,0.55d0, 0.60d0, 0.65d0, 0.70d0, &
+      0.75d0,0.80d0, 0.85d0, 0.90d0, 0.95d0, 1.0d0 /)
+  double precision, dimension(hall_nr,hall_nq), save :: hall_ecoll = reshape((/ &
+      0.001d0,0.001d0,0.001d0,0.001d0,0.001d0,0.001d0,0.001d0,0.001d0,0.001d0,0.001d0, &
+      0.001d0,0.001d0,0.001d0,0.001d0,0.001d0,0.003d0,0.003d0,0.003d0,0.004d0,0.005d0, &
+      0.005d0,0.005d0,0.010d0,0.100d0,0.050d0,0.200d0,0.500d0,0.770d0,0.870d0,0.970d0, &
+      0.007d0,0.007d0,0.007d0,0.008d0,0.009d0,0.010d0,0.010d0,0.070d0,0.400d0,0.430d0, &
+      0.580d0,0.790d0,0.930d0,0.960d0,1.000d0,0.009d0,0.009d0,0.009d0,0.012d0,0.015d0, &
+      0.010d0,0.020d0,0.280d0,0.600d0,0.640d0,0.750d0,0.910d0,0.970d0,0.980d0,1.000d0, &
+      0.014d0,0.014d0,0.014d0,0.015d0,0.016d0,0.030d0,0.060d0,0.500d0,0.700d0,0.770d0, &
+      0.840d0,0.950d0,0.970d0,1.000d0,1.000d0,0.017d0,0.017d0,0.017d0,0.020d0,0.022d0, &
+      0.060d0,0.100d0,0.620d0,0.780d0,0.840d0,0.880d0,0.950d0,1.000d0,1.000d0,1.000d0, &
+      0.030d0,0.030d0,0.024d0,0.022d0,0.032d0,0.062d0,0.200d0,0.680d0,0.830d0,0.870d0, &
+      0.900d0,0.950d0,1.000d0,1.000d0,1.000d0,0.025d0,0.025d0,0.025d0,0.036d0,0.043d0, &
+      0.130d0,0.270d0,0.740d0,0.860d0,0.890d0,0.920d0,1.000d0,1.000d0,1.000d0,1.000d0, &
+      0.027d0,0.027d0,0.027d0,0.040d0,0.052d0,0.200d0,0.400d0,0.780d0,0.880d0,0.900d0, &
+      0.940d0,1.000d0,1.000d0,1.000d0,1.000d0,0.030d0,0.030d0,0.030d0,0.047d0,0.064d0, &
+      0.250d0,0.500d0,0.800d0,0.900d0,0.910d0,0.950d0,1.000d0,1.000d0,1.000d0,1.000d0, &
+      0.040d0,0.040d0,0.033d0,0.037d0,0.068d0,0.240d0,0.550d0,0.800d0,0.900d0,0.910d0, &
+      0.950d0,1.000d0,1.000d0,1.000d0,1.000d0,0.035d0,0.035d0,0.035d0,0.055d0,0.079d0, &
+      0.290d0,0.580d0,0.800d0,0.900d0,0.910d0,0.950d0,1.000d0,1.000d0,1.000d0,1.000d0, &
+      0.037d0,0.037d0,0.037d0,0.062d0,0.082d0,0.290d0,0.590d0,0.780d0,0.900d0,0.910d0, &
+      0.950d0,1.000d0,1.000d0,1.000d0,1.000d0,0.037d0,0.037d0,0.037d0,0.060d0,0.080d0, &
+      0.290d0,0.580d0,0.770d0,0.890d0,0.910d0,0.950d0,1.000d0,1.000d0,1.000d0,1.000d0, &
+      0.037d0,0.037d0,0.037d0,0.041d0,0.075d0,0.250d0,0.540d0,0.760d0,0.880d0,0.920d0, &
+      0.950d0,1.000d0,1.000d0,1.000d0,1.000d0,0.037d0,0.037d0,0.037d0,0.052d0,0.067d0, &
+      0.250d0,0.510d0,0.770d0,0.880d0,0.930d0,0.970d0,1.000d0,1.000d0,1.000d0,1.000d0, &
+      0.037d0,0.037d0,0.037d0,0.047d0,0.057d0,0.250d0,0.490d0,0.770d0,0.890d0,0.950d0, &
+      1.000d0,1.000d0,1.000d0,1.000d0,1.000d0,0.036d0,0.036d0,0.036d0,0.042d0,0.048d0, &
+      0.230d0,0.470d0,0.780d0,0.920d0,1.000d0,1.020d0,1.020d0,1.020d0,1.020d0,1.020d0, &
+      0.040d0,0.040d0,0.035d0,0.033d0,0.040d0,0.112d0,0.450d0,0.790d0,1.010d0,1.030d0, &
+      1.040d0,1.040d0,1.040d0,1.040d0,1.040d0,0.033d0,0.033d0,0.033d0,0.033d0,0.033d0, &
+      0.119d0,0.470d0,0.950d0,1.300d0,1.700d0,2.300d0,2.300d0,2.300d0,2.300d0,2.300d0, &
+      0.027d0,0.027d0,0.027d0,0.027d0,0.027d0,0.125d0,0.520d0,1.400d0,2.300d0,3.000d0, &
+      4.000d0,4.000d0,4.000d0,4.000d0,4.000d0 /), (/ hall_nr,hall_nq /))
+
   !$acc declare create (hist_restime,hist_radius,hist_dry_radius,hist_radius10, &
   !$acc                 hist_fallrad,restime_min,restime_max, &
   !$acc                 restime_min10,restime_max10,dhres,dhrad, &
@@ -53,6 +98,7 @@
   !$acc                 coal_pair_attempts,coal_pair_successes,coal_collision_mult, &
   !$acc                 coal_palpha_sum,coal_palpha_mean,coal_palpha_max,coal_gamtil_max, &
   !$acc                 num100,num1000,ngidx)
+  !$acc declare copyin(hall_r0,hall_rat,hall_ecoll)
 
   CONTAINS
 
@@ -1425,6 +1471,68 @@
 
 !----------------------------------------------------------------------
 
+   double precision function hall_effic_um(r1_um,r2_um)
+      !$acc routine seq
+      implicit none
+
+      double precision, intent(in) :: r1_um,r2_um
+
+      integer :: k,kk,ir,iq
+      double precision :: drop_ratio,p,q,rbig_um,rsmall_um,ek,ec
+
+      rbig_um = max(r1_um,r2_um)
+      rsmall_um = min(r1_um,r2_um)
+
+      if( rbig_um.le.0.0d0 )then
+        hall_effic_um = 0.0d0
+        return
+      endif
+
+      drop_ratio = min(1.0d0,max(0.0d0,rsmall_um/rbig_um))
+
+      ir = 1
+      if( rbig_um.gt.hall_r0(hall_nr) )then
+        ir = hall_nr + 1
+      else
+        do k=2,hall_nr
+          if( rbig_um.le.hall_r0(k) .and. rbig_um.ge.hall_r0(k-1) )then
+            ir = k
+            exit
+          endif
+        enddo
+      endif
+
+      iq = 2
+      do kk=2,hall_nq
+        if( drop_ratio.le.hall_rat(kk) )then
+          iq = kk
+          exit
+        endif
+      enddo
+
+      q = (drop_ratio-hall_rat(iq-1))/(hall_rat(iq)-hall_rat(iq-1))
+
+      if( ir.lt.hall_nr+1 )then
+        if( ir.ge.2 )then
+          p = (rbig_um-hall_r0(ir-1))/(hall_r0(ir)-hall_r0(ir-1))
+          ec = (1.0d0-p)*(1.0d0-q)*hall_ecoll(ir-1,iq-1) &
+             + p*(1.0d0-q)*hall_ecoll(ir,iq-1) &
+             + q*(1.0d0-p)*hall_ecoll(ir-1,iq) &
+             + p*q*hall_ecoll(ir,iq)
+        else
+          ec = (1.0d0-q)*hall_ecoll(1,iq-1) + q*hall_ecoll(1,iq)
+        endif
+      else
+        ek = (1.0d0-q)*hall_ecoll(hall_nr,iq-1) + q*hall_ecoll(hall_nr,iq)
+        ec = min(ek,1.0d0)
+      endif
+
+      hall_effic_um = max(0.0d0,ec)
+
+   end function hall_effic_um
+
+!----------------------------------------------------------------------
+
    subroutine droplet_coalescence_driver(dt,nstep,xf,yf,zf,sigmaf,pdata,pdata_locind)
 
       use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,npvals,nparcelsLocal, &
@@ -1494,7 +1602,7 @@
       if( ncoal_cells.lt.1 )then
         stop 'DROPLET COALESCENCE BAD PROTOTYPE STATE'
       endif
-      if( coal_kernel.lt.0 .or. coal_kernel.gt.2 )then
+      if( coal_kernel.lt.0 .or. coal_kernel.gt.3 )then
         stop 'DROPLET COALESCENCE BAD KERNEL'
       endif
 
@@ -1797,6 +1905,12 @@
                   effic = 1.0d0
                 endif
                 effic = min(1.0d0,max(0.0d0,effic))
+                kernel = dble(pi)*effic*(dble(r_j)+dble(r_k))**2*veldiff
+              elseif( coal_kernel.eq.3 )then
+                veldiff = sqrt( dble(pdata(j_idx,prvpx)-pdata(k_idx,prvpx))**2 &
+                  + dble(pdata(j_idx,prvpy)-pdata(k_idx,prvpy))**2 &
+                  + dble(pdata(j_idx,prvpz)-pdata(k_idx,prvpz))**2 )
+                effic = hall_effic_um(1.0d6*dble(r_j),1.0d6*dble(r_k))
                 kernel = dble(pi)*effic*(dble(r_j)+dble(r_k))**2*veldiff
               else
                 kernel = 0.0d0
