@@ -152,7 +152,7 @@
           kedq,nqdiag,ibdv,iedv,jbdv,jedv,kbdv,kedv,nudiag,nvdiag,nwdiag,ibdk,iedk,jbdk, &
           jedk,kbdk,kedk,nkdiag,ibdp,iedp,jbdp,jedp,kbdp,kedp,npdiag,ib2d,ie2d,jb2d,je2d, &
           nout2d,ib3d,ie3d,jb3d,je3d,kb3d,ke3d,nout3d,nf,nu,nv,nw,testcase,myid,timestats, &
-          psolver,dolsw,nqc,nqi,nnci,nncc,mytime,cm1setup,iusetke,sgsmodel,doimpl,iinit,ptype, &
+          psolver,dolsw,nqc,nqi,nnci,nncc,mytime,cm1setup,iusetke,sgsmodel,doimpl,iinit,ptype,coal_enabled, &
           time_prsrho,time_microphy,time_parcels,time_integ,time_dpc,time_poiss,time_swath,time_lb, & 
           ibw,ibe,ibs,ibn,imoist,irdamp,hrdamp,irbc,rdalpha,iptra,lspgrad,ierr,fcor,vmove, &
           umove,hurr_rad,difforder,idiff,nqv,eqtset,idiss,rterm,iice,nql1,nql2,nqs1,nqs2, &
@@ -1001,7 +1001,7 @@
                                dpten,pdata_locind,nstep,num_drop_fallout)
           num_drop_fallout_step = num_drop_fallout_step + num_drop_fallout
           if (i_dropsub.eq.num_dropsub) then
-            if( ptype.eq.7 )then
+            if( coal_enabled )then
               call droplet_coalescence_driver(dt,nstep,xf,yf,zf,sigmaf,pdata,pdata_locind)
             endif
             if( ptype.eq.7 .and. nqc.ge.1 )then
