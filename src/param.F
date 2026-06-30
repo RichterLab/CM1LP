@@ -2432,7 +2432,7 @@
 
       ! for parcels:
       nparcelsInit = max(1_i8,nparcelsInit)
-      IF( coal_kernel.lt.0 .or. coal_kernel.gt.3 )THEN
+      IF( coal_kernel.lt.0 .or. coal_kernel.gt.4 )THEN
         if(myid.eq.0)then
         print *
         print *,'  coal_kernel = ',coal_kernel

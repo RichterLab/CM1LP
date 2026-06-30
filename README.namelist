@@ -1611,7 +1611,8 @@
 
  coal_kernel   -  Lagrangian droplet coalescence kernel selector
                   (0 = Golovin, 1 = geometric with collection efficiency E=1,
-                   2 = Long, 3 = Hall)
+                   2 = Long, 3 = Hall,
+                   4 = Hall with SGS-velocity relative-speed enhancement)
 
 
 ------------------------------------------------------------------------

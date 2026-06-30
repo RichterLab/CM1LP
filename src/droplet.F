@@ -1538,7 +1538,7 @@
       use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,npvals,nparcelsLocal, &
           nparcelsLocalActive,nx,ny,axisymm,terrain_flag, &
           prx,pry,prz,prsig,prrp,prmult,prms,prkap,prvpx,prvpy,prvpz, &
-          coal_enabled,coal_kernel,myid
+          prusgs,prvsgs,prwsgs,coal_enabled,coal_kernel,myid
       use constants, only : undefined_index,i8,pi
       implicit none
 
@@ -1602,7 +1602,7 @@
       if( ncoal_cells.lt.1 )then
         stop 'DROPLET COALESCENCE BAD PROTOTYPE STATE'
       endif
-      if( coal_kernel.lt.0 .or. coal_kernel.gt.3 )then
+      if( coal_kernel.lt.0 .or. coal_kernel.gt.4 )then
         stop 'DROPLET COALESCENCE BAD KERNEL'
       endif
 
@@ -1910,6 +1910,15 @@
                 veldiff = sqrt( dble(pdata(j_idx,prvpx)-pdata(k_idx,prvpx))**2 &
                   + dble(pdata(j_idx,prvpy)-pdata(k_idx,prvpy))**2 &
                   + dble(pdata(j_idx,prvpz)-pdata(k_idx,prvpz))**2 )
+                effic = hall_effic_um(1.0d6*dble(r_j),1.0d6*dble(r_k))
+                kernel = dble(pi)*effic*(dble(r_j)+dble(r_k))**2*veldiff
+              elseif( coal_kernel.eq.4 )then
+                veldiff = sqrt( dble(pdata(j_idx,prvpx)+pdata(j_idx,prusgs) &
+                  - pdata(k_idx,prvpx)-pdata(k_idx,prusgs))**2 &
+                  + dble(pdata(j_idx,prvpy)+pdata(j_idx,prvsgs) &
+                  - pdata(k_idx,prvpy)-pdata(k_idx,prvsgs))**2 &
+                  + dble(pdata(j_idx,prvpz)+pdata(j_idx,prwsgs) &
+                  - pdata(k_idx,prvpz)-pdata(k_idx,prwsgs))**2 )
                 effic = hall_effic_um(1.0d6*dble(r_j),1.0d6*dble(r_k))
                 kernel = dble(pi)*effic*(dble(r_j)+dble(r_k))**2*veldiff
               else
