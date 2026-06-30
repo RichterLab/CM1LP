@@ -25,6 +25,9 @@
   double precision :: mass_evap,mass_dpten
   double precision :: coal_pair_attempts,coal_pair_successes,coal_collision_mult
   double precision :: coal_palpha_sum,coal_palpha_mean,coal_palpha_max,coal_gamtil_max
+  logical :: coal_driver_reported = .false.
+  logical :: coal_grid_reported = .false.
+  logical :: coal_zero_attempts_reported = .false.
 
   real, allocatable, dimension(:) :: sfs_fs_profile
 
@@ -1584,11 +1587,20 @@
       double precision :: coal_pair_attempts_step,coal_pair_successes_step
       double precision :: coal_collision_mult_step,coal_palpha_sum_step
       double precision :: coal_palpha_max_step,coal_gamtil_max_step
+      double precision :: coal_pair_cells_step,coal_candidate_pairs_step
       double precision :: mult_before,mult_after,mult_loss
       double precision :: water_before,water_after,solute_before,solute_after
       double precision :: kappa_before,kappa_after
       double precision :: mult_err,water_err,solute_err,kappa_err
+      integer :: coal_max_cell_count_step
 
+      if( myid.eq.0 .and. .not. coal_driver_reported )then
+        print *,'DROPLET COALESCENCE CALL: nstep=',nstep, &
+                ' enabled=',coal_enabled,' kernel=',coal_kernel, &
+                ' nactive=',nparcelsLocalActive,' dt=',dt
+        call flush(6)
+        coal_driver_reported = .true.
+      endif
       if( .not. coal_enabled ) return
       if( dt.le.0.0 ) return
       if( nparcelsLocalActive.le.1 ) return
@@ -1598,6 +1610,15 @@
       ncj = max(1,(nj+coal_ny-1)/coal_ny)
       nck = max(1,(nk+coal_nz-1)/coal_nz)
       ncoal_cells = nci*ncj*nck
+
+      if( myid.eq.0 .and. .not. coal_grid_reported )then
+        print *,'DROPLET COALESCENCE GRID: coal_nx=',coal_nx, &
+                ' coal_ny=',coal_ny,' coal_nz=',coal_nz, &
+                ' nci=',nci,' ncj=',ncj,' nck=',nck, &
+                ' ncoal_cells=',ncoal_cells
+        call flush(6)
+        coal_grid_reported = .true.
+      endif
 
       if( ncoal_cells.lt.1 )then
         stop 'DROPLET COALESCENCE BAD PROTOTYPE STATE'
@@ -2010,6 +2031,29 @@
       coal_palpha_sum = coal_palpha_sum + coal_palpha_sum_step
       coal_palpha_max = max(coal_palpha_max,coal_palpha_max_step)
       coal_gamtil_max = max(coal_gamtil_max,coal_gamtil_max_step)
+
+      if( myid.eq.0 .and. coal_pair_attempts_step.le.0.0d0 .and. &
+          .not. coal_zero_attempts_reported )then
+        !$acc update host(cell_count)
+        coal_pair_cells_step = 0.0d0
+        coal_candidate_pairs_step = 0.0d0
+        coal_max_cell_count_step = 0
+        do c=1,ncoal_cells
+          ns_cell = cell_count(c)
+          if( ns_cell.ge.2 )then
+            coal_pair_cells_step = coal_pair_cells_step + 1.0d0
+            coal_candidate_pairs_step = coal_candidate_pairs_step + dble(ns_cell/2)
+          endif
+          coal_max_cell_count_step = max(coal_max_cell_count_step,ns_cell)
+        enddo
+        print *,'DROPLET COALESCENCE ZERO ATTEMPTS: myid=',myid, &
+                ' nstep=',nstep,' nactive=',nactive, &
+                ' pair_cells=',coal_pair_cells_step, &
+                ' candidate_pairs=',coal_candidate_pairs_step, &
+                ' max_cell_count=',coal_max_cell_count_step
+        call flush(6)
+        coal_zero_attempts_reported = .true.
+      endif
 
       if( bad_pair.gt.0 )then
         print *,'DROPLET COALESCENCE BAD PAIR STATE DETAIL myid=',myid, &
