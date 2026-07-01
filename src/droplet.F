@@ -42,6 +42,14 @@
 
   !For testing: set this parameter to ".false." to make droplet injection deterministic (not random)
   logical, parameter :: random_droplets = .true.
+  integer, parameter :: ssgf_nbin = 100
+  double precision :: ssgf_binsdata(ssgf_nbin) = 0.0d0
+  double precision :: ssgf_binsdata10(ssgf_nbin) = 0.0d0
+  double precision :: ssgf_binsdata_edge(ssgf_nbin+1) = 0.0d0
+  double precision :: ssgf_binsdata10_edge(ssgf_nbin+1) = 0.0d0
+  logical :: ssgf_bins_initialized = .false.
+  double precision :: drop_inject_bin_owed(ssgf_nbin) = 0.0d0
+  logical :: drop_inject_zero_warned = .false.
 
   integer, parameter :: hall_nr = 15
   integer, parameter :: hall_nq = 21
@@ -867,7 +875,7 @@
     call comm_droplet_number(numHoles,Depart,Arrive)
     !$acc wait
 
-    
+
     ! On the CPU assigns pointers (ptrArrive) into indirect address 
     ! array (holes_ind) for arriving droplets
     call setupIndexPointers(Arrive,ptrArrive)
@@ -2253,15 +2261,19 @@
       integer, intent(in) :: num_fallout
 
       integer :: i,j,np,iflag,jflag,kflag
-      integer :: doinject,my_reintro
+      integer :: doinject,my_reintro,scheduled_inject
       real :: x3d,y3d,z3d,sig3d
-      integer(i8) :: np_tmp,total_fallout
+      integer(i8) :: np_tmp,total_fallout,total_request
+      integer(i8) :: bin_request(ssgf_nbin),bin_inserted(ssgf_nbin)
       real :: uval,vval,wval,qval,prsval,tval,rhoval,sigdot
       real :: radmin,radmax,Tpmin,Tpmax
       real :: qfmin,qfmax,Tfmin,Tfmax
       real :: prsmin,prsmax,rhomin,rhomax
       real :: usgsmin,usgsmax,vsgsmin,vsgsmax,wsgsmin,wsgsmax
       real :: minvals(9),maxvals(9)
+      real, parameter :: drop_inject_elapse_tol = 10.0*epsilon(1.0)
+      double precision :: source_dt,source_time0,source_time1
+      double precision :: bin_source_rate(ssgf_nbin)
 
       !----------------------------------------------------------------------
       ! Final thing: Inject droplets which will be active on the next call of droplet_driver
@@ -2281,21 +2293,62 @@
 
 
       doinject = 0
+      scheduled_inject = 0
+      my_reintro = 0
       total_fallout = 0_i8
+      total_request = 0_i8
+      bin_request(:) = 0_i8
+      bin_inserted(:) = 0_i8
+      bin_source_rate(:) = 0.0d0
+      source_time0 = mtime
+      source_time1 = mtime + dble(dt)
+      source_dt = 0.0d0
 
-      !Only inject if a certain time has elapsed (specified in the namelist file)
-      !Negative drop_inject_elapse means inject every time step
-      if (drop_inject_elapse .lt. 0.0) then
-         doinject = 1
-      elseif (floor(mtime/drop_inject_elapse) .ne. floor((mtime+dt)/drop_inject_elapse)) then
-         doinject = 1
+      ! Testcases 15 and 16 have time-based droplet sources.  Accumulate
+      ! their continuous source over the actual timestep first; only later
+      ! decide whether accumulated source should be materialized as particles.
+      if (testcase.eq.15 .or. testcase.eq.16) then
+         ! A zero injection interval would make the schedule ambiguous, so
+         ! treat it as an explicit "off" state and warn only once.
+         if (abs(drop_inject_elapse) .le. drop_inject_elapse_tol) then
+            if (myid.eq.0 .and. .not. drop_inject_zero_warned) then
+               write(*,*) 'WARNING drop_inject_elapse is near zero; disabling scheduled droplet injection'
+            end if
+            drop_inject_zero_warned = .true.
+         else
+            ! Only the portion of this timestep after drop_inject_time
+            ! contributes source.  This keeps adaptive dt cases tied to
+            ! elapsed physical time instead of the materialization interval.
+            source_dt = max(0.0d0,source_time1 - max(source_time0,dble(drop_inject_time)))
+            if (source_dt .gt. 0.0d0) then
+               call droplet_scheduled_bin_source(testcase,bin_source_rate)
+               do i=1,ssgf_nbin
+                  drop_inject_bin_owed(i) = drop_inject_bin_owed(i) + bin_source_rate(i)*source_dt
+               end do
+
+               ! Negative drop_inject_elapse means materialize every timestep.
+               ! Positive values materialize only when this timestep crosses
+               ! a scheduled interval boundary measured from drop_inject_time.
+               if (drop_inject_elapse .lt. -drop_inject_elapse_tol) then
+                  scheduled_inject = 1
+               elseif (drop_inject_elapse .gt. drop_inject_elapse_tol) then
+                  ! If this is the first timestep with active source, allow
+                  ! immediate materialization rather than waiting one interval.
+                  if (source_time0 .le. dble(drop_inject_time)) then
+                     scheduled_inject = 1
+                  elseif (floor((source_time0-dble(drop_inject_time))/dble(drop_inject_elapse)) .ne. &
+                          floor((source_time1-dble(drop_inject_time))/dble(drop_inject_elapse))) then
+                     scheduled_inject = 1
+                  end if
+               end if
+            end if
+         end if
       end if
+      doinject = scheduled_inject
 
-      !Only inject if past a certain time (specified in the namelist file)
-      if (mtime .lt. drop_inject_time) then
-         doinject=0
-      end if
-
+      ! Testcase 17 is event-driven: reinject according to how many particles
+      ! fell out during this timestep, independent of the scheduled source
+      ! accumulator used by testcases 15 and 16.
       if (testcase.eq.17) then
          total_fallout = int(num_fallout,i8)
 #ifdef MPI
@@ -2309,16 +2362,35 @@
 
       if (doinject .eq. 1) then
 
-        my_reintro = 0
-
-        if (testcase.eq.15) then  !Hurricane boundary layer spray LES case
-          call droplet_injection(pdata,xf,yf,max(drop_inject_elapse,dt),mtime,my_reintro)
+        ! Convert accumulated fractional source into integer bin requests at
+        ! materialization time.  The largest-remainder selection avoids losing
+        ! source to per-bin truncation.
+        if (scheduled_inject.eq.1 .and. (testcase.eq.15 .or. testcase.eq.16)) then
+          call droplet_bin_request(drop_inject_bin_owed,bin_request,total_request)
         end if
 
-        if (testcase.eq.16) then  !Pi chamber
-          call droplet_injection_pi(pdata,xf,yf,max(drop_inject_elapse,dt),mtime,my_reintro)
+        ! Testcase 15 interprets the bin requests as a sea-spray size
+        ! distribution.  Testcase 16 currently uses the same bin accumulator
+        ! but materializes monodisperse PI chamber droplets.
+        if (testcase.eq.15 .and. total_request.gt.0_i8) then  !Hurricane boundary layer spray LES case
+          call droplet_injection(pdata,xf,yf,bin_request,mtime,my_reintro,bin_inserted)
         end if
 
+        if (testcase.eq.16 .and. total_request.gt.0_i8) then  !Pi chamber
+          call droplet_injection_pi(pdata,xf,yf,bin_request,mtime,my_reintro,bin_inserted)
+        end if
+
+        ! Subtract only what was actually inserted.  If capacity checks reject
+        ! the injection, bin_inserted remains zero and the accumulated source
+        ! stays owed for a later materialization attempt.
+        if (scheduled_inject.eq.1 .and. (testcase.eq.15 .or. testcase.eq.16)) then
+          do i=1,ssgf_nbin
+             drop_inject_bin_owed(i) = max(0.0d0,drop_inject_bin_owed(i)-dble(bin_inserted(i)))
+          end do
+        end if
+
+        ! Fallout reinjection is intentionally kept separate from the scheduled
+        ! source accumulator because its source is the per-rank fallout count.
         if (testcase.eq.17) then
           call droplet_fallout_reinjection(pdata,xf,yf,num_fallout,mtime,my_reintro)
         end if
@@ -2647,7 +2719,7 @@
       taup_scale = rhow_dp*(1.0d-6)**2/(18.0d0*dble(rhoval)*dble(viscosity))
 
       dt_nondim = dbldt/taup_scale
-      
+
       guess = 0.0d0
 
       !Gives initial guess into nonlinear solver
@@ -5719,7 +5791,200 @@
 
       end function crit_radius     
 
-      subroutine droplet_injection(pdata,xf,yf,time_since_inject,mtime,my_reintro)
+      subroutine distribute_injection_bins(total_bin_reintro,my_bin_reintro,my_reintro)
+
+      use input, only : myid,numprocs
+      use constants, only : i8
+      implicit none
+
+      integer(i8), intent(in) :: total_bin_reintro(ssgf_nbin)
+      integer(i8), intent(out) :: my_bin_reintro(ssgf_nbin)
+      integer, intent(out) :: my_reintro
+
+      integer :: i
+      integer(i8) :: base_count,extra_count,local_total
+
+      local_total = 0_i8
+      do i=1,ssgf_nbin
+         base_count = total_bin_reintro(i)/int(numprocs,i8)
+         extra_count = mod(total_bin_reintro(i),int(numprocs,i8))
+         my_bin_reintro(i) = base_count
+         if (int(myid,i8) .lt. extra_count) my_bin_reintro(i) = my_bin_reintro(i) + 1_i8
+         local_total = local_total + my_bin_reintro(i)
+      end do
+      my_reintro = int(local_total)
+
+      end subroutine distribute_injection_bins
+
+!----------------------------------------------------------------------
+
+      subroutine droplet_bin_request(bin_owed,bin_request,total_request)
+
+      use constants, only : i8
+      implicit none
+
+      double precision, intent(in) :: bin_owed(ssgf_nbin)
+      integer(i8), intent(out) :: bin_request(ssgf_nbin)
+      integer(i8), intent(out) :: total_request
+
+      integer :: i,best_i
+      integer(i8) :: base_total,remaining
+      logical :: selected(ssgf_nbin)
+      double precision :: owed,frac,best_frac
+
+      total_request = floor(sum(max(bin_owed,0.0d0)),kind=i8)
+      base_total = 0_i8
+      selected(:) = .false.
+      do i=1,ssgf_nbin
+         owed = max(bin_owed(i),0.0d0)
+         bin_request(i) = floor(owed,kind=i8)
+         base_total = base_total + bin_request(i)
+      end do
+
+      remaining = total_request - base_total
+      do while (remaining.gt.0_i8)
+         best_i = 1
+         best_frac = -1.0d0
+         do i=1,ssgf_nbin
+            if (.not. selected(i)) then
+               owed = max(bin_owed(i),0.0d0)
+               frac = owed - dble(floor(owed,kind=i8))
+               if (frac.gt.best_frac) then
+                  best_frac = frac
+                  best_i = i
+               end if
+            end if
+         end do
+         bin_request(best_i) = bin_request(best_i) + 1_i8
+         selected(best_i) = .true.
+         remaining = remaining - 1_i8
+      end do
+
+      end subroutine droplet_bin_request
+
+!----------------------------------------------------------------------
+
+      subroutine droplet_scheduled_bin_source(testcase_in,bin_source_rate)
+
+      use input, only : dx,dy,nx,ny,drop_mult
+      implicit none
+
+      integer, intent(in) :: testcase_in
+      double precision, intent(out) :: bin_source_rate(ssgf_nbin)
+
+      integer :: i
+      double precision :: bin_flux(ssgf_nbin)
+      double precision :: domain_area
+
+      bin_source_rate(:) = 0.0d0
+      if (testcase_in.eq.15) then
+         call build_sea_spray_distribution(bin_flux)
+         domain_area = dble(dx)*dble(nx)*dble(dy)*dble(ny)
+         do i=1,ssgf_nbin
+            bin_source_rate(i) = domain_area*bin_flux(i)/dble(drop_mult)
+         end do
+      elseif (testcase_in.eq.16) then
+         bin_source_rate(1) = 0.01d0*(1.0d0/60.0d0)*(10.0d0**6)*4.0d0
+      end if
+
+      end subroutine droplet_scheduled_bin_source
+
+!----------------------------------------------------------------------
+
+      subroutine build_sea_spray_bins()
+
+      implicit none
+
+      double precision :: dh_ssgf,rmin10_ssgf,rmax10_ssgf
+      integer :: i
+
+      if (ssgf_bins_initialized) return
+
+      rmin10_ssgf = log10(2d-06)
+      rmax10_ssgf = log10(500d-06)
+      dh_ssgf = (rmax10_ssgf-rmin10_ssgf)/dble(ssgf_nbin-1)
+
+      ssgf_binsdata10(1) = rmin10_ssgf
+      ssgf_binsdata(1) = 1.0d6*(10**ssgf_binsdata10(1))
+      ssgf_binsdata10_edge(1) = rmin10_ssgf - dh_ssgf/2.0
+      ssgf_binsdata_edge(1) = 1.0d6*(10**ssgf_binsdata10_edge(1))
+
+      do i = 1,ssgf_nbin-1
+        ssgf_binsdata10(i+1)= dh_ssgf+ssgf_binsdata10(i)
+        ssgf_binsdata(i+1) = 1.0d6*(10**ssgf_binsdata10(i+1))
+
+        ssgf_binsdata10_edge(i+1) = dh_ssgf + ssgf_binsdata10_edge(i)
+        ssgf_binsdata_edge(i+1) = 1.0d6*(10**ssgf_binsdata10_edge(i+1))
+      end do
+
+      ssgf_binsdata10_edge(ssgf_nbin+1) = ssgf_binsdata10_edge(ssgf_nbin) + dh_ssgf/2.0
+      ssgf_binsdata_edge(ssgf_nbin+1) = 1.0d6*(10**ssgf_binsdata10_edge(ssgf_nbin+1))
+      ssgf_bins_initialized = .true.
+
+      end subroutine build_sea_spray_bins
+
+!----------------------------------------------------------------------
+
+      subroutine build_sea_spray_distribution(bin_flux)
+
+      implicit none
+
+      double precision, intent(out) :: bin_flux(ssgf_nbin)
+
+      double precision :: c1,c2,c3,c4,m
+      double precision :: r80,r0
+      double precision :: dFsdr80(ssgf_nbin),dFmsdr0(ssgf_nbin)
+      real :: u10
+      integer :: i,ssgf_type
+
+      call build_sea_spray_bins()
+
+      u10 = min(real(u10_ssgf),50.0)
+      ssgf_type = 2
+
+      c1 = 10.0*smithssgf(u10,dble(10.0),dble(0.4))
+      c2 = c1*(37.5**1.8)
+      c3 = c2*(100.0**5.2)
+
+      m = 0.0434*u10 - 5.83
+      c4 = c2*100**-2.8*(10**6*1.963*(100**1.025))**-m
+
+      do i = 1,ssgf_nbin
+         r0 = ssgf_binsdata(i)
+         r80 = 0.518*r0**0.976
+
+         if (ssgf_type.eq.1) then
+             if (r80 .lt. 10.0) then
+               dFsdr80(i) =  smithssgf(u10,r80,dble(0.4))
+             elseif ((r80 .ge. 10.0) .and. (r80 .lt. 37.5)) then
+               dFsdr80(i) = c1/r80
+             elseif ((r80 .ge. 37.5) .and. (r80 .lt. 100.0)) then
+               dFSdr80(i) = c2*r80**-2.8
+             elseif (r80 .ge. 100.0) then
+               dFsdr80(i) = c3*r80**-8.0
+             endif
+         elseif (ssgf_type.eq.2) then
+             if (r80 .lt. 10.0) then
+               dFsdr80(i) =  smithssgf(u10,r80,dble(0.4))
+             elseif ((r80 .ge. 10.0) .and. (r80 .lt. 37.5)) then
+               dFsdr80(i) = c1/r80
+             elseif ((r80 .ge. 37.5) .and. (r80 .lt. 100.0)) then
+               dFSdr80(i) = c2*r80**-2.8
+             elseif (r80 .ge. 100.0) then
+               dFsdr80(i) = c4*(10**6*1.963*r80**1.025)**m
+             endif
+         end if
+
+         dFmsdr0(i) = 3.5*dFsdr80(i)*0.506*r0**-0.024
+
+         bin_flux(i) = dFmsdr0(i)*(ssgf_binsdata_edge(i+1)-ssgf_binsdata_edge(i))
+      end do
+
+      end subroutine build_sea_spray_distribution
+
+!----------------------------------------------------------------------
+
+      subroutine droplet_injection(pdata,xf,yf,total_bin_reintro,mtime,my_reintro,bin_inserted)
       !Inject new particles according to some rule
       !Here use the sea spray generation function (SSGF) of Andreas (1998)
       use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
@@ -5738,174 +6003,72 @@
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
       real, intent(in), dimension(ib:ie+1) :: xf
       real, intent(in), dimension(jb:je+1) :: yf
-      real, intent(in) :: time_since_inject
+      integer(i8), intent(in) :: total_bin_reintro(ssgf_nbin)
       double precision, intent(in) :: mtime
       integer, intent(out) :: my_reintro
-    
-      integer, parameter :: nbin = 100
-      integer :: i,np,idx_tmp
-      integer(i8) :: tot_after_reintro,total_reintro
-      integer :: sum_buf(2)
-      double precision :: dFssum(nbin+1)  !Discretized cumulative spray generation function (to be calculated)
-      double precision :: binsdata(nbin),binsdata10(nbin)  !Discretized bins for SSGF; "10" is for the log10 value
-      double precision :: binsdata_edge(nbin+1),binsdata10_edge(nbin+1) !Bin edges
+      integer(i8), intent(out) :: bin_inserted(ssgf_nbin)
 
-      double precision :: totdrops  !Total number being produced during this call to droplet_injection
+      integer :: i,np,idx_tmp,ibin
+      integer(i8) :: tot_after_reintro,total_reintro_actual
+      integer(i8) :: local_bin_reintro(ssgf_nbin),remaining_count
+      integer :: local_capacity_ok,global_capacity_ok
+
       double precision :: rad_init  !Initial radius, being calculated one at a time according to SSGF
-      real :: u10
       type(randomNumberSequence) :: randomNumbers
 
       real :: xrange,yrange,zrange
       real :: salinity
-      real :: my_reintro_tmp  !A temporaray variable to store a real version of my_reintro
-      
+
       !implementing the Andreas 1998 sea spray generation function
       !Set the parameters of the two lognormals:
-      double precision :: c1,c2,c3,u14,cdn10,a,rand,c4,m
-      double precision :: a1,a2,r80,r0,dh_ssgf,r_interval
-      double precision :: dFsdr80(nbin),dFmsdr0(nbin),dr80_dr0
-      integer :: iter,num_create,j,ierr
-      integer :: ssgf_type  !1 for Andreas 1998, 2 for Ortiz-Suslow 2016
+      double precision :: rand,r_interval
+      integer :: j,ierr
 
-      double precision :: rmin10_ssgf,rmax10_ssgf
       integer :: local_seed
 
-
-      !Define the bin centers and edges
-      rmin10_ssgf = log10(2d-06)
-      rmax10_ssgf = log10(500d-06)
-      dh_ssgf = (rmax10_ssgf-rmin10_ssgf)/dble(nbin-1)
-
-      binsdata10(1) = rmin10_ssgf
-      binsdata(1) = 1.0d6*(10**binsdata10(1))
-      binsdata10_edge(1) = rmin10_ssgf - dh_ssgf/2.0
-      binsdata_edge(1) = 1.0d6*(10**binsdata10_edge(1))
-
-      do i = 1,nbin-1
-        binsdata10(i+1)= dh_ssgf+binsdata10(i)
-        binsdata(i+1) = 1.0d6*(10**binsdata10(i+1))
-
-        binsdata10_edge(i+1) = dh_ssgf + binsdata10_edge(i)
-        binsdata_edge(i+1) = 1.0d6*(10**binsdata10_edge(i+1))
-      end do
-
-      binsdata10_edge(nbin+1) = binsdata10_edge(nbin) + dh_ssgf/2.0
-      binsdata_edge(nbin+1) = 1.0d6*(10**binsdata10_edge(nbin+1))
-
-
-      ! Now figure out how many particles are produced in each of
-      ! those bins. This is a function of u10
-      u10 = min(u10_ssgf,50.0)
-
-      ssgf_type = 2
-
-      !For Andreas 1998 model
-      c1 = 10.0*smithssgf(u10,dble(10.0),dble(0.4))
-      c2 = c1*(37.5**1.8)
-      c3 = c2*(100.0**5.2)
-
-      !For modfying with Ortiz-Suslow 2016
-      m = 0.0434*u10 - 5.83
-      c4 = c2*100**-2.8*(10**6*1.963*(100**1.025))**-m
-
-      dFssum(1) = 0
-      do i = 1,nbin
-         r0 = binsdata(i)
-         ! calculate radius at 80%RH
-         r80 = 0.518*r0**0.976;
- 
-         if (ssgf_type.eq.1) then
-
-             ! now apply these to Eqs. 3.5 in Andreas 1998
-             if (r80 .lt. 10.0) then
-               dFsdr80(i) =  smithssgf(u10,r80,dble(0.4))
-             elseif ((r80 .ge. 10.0) .and. (r80 .lt. 37.5)) then
-               dFsdr80(i) = c1/r80
-             elseif ((r80 .ge. 37.5) .and. (r80 .lt. 100.0)) then
-               dFSdr80(i) = c2*r80**-2.8
-             elseif (r80 .ge. 100.0) then
-               dFsdr80(i) = c3*r80**-8.0
-             endif
-
-         elseif (ssgf_type.eq.2) then
-
-             ! Almost the same, except change the spume for > 100 for Ortiz-Suslow
-             if (r80 .lt. 10.0) then
-               dFsdr80(i) =  smithssgf(u10,r80,dble(0.4))
-             elseif ((r80 .ge. 10.0) .and. (r80 .lt. 37.5)) then
-               dFsdr80(i) = c1/r80
-             elseif ((r80 .ge. 37.5) .and. (r80 .lt. 100.0)) then
-               dFSdr80(i) = c2*r80**-2.8
-             elseif (r80 .ge. 100.0) then
-               dFsdr80(i) = c4*(10**6*1.963*r80**1.025)**m
-             endif
-
-         end if
- 
-         ! apply eq. 3.8 from Andreas 1998
-         dFmsdr0(i) = 3.5*dFsdr80(i)*0.506*r0**-0.024
- 
-         if (i==1) then
-           dFssum(i+1) = dFmsdr0(i)*(binsdata_edge(i+1)-binsdata_edge(i))
-         elseif (i .gt. 1) then
-           dFssum(i+1) = dFssum(i) + dFmsdr0(i)*(binsdata_edge(i+1)-binsdata_edge(i))
-         endif
-      end do
-
-      totdrops = dFssum(nbin+1)    !totdrops at this point is # per unit area per unit time
-
-
-      !Define xrange and yrange to be WHOLE domain area, to calculate the total droplet number
-      xrange = dx*nx
-      yrange = dy*ny
-
-      my_reintro_tmp = xrange*yrange*time_since_inject*totdrops/drop_mult
-#ifdef MPI
-      my_reintro = floor(my_reintro_tmp/sngl(numprocs))
-
-      !Processors 0 through the remainder-1 will create an extra particle
-      if (myid .lt. floor(mod(my_reintro_tmp,sngl(numprocs)))) then 
-         my_reintro = my_reintro + 1
-      end if
-#else
-      my_reintro = floor(my_reintro_tmp)
-#endif
+      call build_sea_spray_bins()
+      call distribute_injection_bins(total_bin_reintro,local_bin_reintro,my_reintro)
+      bin_inserted(:) = 0_i8
 
       !Now that my_reintro has been calculated, reset to the LOCAL area for initializing droplet location
       xrange = xf(ni+1)-xf(1)
       yrange = yf(nj+1)-yf(1)
       zrange = 20.0
 
-      !Update the cumulative injection statistics
-      num_injected = num_injected + real(my_reintro)*drop_mult
-      !$acc update device (num_injected)
+      total_reintro_actual = sum(total_bin_reintro)
 
-      total_reintro = int(my_reintro,i8)
+      local_capacity_ok = 1
+      if (nparcelsLocalActive + my_reintro .gt. nparcelsLocal) local_capacity_ok = 0
 #ifdef MPI
-      call mpi_allreduce(mpi_in_place,total_reintro,1,mpi_integer8,mpi_sum,mpi_comm_world,ierr)
-#endif
-
-#ifdef MPI
+      call mpi_allreduce(local_capacity_ok,global_capacity_ok,1,mpi_integer,mpi_min,mpi_comm_world,ierr)
       !For deciding whether to inject more:
       call mpi_allreduce(my_reintro+nparcelsLocalActive, &
                          tot_after_reintro,1,mpi_integer8,mpi_sum, &
                          mpi_comm_world,ierr)
 #else
+      global_capacity_ok = local_capacity_ok
       !Calculate the total number which will occur after injection
       tot_after_reintro = my_reintro+nparcelsLocalActive
 #endif
 
 
-      if (tot_after_reintro .lt. nparcelsMax) then   !Only add particles if the total number injected
+      if (tot_after_reintro .le. nparcelsMax .and. global_capacity_ok.eq.1) then   !Only add particles if the total number injected
                                                      !does not make the global exceed nparcelsMax
-         if (myid==0 .and. total_reintro.gt.0_i8) then
+         !Update the cumulative injection statistics
+         num_injected = num_injected + real(my_reintro)*drop_mult
+         !$acc update device (num_injected)
+
+         if (myid==0 .and. total_reintro_actual.gt.0_i8) then
             write(*,'(a,1pe15.6,a,i18)') 'DROP INJECTION: mtime=',mtime, &
-                                         ' superdroplets=',total_reintro
+                                         ' superdroplets=',total_reintro_actual
          end if
 
-         !$acc data copyin(dFssum,binsdata,binsdata10) create(randomNumbers,randomNumbers%state)
+         bin_inserted(:) = total_bin_reintro(:)
+
+         !$acc data copyin(ssgf_binsdata_edge,local_bin_reintro) create(randomNumbers,randomNumbers%state)
          !$acc update device(ngidx)
-         !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) private(randomNumbers,local_seed)
+         !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) &
+         !$acc private(randomNumbers,local_seed,ibin,remaining_count)
          do j=1,my_reintro
             np=nparcelsLocalActive+j
             if (random_droplets) then
@@ -5916,20 +6079,22 @@
                local_seed = floor(29.*mtime) + (97*myid) + (7*j)
                call new_RandomNumberSequence(randomNumbers, local_seed)
 
-               rand = getRandomReal(randomNumbers)
-               a = totdrops*rand
-
-               !Set the droplet radius based on the sea spray generation function (SSGF)
-               !Loop over all of the discretized bins of the SSGF. Based on the random number, choose which bin to draw the radius from
-               !Once a bind is identified by the conditional statement, the radius is set to a random number between the edges of the bin
-
+               remaining_count = int(j,i8)
+               ibin = 0
                !$acc loop seq
-               do i = 1,nbin
-                  if ((a .gt. dFssum(i)) .and. (a .le. dFssum(i+1))) then
-                     r_interval = 10**(binsdata10(i)+dh_ssgf/2.0) - 10**(binsdata10(i)-dh_ssgf/2.0)
-                     rad_init = binsdata(i) + 2.0*(rand-0.5)*r_interval
-                  end if 
+               do i = 1,ssgf_nbin
+                  if (ibin.eq.0) then
+                     if (remaining_count.gt.local_bin_reintro(i)) then
+                        remaining_count = remaining_count - local_bin_reintro(i)
+                     else
+                        ibin = i
+                     end if
+                  end if
                end do
+               if (ibin.eq.0) ibin = ssgf_nbin
+               rand = getRandomReal(randomNumbers)
+               r_interval = ssgf_binsdata_edge(ibin+1) - ssgf_binsdata_edge(ibin)
+               rad_init = ssgf_binsdata_edge(ibin) + rand*r_interval
                rad_init = rad_init*1.0e-6
 
                !Random location
@@ -5995,7 +6160,8 @@
          !Then once the new droplets have been added, update nparcelsLocalActive
          nparcelsLocalActive = nparcelsLocalActive + my_reintro
       else
-         if (myid == 0) write(*,*) 'WARNING CANNOT ADD MORE PARTICLES, WILL EXCEED NPARCELSMAX'  
+         if (myid == 0) write(*,*) 'WARNING CANNOT ADD MORE PARTICLES, WILL EXCEED NPARCELSMAX OR NPARCELSLOCAL'
+         my_reintro = 0
       end if
 
     end subroutine droplet_injection
@@ -6026,7 +6192,7 @@
 
     end function smithssgf
 
-    subroutine droplet_injection_pi(pdata,xf,yf,time_since_inject,mtime,my_reintro)
+    subroutine droplet_injection_pi(pdata,xf,yf,total_bin_reintro,mtime,my_reintro,bin_inserted)
       !Inject new particles according to some rule
       !Here use the pi chamber protocol: uniform aerosols at centerplane
       use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
@@ -6045,13 +6211,15 @@
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
       real, intent(in), dimension(ib:ie+1) :: xf
       real, intent(in), dimension(jb:je+1) :: yf
-      real, intent(in) :: time_since_inject
+      integer(i8), intent(in) :: total_bin_reintro(ssgf_nbin)
       double precision, intent(in) :: mtime
       integer, intent(out) :: my_reintro
+      integer(i8), intent(out) :: bin_inserted(ssgf_nbin)
     
-      integer :: i,np,idx_tmp
-      integer(i8) :: tot_after_reintro,total_reintro
-      integer :: sum_buf(2)
+      integer :: np,idx_tmp
+      integer(i8) :: tot_after_reintro,total_reintro_actual
+      integer(i8) :: local_bin_reintro(ssgf_nbin)
+      integer :: local_capacity_ok,global_capacity_ok
 
       double precision :: rad_init  !Initial radius
       double precision :: rand
@@ -6059,56 +6227,48 @@
 
       real :: xrange,yrange,zrange
       real :: salinity
-      real :: my_reintro_tmp  !A temporaray variable to store a real version of my_reintro
       
-      integer :: iter,nbin,num_create,j,ierr
+      integer :: j,ierr
 
       integer :: local_seed
 
-      my_reintro_tmp = 0.01*(1./60.)*(10.**6.)*time_since_inject*4 !total for a 4m^3 vol chamber
-
-#ifdef MPI
-      my_reintro = floor(my_reintro_tmp/sngl(numprocs))
-
-      !Processors 0 through the remainder-1 will create an extra particle
-      if (myid .lt. floor(mod(my_reintro_tmp,sngl(numprocs)))) then 
-         my_reintro = my_reintro + 1
-      end if
-#else
-      my_reintro = floor(my_reintro_tmp)
-#endif
+      call distribute_injection_bins(total_bin_reintro,local_bin_reintro,my_reintro)
+      bin_inserted(:) = 0_i8
 
       !Now that my_reintro has been calculated, reset to the LOCAL area for initializing droplet location
       xrange = xf(ni+1)-xf(1)
       yrange = yf(nj+1)-yf(1)
       zrange = nz*dz/2.0
 
-      !Update the cumulative injection statistics
-      num_injected = num_injected + real(my_reintro)*drop_mult
-      !$acc update device (num_injected)
+      total_reintro_actual = sum(total_bin_reintro)
 
-      total_reintro = int(my_reintro,i8)
+      local_capacity_ok = 1
+      if (nparcelsLocalActive + my_reintro .gt. nparcelsLocal) local_capacity_ok = 0
 #ifdef MPI
-      call mpi_allreduce(mpi_in_place,total_reintro,1,mpi_integer8,mpi_sum,mpi_comm_world,ierr)
-#endif
-
-#ifdef MPI
+      call mpi_allreduce(local_capacity_ok,global_capacity_ok,1,mpi_integer,mpi_min,mpi_comm_world,ierr)
       !For deciding whether to inject more:
       call mpi_allreduce(my_reintro+nparcelsLocalActive, &
                          tot_after_reintro,1,mpi_integer8,mpi_sum, &
                          mpi_comm_world,ierr)
 #else
+      global_capacity_ok = local_capacity_ok
       !Calculate the total number which will occur after injection
       tot_after_reintro = my_reintro+nparcelsLocalActive
 #endif
 
 
-      if (tot_after_reintro .lt. nparcelsMax) then   !Only add particles if the total number injected
+      if (tot_after_reintro .le. nparcelsMax .and. global_capacity_ok.eq.1) then   !Only add particles if the total number injected
                                                      !does not make the global exceed nparcelsMax
-         if (myid==0 .and. total_reintro.gt.0_i8) then
+         !Update the cumulative injection statistics
+         num_injected = num_injected + real(my_reintro)*drop_mult
+         !$acc update device (num_injected)
+
+         if (myid==0 .and. total_reintro_actual.gt.0_i8) then
             write(*,'(a,1pe15.6,a,i18)') 'DROP INJECTION: mtime=',mtime, &
-                                         ' superdroplets=',total_reintro
+                                         ' superdroplets=',total_reintro_actual
          end if
+
+         bin_inserted(:) = total_bin_reintro(:)
 
          !$acc data create(randomNumbers,randomNumbers%state)
          !$acc update device(ngidx)
@@ -6186,7 +6346,8 @@
          !Then once the new droplets have been added, update nparcelsLocalActive
          nparcelsLocalActive = nparcelsLocalActive + my_reintro
       else
-         if (myid == 0) write(*,*) 'WARNING CANNOT ADD MORE PARTICLES, WILL EXCEED NPARCELSMAX'  
+         if (myid == 0) write(*,*) 'WARNING CANNOT ADD MORE PARTICLES, WILL EXCEED NPARCELSMAX OR NPARCELSLOCAL'
+         my_reintro = 0
       end if
 
     end subroutine droplet_injection_pi
