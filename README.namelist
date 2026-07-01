@@ -1606,6 +1606,20 @@
                   (0 = off, 1 = stochastic position update,
                    2 = stochastic SGS velocity update)
 
+ coal_enabled  -  Lagrangian droplet collision-coalescence switch
+                  (.false. = off, .true. = on)
+
+ coal_kernel   -  Lagrangian droplet coalescence kernel selector
+                  (0 = Golovin, 1 = geometric with collection efficiency E=1,
+                   2 = Long, 3 = Hall,
+                   4 = Hall with SGS-velocity relative-speed enhancement)
+
+ coal_Ndx      -  Number of Eulerian dx grid cells per coalescence collision cell
+
+ coal_Ndy      -  Number of Eulerian dy grid cells per coalescence collision cell
+
+ coal_Ndz      -  Number of Eulerian dz grid cells per coalescence collision cell
+
 
 ------------------------------------------------------------------------
   nssl2mom_params section - parameters/options for NSSL microphysics scheme

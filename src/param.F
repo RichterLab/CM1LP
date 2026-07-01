@@ -302,6 +302,11 @@
       call bcast_int(drop_evap) ! DEVICE
       call bcast_int(drop_traj) ! DEVICE
       call bcast_int(drop_sgs_opt) ! DEVICE
+      call bcast_log(coal_enabled) ! DEVICE
+      call bcast_int(coal_kernel) ! DEVICE
+      call bcast_int(coal_Ndx) ! DEVICE
+      call bcast_int(coal_Ndy) ! DEVICE
+      call bcast_int(coal_Ndz) ! DEVICE
       call bcast_int(nparcelsMax)
       call bcast_real(drop_inject_elapse)
       call bcast_real(drop_inject_time)
@@ -2430,6 +2435,38 @@
 
       ! for parcels:
       nparcelsInit = max(1_i8,nparcelsInit)
+      IF( coal_kernel.lt.0 .or. coal_kernel.gt.4 )THEN
+        if(myid.eq.0)then
+        print *
+        print *,'  coal_kernel = ',coal_kernel
+        print *
+        print *,'  unrecognized value for coal_kernel '
+        print *
+        print *,'   stopping model .... '
+        print *
+        endif
+#ifdef MPI
+        call MPI_BARRIER (MPI_COMM_WORLD,ierr)
+#endif
+        call stopcm1
+      ENDIF
+      IF( coal_Ndx.lt.1 .or. coal_Ndy.lt.1 .or. coal_Ndz.lt.1 )THEN
+        if(myid.eq.0)then
+        print *
+        print *,'  coal_Ndx = ',coal_Ndx
+        print *,'  coal_Ndy = ',coal_Ndy
+        print *,'  coal_Ndz = ',coal_Ndz
+        print *
+        print *,'  collision cell sizes must be at least 1 grid cell '
+        print *
+        print *,'   stopping model .... '
+        print *
+        endif
+#ifdef MPI
+        call MPI_BARRIER (MPI_COMM_WORLD,ierr)
+#endif
+        call stopcm1
+      ENDIF
 
 !-----
 
@@ -2699,6 +2736,11 @@
       if(dowr) write(outfile,*) 'two_way_coupling=',two_way_coupling
       if(dowr) write(outfile,*) 'drop_evap=',drop_evap
       if(dowr) write(outfile,*) 'drop_sgs_opt=',drop_sgs_opt
+      if(dowr) write(outfile,*) 'coal_enabled=',coal_enabled
+      if(dowr) write(outfile,*) 'coal_kernel=',coal_kernel
+      if(dowr) write(outfile,*) 'coal_Ndx=',coal_Ndx
+      if(dowr) write(outfile,*) 'coal_Ndy=',coal_Ndy
+      if(dowr) write(outfile,*) 'coal_Ndz=',coal_Ndz
       if(dowr) write(outfile,*)
       if(dowr) write(outfile,*) 'kdiff2    =',kdiff2
       if(dowr) write(outfile,*) 'kdiff6    =',kdiff6

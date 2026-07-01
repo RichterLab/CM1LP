@@ -4,7 +4,7 @@
 
   private
   public :: droplet_driver,droplet_injection_driver,compute_droplet_substeps, &
-            project_droplet_qc_effc, &
+            droplet_coalescence_driver,project_droplet_qc_effc, &
             droplet_diag,initialize_droplet_histograms, &
             check_droplet_ownership,particle_seed,ngidx, &
             kohler_equil_radius,lognormal_droplet
@@ -23,6 +23,8 @@
   double precision :: eng_destroyed,eng_injected,m1_destroyed,m2_destroyed,m1_injected,m2_injected   !Same but for droplet internal energy and momentum
   double precision :: mass_reentry,eng_reentry,m1_reentry,m2_reentry
   double precision :: mass_evap,mass_dpten
+  double precision :: coal_pair_attempts,coal_pair_successes,coal_collision_mult
+  double precision :: coal_palpha_sum,coal_palpha_mean,coal_palpha_max,coal_gamtil_max
 
   real, allocatable, dimension(:) :: sfs_fs_profile
 
@@ -41,6 +43,51 @@
   !For testing: set this parameter to ".false." to make droplet injection deterministic (not random)
   logical, parameter :: random_droplets = .true.
 
+  integer, parameter :: hall_nr = 15
+  integer, parameter :: hall_nq = 21
+  double precision, dimension(hall_nr), save :: hall_r0 = (/ &
+       6.0d0,  8.0d0, 10.0d0, 15.0d0, 20.0d0, &
+      25.0d0, 30.0d0, 40.0d0, 50.0d0, 60.0d0, &
+      70.0d0,100.0d0,150.0d0,200.0d0,300.0d0 /)
+  double precision, dimension(hall_nq), save :: hall_rat = (/ &
+      0.0d0, 0.05d0, 0.10d0, 0.15d0, 0.20d0, &
+      0.25d0,0.30d0, 0.35d0, 0.40d0, 0.45d0, &
+      0.50d0,0.55d0, 0.60d0, 0.65d0, 0.70d0, &
+      0.75d0,0.80d0, 0.85d0, 0.90d0, 0.95d0, 1.0d0 /)
+  double precision, dimension(hall_nr,hall_nq), save :: hall_ecoll = reshape((/ &
+      0.001d0,0.001d0,0.001d0,0.001d0,0.001d0,0.001d0,0.001d0,0.001d0,0.001d0,0.001d0, &
+      0.001d0,0.001d0,0.001d0,0.001d0,0.001d0,0.003d0,0.003d0,0.003d0,0.004d0,0.005d0, &
+      0.005d0,0.005d0,0.010d0,0.100d0,0.050d0,0.200d0,0.500d0,0.770d0,0.870d0,0.970d0, &
+      0.007d0,0.007d0,0.007d0,0.008d0,0.009d0,0.010d0,0.010d0,0.070d0,0.400d0,0.430d0, &
+      0.580d0,0.790d0,0.930d0,0.960d0,1.000d0,0.009d0,0.009d0,0.009d0,0.012d0,0.015d0, &
+      0.010d0,0.020d0,0.280d0,0.600d0,0.640d0,0.750d0,0.910d0,0.970d0,0.980d0,1.000d0, &
+      0.014d0,0.014d0,0.014d0,0.015d0,0.016d0,0.030d0,0.060d0,0.500d0,0.700d0,0.770d0, &
+      0.840d0,0.950d0,0.970d0,1.000d0,1.000d0,0.017d0,0.017d0,0.017d0,0.020d0,0.022d0, &
+      0.060d0,0.100d0,0.620d0,0.780d0,0.840d0,0.880d0,0.950d0,1.000d0,1.000d0,1.000d0, &
+      0.030d0,0.030d0,0.024d0,0.022d0,0.032d0,0.062d0,0.200d0,0.680d0,0.830d0,0.870d0, &
+      0.900d0,0.950d0,1.000d0,1.000d0,1.000d0,0.025d0,0.025d0,0.025d0,0.036d0,0.043d0, &
+      0.130d0,0.270d0,0.740d0,0.860d0,0.890d0,0.920d0,1.000d0,1.000d0,1.000d0,1.000d0, &
+      0.027d0,0.027d0,0.027d0,0.040d0,0.052d0,0.200d0,0.400d0,0.780d0,0.880d0,0.900d0, &
+      0.940d0,1.000d0,1.000d0,1.000d0,1.000d0,0.030d0,0.030d0,0.030d0,0.047d0,0.064d0, &
+      0.250d0,0.500d0,0.800d0,0.900d0,0.910d0,0.950d0,1.000d0,1.000d0,1.000d0,1.000d0, &
+      0.040d0,0.040d0,0.033d0,0.037d0,0.068d0,0.240d0,0.550d0,0.800d0,0.900d0,0.910d0, &
+      0.950d0,1.000d0,1.000d0,1.000d0,1.000d0,0.035d0,0.035d0,0.035d0,0.055d0,0.079d0, &
+      0.290d0,0.580d0,0.800d0,0.900d0,0.910d0,0.950d0,1.000d0,1.000d0,1.000d0,1.000d0, &
+      0.037d0,0.037d0,0.037d0,0.062d0,0.082d0,0.290d0,0.590d0,0.780d0,0.900d0,0.910d0, &
+      0.950d0,1.000d0,1.000d0,1.000d0,1.000d0,0.037d0,0.037d0,0.037d0,0.060d0,0.080d0, &
+      0.290d0,0.580d0,0.770d0,0.890d0,0.910d0,0.950d0,1.000d0,1.000d0,1.000d0,1.000d0, &
+      0.037d0,0.037d0,0.037d0,0.041d0,0.075d0,0.250d0,0.540d0,0.760d0,0.880d0,0.920d0, &
+      0.950d0,1.000d0,1.000d0,1.000d0,1.000d0,0.037d0,0.037d0,0.037d0,0.052d0,0.067d0, &
+      0.250d0,0.510d0,0.770d0,0.880d0,0.930d0,0.970d0,1.000d0,1.000d0,1.000d0,1.000d0, &
+      0.037d0,0.037d0,0.037d0,0.047d0,0.057d0,0.250d0,0.490d0,0.770d0,0.890d0,0.950d0, &
+      1.000d0,1.000d0,1.000d0,1.000d0,1.000d0,0.036d0,0.036d0,0.036d0,0.042d0,0.048d0, &
+      0.230d0,0.470d0,0.780d0,0.920d0,1.000d0,1.020d0,1.020d0,1.020d0,1.020d0,1.020d0, &
+      0.040d0,0.040d0,0.035d0,0.033d0,0.040d0,0.112d0,0.450d0,0.790d0,1.010d0,1.030d0, &
+      1.040d0,1.040d0,1.040d0,1.040d0,1.040d0,0.033d0,0.033d0,0.033d0,0.033d0,0.033d0, &
+      0.119d0,0.470d0,0.950d0,1.300d0,1.700d0,2.300d0,2.300d0,2.300d0,2.300d0,2.300d0, &
+      0.027d0,0.027d0,0.027d0,0.027d0,0.027d0,0.125d0,0.520d0,1.400d0,2.300d0,3.000d0, &
+      4.000d0,4.000d0,4.000d0,4.000d0,4.000d0 /), (/ hall_nr,hall_nq /))
+
   !$acc declare create (hist_restime,hist_radius,hist_dry_radius,hist_radius10, &
   !$acc                 hist_fallrad,restime_min,restime_max, &
   !$acc                 restime_min10,restime_max10,dhres,dhrad, &
@@ -48,7 +95,10 @@
   !$acc                 num_injected,mass_destroyed,mass_injected, &
   !$acc                 mass_reentry,eng_reentry,m1_reentry,m2_reentry, &
   !$acc                 eng_destroyed,eng_injected,m1_destroyed,m2_destroyed,m1_injected,m2_injected, &
+  !$acc                 coal_pair_attempts,coal_pair_successes,coal_collision_mult, &
+  !$acc                 coal_palpha_sum,coal_palpha_mean,coal_palpha_max,coal_gamtil_max, &
   !$acc                 num100,num1000,ngidx)
+  !$acc declare copyin(hall_r0,hall_rat,hall_ecoll)
 
   CONTAINS
 
@@ -1418,6 +1468,623 @@
       endif
 
    end subroutine compute_droplet_substeps
+
+!----------------------------------------------------------------------
+
+   double precision function hall_effic_um(r1_um,r2_um)
+      !$acc routine seq
+      implicit none
+
+      double precision, intent(in) :: r1_um,r2_um
+
+      integer :: k,kk,ir,iq
+      double precision :: drop_ratio,p,q,rbig_um,rsmall_um,ek,ec
+
+      rbig_um = max(r1_um,r2_um)
+      rsmall_um = min(r1_um,r2_um)
+
+      if( rbig_um.le.0.0d0 )then
+        hall_effic_um = 0.0d0
+        return
+      endif
+
+      drop_ratio = min(1.0d0,max(0.0d0,rsmall_um/rbig_um))
+
+      ir = 1
+      if( rbig_um.gt.hall_r0(hall_nr) )then
+        ir = hall_nr + 1
+      else
+        do k=2,hall_nr
+          if( rbig_um.le.hall_r0(k) .and. rbig_um.ge.hall_r0(k-1) )then
+            ir = k
+            exit
+          endif
+        enddo
+      endif
+
+      iq = 2
+      do kk=2,hall_nq
+        if( drop_ratio.le.hall_rat(kk) )then
+          iq = kk
+          exit
+        endif
+      enddo
+
+      q = (drop_ratio-hall_rat(iq-1))/(hall_rat(iq)-hall_rat(iq-1))
+
+      if( ir.lt.hall_nr+1 )then
+        if( ir.ge.2 )then
+          p = (rbig_um-hall_r0(ir-1))/(hall_r0(ir)-hall_r0(ir-1))
+          ec = (1.0d0-p)*(1.0d0-q)*hall_ecoll(ir-1,iq-1) &
+             + p*(1.0d0-q)*hall_ecoll(ir,iq-1) &
+             + q*(1.0d0-p)*hall_ecoll(ir-1,iq) &
+             + p*q*hall_ecoll(ir,iq)
+        else
+          ec = (1.0d0-q)*hall_ecoll(1,iq-1) + q*hall_ecoll(1,iq)
+        endif
+      else
+        ek = (1.0d0-q)*hall_ecoll(hall_nr,iq-1) + q*hall_ecoll(hall_nr,iq)
+        ec = min(ek,1.0d0)
+      endif
+
+      hall_effic_um = max(0.0d0,ec)
+
+   end function hall_effic_um
+
+!----------------------------------------------------------------------
+
+   subroutine droplet_coalescence_driver(dt,nstep,xf,yf,zf,sigmaf,pdata,pdata_locind)
+
+      use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,npvals,nparcelsLocal, &
+          nparcelsLocalActive,nx,ny,axisymm,terrain_flag, &
+          prx,pry,prz,prsig,prrp,prmult,prms,prkap,prvpx,prvpy,prvpz, &
+          prusgs,prvsgs,prwsgs,coal_enabled,coal_kernel, &
+          coal_Ndx,coal_Ndy,coal_Ndz,myid
+      use constants, only : undefined_index,i8,pi
+      implicit none
+
+      real, intent(in) :: dt
+      integer, intent(in) :: nstep
+      real, intent(in), dimension(ib:ie+1) :: xf
+      real, intent(in), dimension(jb:je+1) :: yf
+      real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: zf
+      real, intent(in), dimension(kb:ke+1) :: sigmaf
+      real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
+      integer, intent(inout), dimension(nparcelsLocal,3) :: pdata_locind
+
+      double precision, parameter :: coal_conservation_tol = 1.0d-4
+      double precision, parameter :: coal_conservation_floor = 1.0d-30
+      double precision, parameter :: coal_golovin_b = 1.5d3
+      real, parameter :: coal_real_huge = huge(1.0)
+      integer(i8), parameter :: rng_im = 2147483647_i8
+      integer(i8), parameter :: rng_ia = 48271_i8
+
+      integer :: nactive,nci,ncj,nck,ncoal_cells
+      integer :: np,c,iflag,jflag,kflag,ci,cj,ck,cell,slot
+      integer :: first,last,j_idx,k_idx
+      integer :: ns_cell,npairs,pair,pos1,pos2,perm_a,perm_b
+      integer :: ii,jj,kk,ilo,ihi,jlo,jhi,klo,khi
+      integer :: gcd_a,gcd_b,gcd_tmp
+      integer :: bad_cell_id,bad_pack_cursor,bad_pack_particles,packed_count
+      integer :: bad_cell_volume,bad_pair,bad_kernel,bad_state
+      integer, dimension(:), allocatable :: cell_id,cell_count,cell_start
+      integer, dimension(:), allocatable :: cell_cursor,cell_particles
+      real, dimension(:), allocatable :: cell_volume
+      integer(i8) :: seed
+      real :: xi_j,xi_k
+      real :: r_j,r_k,ms_j,ms_k,kap_j,kap_k
+      real :: x3d,y3d,z3d,sig3d,vol_tmp
+      double precision :: p_alpha,phi,frac_p,gm_real,gamma_cap
+      double precision :: remaining_j,gam_til
+      double precision :: new_rad,new_ms,new_kap,new_mult_j,new_mult_k
+      double precision :: veldiff,kernel,cell_dv,pair_factor
+      double precision :: pvol_j,pvol_k,effic,rbig_um,rsmall_um
+      double precision :: coal_pair_attempts_step,coal_pair_successes_step
+      double precision :: coal_collision_mult_step,coal_palpha_sum_step
+      double precision :: coal_palpha_max_step,coal_gamtil_max_step
+      double precision :: mult_before,mult_after,mult_loss
+      double precision :: water_before,water_after,solute_before,solute_after
+      double precision :: kappa_before,kappa_after
+      double precision :: mult_err,water_err,solute_err,kappa_err
+
+      if( .not. coal_enabled ) return
+      if( dt.le.0.0 ) return
+      if( nparcelsLocalActive.le.1 ) return
+
+      nactive = nparcelsLocalActive
+      nci = max(1,(ni+coal_Ndx-1)/coal_Ndx)
+      ncj = max(1,(nj+coal_Ndy-1)/coal_Ndy)
+      nck = max(1,(nk+coal_Ndz-1)/coal_Ndz)
+      ncoal_cells = nci*ncj*nck
+
+      if( ncoal_cells.lt.1 )then
+        stop 'DROPLET COALESCENCE BAD PROTOTYPE STATE'
+      endif
+      if( coal_kernel.lt.0 .or. coal_kernel.gt.4 )then
+        stop 'DROPLET COALESCENCE BAD KERNEL'
+      endif
+
+      allocate(cell_id(nactive),cell_count(ncoal_cells), &
+               cell_start(ncoal_cells+1),cell_cursor(ncoal_cells), &
+               cell_particles(nactive),cell_volume(ncoal_cells))
+
+      !$acc data create(cell_id,cell_count,cell_start,cell_cursor,cell_particles,cell_volume) &
+      !$acc      present(pdata,pdata_locind)
+
+      !$acc parallel loop gang vector default(present)
+      do np=1,nactive
+        cell_id(np) = 0
+        cell_particles(np) = 0
+      enddo
+      !$acc end parallel
+
+      !$acc parallel loop gang vector default(present)
+      do c=1,ncoal_cells
+        cell_count(c) = 0
+        cell_cursor(c) = 0
+        cell_volume(c) = 0.0
+      enddo
+      !$acc end parallel
+
+      bad_cell_volume = 0
+      !$acc parallel loop gang vector default(present) &
+      !$acc private(ci,cj,ck,ii,jj,kk,ilo,ihi,jlo,jhi,klo,khi,vol_tmp) &
+      !$acc reduction(+:bad_cell_volume)
+      do c=1,ncoal_cells
+        ck = (c-1)/(nci*ncj) + 1
+        cj = ((c-1) - nci*ncj*(ck-1))/nci + 1
+        ci = c - nci*(cj-1) - nci*ncj*(ck-1)
+
+        ilo = (ci-1)*coal_Ndx + 1
+        ihi = min(ni,ci*coal_Ndx)
+        jlo = (cj-1)*coal_Ndy + 1
+        jhi = min(nj,cj*coal_Ndy)
+        klo = (ck-1)*coal_Ndz + 1
+        khi = min(nk,ck*coal_Ndz)
+
+        vol_tmp = 0.0
+        do kk=klo,khi
+        do jj=jlo,jhi
+        do ii=ilo,ihi
+          vol_tmp = vol_tmp + (xf(ii+1)-xf(ii))*(yf(jj+1)-yf(jj)) &
+            *(zf(ii,jj,kk+1)-zf(ii,jj,kk))
+        enddo
+        enddo
+        enddo
+        cell_volume(c) = vol_tmp
+        if( vol_tmp.le.0.0 )then
+          bad_cell_volume = bad_cell_volume + 1
+        endif
+      enddo
+      !$acc end parallel
+
+      if( bad_cell_volume.gt.0 )then
+        stop 'DROPLET COALESCENCE BAD CELL VOLUME'
+      endif
+
+      bad_cell_id = 0
+      !$acc parallel loop gang vector default(present) &
+      !$acc private(iflag,jflag,kflag,ci,cj,ck,cell,x3d,y3d,z3d,sig3d) &
+      !$acc reduction(+:bad_cell_id)
+      do np=1,nactive
+        x3d = pdata(np,prx)
+        y3d = pdata(np,pry)
+        if( .not. terrain_flag )then
+          z3d = pdata(np,prz)
+        else
+          sig3d = pdata(np,prsig)
+        endif
+
+        iflag = undefined_index
+        jflag = undefined_index
+        kflag = undefined_index
+
+        IF(nx.eq.1)THEN
+          iflag = 1
+          pdata_locind(np,1) = iflag
+        ELSE
+          call find_horizontal_location_index (pdata_locind(np,1), x3d, ib, ie+1, xf, ni+1, iflag)
+        ENDIF
+
+        IF(axisymm.eq.1.or.ny.eq.1)THEN
+          jflag = 1
+          pdata_locind(np,2) = jflag
+        ELSE
+          call find_horizontal_location_index (pdata_locind(np,2), y3d, jb, je+1, yf, nj+1, jflag)
+        ENDIF
+
+        if( iflag.ge.1 .and. iflag.le.ni .and. jflag.ge.1 .and. jflag.le.nj )then
+          kflag = 1
+          if( .not. terrain_flag )then
+            if( z3d.ge.zf(iflag,jflag,kb) .and. z3d.le.zf(iflag,jflag,ke+1) )then
+              do while( z3d.gt.zf(iflag,jflag,kflag+1) )
+                kflag = kflag+1
+              enddo
+              pdata_locind(np,3) = kflag
+            else
+              kflag = undefined_index
+            endif
+          else
+            if( sig3d.ge.sigmaf(kb) .and. sig3d.le.sigmaf(ke+1) )then
+              call find_vertical_location_index (pdata_locind(np,3), sig3d, kb, ke+1, sigmaf, kflag, .TRUE.)
+            else
+              kflag = undefined_index
+            endif
+          endif
+
+          if( kflag.ge.1 .and. kflag.le.nk )then
+            ci = (iflag-1)/coal_Ndx + 1
+            cj = (jflag-1)/coal_Ndy + 1
+            ck = (kflag-1)/coal_Ndz + 1
+            cell = ci + nci*(cj-1) + nci*ncj*(ck-1)
+            cell_id(np) = cell
+            !$acc atomic update
+            cell_count(cell) = cell_count(cell) + 1
+          else
+            bad_cell_id = bad_cell_id + 1
+          endif
+        else
+          bad_cell_id = bad_cell_id + 1
+        endif
+      enddo
+      !$acc end parallel
+
+      if( bad_cell_id.gt.0 )then
+        stop 'DROPLET COALESCENCE BAD CELL ID'
+      endif
+
+      !$acc serial present(cell_count,cell_start,cell_cursor)
+      packed_count = 1
+      do c=1,ncoal_cells
+        cell_start(c) = packed_count
+        cell_cursor(c) = packed_count
+        packed_count = packed_count + cell_count(c)
+      enddo
+      cell_start(ncoal_cells+1) = packed_count
+      !$acc end serial
+
+      !$acc parallel loop gang vector default(present) private(cell,slot)
+      do np=1,nactive
+        cell = cell_id(np)
+        !$acc atomic capture
+        slot = cell_cursor(cell)
+        cell_cursor(cell) = cell_cursor(cell) + 1
+        !$acc end atomic
+        cell_particles(slot) = np
+      enddo
+      !$acc end parallel
+
+      bad_pack_cursor = 0
+      !$acc parallel loop gang vector default(present) reduction(+:bad_pack_cursor)
+      do c=1,ncoal_cells
+        if( cell_cursor(c).ne.cell_start(c+1) )then
+          bad_pack_cursor = bad_pack_cursor + 1
+        endif
+      enddo
+      !$acc end parallel
+
+      bad_pack_particles = 0
+      !$acc parallel loop gang vector default(present) reduction(+:bad_pack_particles)
+      do np=1,nactive
+        if( cell_particles(np).lt.1 .or. cell_particles(np).gt.nactive )then
+          bad_pack_particles = bad_pack_particles + 1
+        endif
+      enddo
+      !$acc end parallel
+
+      if( bad_pack_cursor.gt.0 .or. bad_pack_particles.gt.0 )then
+        stop 'DROPLET COALESCENCE BAD PACKED LIST'
+      endif
+
+      mult_before = 0.0d0
+      water_before = 0.0d0
+      solute_before = 0.0d0
+      kappa_before = 0.0d0
+      !$acc parallel loop gang vector default(present) &
+      !$acc reduction(+:mult_before,water_before,solute_before,kappa_before)
+      do np=1,nactive
+        mult_before = mult_before + dble(pdata(np,prmult))
+        water_before = water_before + dble(pdata(np,prmult)) &
+          *dble(pdata(np,prrp))**3
+        solute_before = solute_before + dble(pdata(np,prmult)) &
+          *dble(pdata(np,prms))
+        kappa_before = kappa_before + dble(pdata(np,prmult)) &
+          *dble(pdata(np,prms))*dble(pdata(np,prkap))
+      enddo
+      !$acc end parallel
+
+      bad_pair = 0
+      bad_kernel = 0
+      mult_loss = 0.0d0
+      coal_pair_attempts_step = 0.0d0
+      coal_pair_successes_step = 0.0d0
+      coal_collision_mult_step = 0.0d0
+      coal_palpha_sum_step = 0.0d0
+      coal_palpha_max_step = 0.0d0
+      coal_gamtil_max_step = 0.0d0
+      !$acc parallel loop gang default(present) &
+      !$acc private(first,last,ns_cell,npairs,pair,pos1,pos2,perm_a,perm_b) &
+      !$acc private(gcd_a,gcd_b,gcd_tmp,seed,j_idx,k_idx,xi_j,xi_k,remaining_j,gam_til,p_alpha) &
+      !$acc private(phi,frac_p,gm_real,gamma_cap,veldiff,kernel,cell_dv,pair_factor,pvol_j,pvol_k) &
+      !$acc private(effic,rbig_um,rsmall_um) &
+      !$acc private(r_j,r_k,ms_j,ms_k,kap_j,kap_k,new_rad,new_ms,new_kap,new_mult_j,new_mult_k) &
+      !$acc reduction(+:bad_pair,bad_kernel) reduction(+:mult_loss) &
+      !$acc reduction(+:coal_pair_attempts_step,coal_pair_successes_step,coal_collision_mult_step,coal_palpha_sum_step) &
+      !$acc reduction(max:coal_palpha_max_step,coal_gamtil_max_step)
+      do c=1,ncoal_cells
+        first = cell_start(c)
+        last = cell_start(c+1)-1
+        ns_cell = last - first + 1
+        npairs = ns_cell/2
+        if( npairs.gt.0 )then
+          seed = mod(104729_i8 + abs(int(nstep,i8))*1000003_i8, rng_im)
+          seed = mod(seed + abs(int(myid,i8))*9176_i8, rng_im)
+          seed = mod(seed + int(c,i8)*48271_i8, rng_im)
+          seed = mod(seed + int(ns_cell,i8)*69621_i8, rng_im)
+          if( seed.le.0_i8 ) seed = 1_i8
+
+          seed = mod(rng_ia*seed, rng_im)
+          if( seed.le.0_i8 ) seed = seed + rng_im - 1_i8
+          perm_b = int(mod(seed,int(ns_cell,i8)))
+
+          seed = mod(rng_ia*seed, rng_im)
+          if( seed.le.0_i8 ) seed = seed + rng_im - 1_i8
+          perm_a = int(mod(seed,int(ns_cell,i8))) + 1
+
+          ! Affine permutation gives random non-overlapping pairs without
+          ! storing a shuffled particle list.
+          do
+            gcd_a = perm_a
+            gcd_b = ns_cell
+            do while( gcd_b.ne.0 )
+              gcd_tmp = mod(gcd_a,gcd_b)
+              gcd_a = gcd_b
+              gcd_b = gcd_tmp
+            enddo
+            if( gcd_a.eq.1 ) exit
+            perm_a = perm_a + 1
+            if( perm_a.gt.ns_cell ) perm_a = 1
+          enddo
+
+          do pair=0,npairs-1
+            pos1 = first + int(mod(int(perm_a,i8)*(2_i8*int(pair,i8)) &
+              + int(perm_b,i8),int(ns_cell,i8)))
+            pos2 = first + int(mod(int(perm_a,i8)*(2_i8*int(pair,i8)+1_i8) &
+              + int(perm_b,i8),int(ns_cell,i8)))
+            j_idx = cell_particles(pos1)
+            k_idx = cell_particles(pos2)
+
+            if( pdata(j_idx,prmult).lt.pdata(k_idx,prmult) )then
+              j_idx = cell_particles(pos2)
+              k_idx = cell_particles(pos1)
+            endif
+
+            xi_j = pdata(j_idx,prmult)
+            xi_k = pdata(k_idx,prmult)
+            r_j = pdata(j_idx,prrp)
+            r_k = pdata(k_idx,prrp)
+            ms_j = pdata(j_idx,prms)
+            ms_k = pdata(k_idx,prms)
+            kap_j = pdata(j_idx,prkap)
+            kap_k = pdata(k_idx,prkap)
+            coal_pair_attempts_step = coal_pair_attempts_step + 1.0d0
+
+            if( xi_j.ne.xi_j .or. xi_k.ne.xi_k .or. &
+                r_j.ne.r_j .or. r_k.ne.r_k .or. &
+                ms_j.ne.ms_j .or. ms_k.ne.ms_k .or. &
+                kap_j.ne.kap_j .or. kap_k.ne.kap_k .or. &
+                abs(dble(xi_j)).gt.huge(1.0d0) .or. &
+                abs(dble(xi_k)).gt.huge(1.0d0) .or. &
+                abs(dble(r_j)).gt.huge(1.0d0) .or. &
+                abs(dble(r_k)).gt.huge(1.0d0) .or. &
+                xi_j.le.0.0 .or. xi_k.le.0.0 .or. r_j.le.0.0 .or. r_k.le.0.0 )then
+              bad_pair = bad_pair + 1
+            else
+              cell_dv = dble(cell_volume(c))
+              if( coal_kernel.eq.0 )then
+                pvol_j = (4.0d0/3.0d0)*dble(pi)*dble(r_j)**3
+                pvol_k = (4.0d0/3.0d0)*dble(pi)*dble(r_k)**3
+                kernel = coal_golovin_b*(pvol_j + pvol_k)
+              elseif( coal_kernel.eq.1 )then
+                veldiff = sqrt( dble(pdata(j_idx,prvpx)-pdata(k_idx,prvpx))**2 &
+                  + dble(pdata(j_idx,prvpy)-pdata(k_idx,prvpy))**2 &
+                  + dble(pdata(j_idx,prvpz)-pdata(k_idx,prvpz))**2 )
+                kernel = dble(pi)*(dble(r_j)+dble(r_k))**2*veldiff
+              elseif( coal_kernel.eq.2 )then
+                veldiff = sqrt( dble(pdata(j_idx,prvpx)-pdata(k_idx,prvpx))**2 &
+                  + dble(pdata(j_idx,prvpy)-pdata(k_idx,prvpy))**2 &
+                  + dble(pdata(j_idx,prvpz)-pdata(k_idx,prvpz))**2 )
+                rbig_um = 1.0d6*max(dble(r_j),dble(r_k))
+                rsmall_um = 1.0d6*min(dble(r_j),dble(r_k))
+                if( rbig_um.le.50.0d0 )then
+                  effic = 4.5d-4*rbig_um**2 &
+                    *(1.0d0 - 3.0d0/(max(3.0d0,rsmall_um)+1.0d-2))
+                else
+                  effic = 1.0d0
+                endif
+                effic = min(1.0d0,max(0.0d0,effic))
+                kernel = dble(pi)*effic*(dble(r_j)+dble(r_k))**2*veldiff
+              elseif( coal_kernel.eq.3 )then
+                veldiff = sqrt( dble(pdata(j_idx,prvpx)-pdata(k_idx,prvpx))**2 &
+                  + dble(pdata(j_idx,prvpy)-pdata(k_idx,prvpy))**2 &
+                  + dble(pdata(j_idx,prvpz)-pdata(k_idx,prvpz))**2 )
+                effic = hall_effic_um(1.0d6*dble(r_j),1.0d6*dble(r_k))
+                kernel = dble(pi)*effic*(dble(r_j)+dble(r_k))**2*veldiff
+              elseif( coal_kernel.eq.4 )then
+                veldiff = sqrt( dble(pdata(j_idx,prvpx)+pdata(j_idx,prusgs) &
+                  - pdata(k_idx,prvpx)-pdata(k_idx,prusgs))**2 &
+                  + dble(pdata(j_idx,prvpy)+pdata(j_idx,prvsgs) &
+                  - pdata(k_idx,prvpy)-pdata(k_idx,prvsgs))**2 &
+                  + dble(pdata(j_idx,prvpz)+pdata(j_idx,prwsgs) &
+                  - pdata(k_idx,prvpz)-pdata(k_idx,prwsgs))**2 )
+                effic = hall_effic_um(1.0d6*dble(r_j),1.0d6*dble(r_k))
+                kernel = dble(pi)*effic*(dble(r_j)+dble(r_k))**2*veldiff
+              else
+                kernel = 0.0d0
+              endif
+              pair_factor = (dble(ns_cell)*(dble(ns_cell)-1.0d0)/2.0d0) &
+                /dble(npairs)
+              p_alpha = max(0.0d0,kernel*dble(dt)/cell_dv*dble(xi_j)*pair_factor)
+
+              if( kernel.ne.kernel .or. p_alpha.ne.p_alpha .or. &
+                  abs(kernel).gt.huge(1.0d0) .or. &
+                  abs(p_alpha).gt.huge(1.0d0) .or. &
+                  cell_dv.le.0.0d0 .or. kernel.lt.0.0d0 )then
+                bad_kernel = bad_kernel + 1
+              else
+                coal_palpha_sum_step = coal_palpha_sum_step + p_alpha
+                coal_palpha_max_step = max(coal_palpha_max_step,p_alpha)
+
+                seed = mod(rng_ia*seed, rng_im)
+                if( seed.le.0_i8 ) seed = seed + rng_im - 1_i8
+                phi = dble(seed)/dble(rng_im)
+                gm_real = aint(p_alpha)
+                frac_p = p_alpha - gm_real
+                if( phi.lt.frac_p )then
+                  gm_real = gm_real + 1.0d0
+                endif
+                gamma_cap = aint(dble(xi_j)/dble(xi_k))
+
+                if( gm_real.ne.gm_real .or. gamma_cap.ne.gamma_cap .or. &
+                    abs(gm_real).gt.huge(1.0d0) .or. &
+                    abs(gamma_cap).gt.huge(1.0d0) .or. &
+                    min(gm_real,gamma_cap).gt.dble(coal_real_huge) )then
+                  bad_kernel = bad_kernel + 1
+                else
+                  if( gm_real.gt.0.0d0 .and. gamma_cap.gt.0.0d0 )then
+                    gam_til = min(gm_real,gamma_cap)
+                    remaining_j = dble(xi_j) - gam_til*dble(xi_k)
+                    mult_loss = mult_loss + gam_til*dble(xi_k)
+                    coal_pair_successes_step = coal_pair_successes_step + 1.0d0
+                    coal_collision_mult_step = coal_collision_mult_step + gam_til*dble(xi_k)
+                    coal_gamtil_max_step = max(coal_gamtil_max_step,gam_til)
+                    new_rad = (gam_til*dble(r_j)**3 + dble(r_k)**3)**(1.0d0/3.0d0)
+                    new_ms = gam_til*dble(ms_j) + dble(ms_k)
+                    if( new_ms.gt.0.0d0 )then
+                      new_kap = (gam_til*dble(ms_j)*dble(kap_j) &
+                        + dble(ms_k)*dble(kap_k))/new_ms
+                    else
+                      new_kap = 0.5d0*(dble(kap_j) + dble(kap_k))
+                    endif
+
+                    if( new_rad.ne.new_rad .or. new_ms.ne.new_ms .or. &
+                        new_kap.ne.new_kap .or. &
+                        abs(new_rad).gt.dble(coal_real_huge) .or. &
+                        abs(new_ms).gt.dble(coal_real_huge) .or. &
+                        abs(new_kap).gt.dble(coal_real_huge) .or. &
+                        new_rad.le.0.0d0 )then
+                      bad_kernel = bad_kernel + 1
+                    else
+                      if( remaining_j.gt.0.0d0 )then
+                        pdata(j_idx,prmult) = remaining_j
+                        pdata(k_idx,prrp) = new_rad
+                        pdata(k_idx,prms) = new_ms
+                        pdata(k_idx,prkap) = new_kap
+                      else
+                        new_mult_j = 0.5d0*dble(xi_k)
+                        new_mult_k = dble(xi_k) - new_mult_j
+                        pdata(j_idx,prmult) = new_mult_j
+                        pdata(k_idx,prmult) = new_mult_k
+                        pdata(j_idx,prrp) = new_rad
+                        pdata(k_idx,prrp) = new_rad
+                        pdata(j_idx,prms) = new_ms
+                        pdata(k_idx,prms) = new_ms
+                        pdata(j_idx,prkap) = new_kap
+                        pdata(k_idx,prkap) = new_kap
+                      endif
+                    endif
+                  endif
+                endif
+              endif
+            endif
+          enddo
+        endif
+      enddo
+      !$acc end parallel
+
+      coal_pair_attempts = coal_pair_attempts + coal_pair_attempts_step
+      coal_pair_successes = coal_pair_successes + coal_pair_successes_step
+      coal_collision_mult = coal_collision_mult + coal_collision_mult_step
+      coal_palpha_sum = coal_palpha_sum + coal_palpha_sum_step
+      coal_palpha_max = max(coal_palpha_max,coal_palpha_max_step)
+      coal_gamtil_max = max(coal_gamtil_max,coal_gamtil_max_step)
+
+      if( bad_pair.gt.0 )then
+        print *,'DROPLET COALESCENCE BAD PAIR STATE DETAIL myid=',myid, &
+                ' nstep=',nstep,' bad_pair=',bad_pair
+        call flush(6)
+        stop 'DROPLET COALESCENCE BAD PAIR STATE'
+      endif
+
+      if( bad_kernel.gt.0 )then
+        print *,'DROPLET COALESCENCE BAD KERNEL STATE DETAIL myid=',myid, &
+                ' nstep=',nstep,' bad_kernel=',bad_kernel
+        call flush(6)
+        stop 'DROPLET COALESCENCE BAD KERNEL STATE'
+      endif
+
+      bad_state = 0
+      !$acc parallel loop gang vector default(present) reduction(+:bad_state)
+      do np=1,nactive
+        if( pdata(np,prmult).ne.pdata(np,prmult) .or. &
+            pdata(np,prrp).ne.pdata(np,prrp) .or. &
+            pdata(np,prms).ne.pdata(np,prms) .or. &
+            pdata(np,prkap).ne.pdata(np,prkap) .or. &
+            abs(dble(pdata(np,prmult))).gt.huge(1.0d0) .or. &
+            abs(dble(pdata(np,prrp))).gt.huge(1.0d0) .or. &
+            abs(dble(pdata(np,prms))).gt.huge(1.0d0) .or. &
+            abs(dble(pdata(np,prkap))).gt.huge(1.0d0) .or. &
+            pdata(np,prmult).le.0.0 .or. pdata(np,prrp).le.0.0 )then
+          bad_state = bad_state + 1
+        endif
+      enddo
+      !$acc end parallel
+
+      if( bad_state.gt.0 )then
+        print *,'DROPLET COALESCENCE BAD OUTPUT STATE DETAIL myid=',myid, &
+                ' nstep=',nstep,' bad_state=',bad_state
+        call flush(6)
+        stop 'DROPLET COALESCENCE BAD OUTPUT STATE'
+      endif
+
+      mult_after = 0.0d0
+      water_after = 0.0d0
+      solute_after = 0.0d0
+      kappa_after = 0.0d0
+      !$acc parallel loop gang vector default(present) &
+      !$acc reduction(+:mult_after,water_after,solute_after,kappa_after)
+      do np=1,nactive
+        mult_after = mult_after + dble(pdata(np,prmult))
+        water_after = water_after + dble(pdata(np,prmult)) &
+          *dble(pdata(np,prrp))**3
+        solute_after = solute_after + dble(pdata(np,prmult)) &
+          *dble(pdata(np,prms))
+        kappa_after = kappa_after + dble(pdata(np,prmult)) &
+          *dble(pdata(np,prms))*dble(pdata(np,prkap))
+      enddo
+      !$acc end parallel
+
+      mult_err = abs((mult_before-mult_after)-mult_loss) &
+        /max(abs(mult_before),coal_conservation_floor)
+      water_err = abs(water_after-water_before) &
+        /max(abs(water_before),coal_conservation_floor)
+      solute_err = abs(solute_after-solute_before) &
+        /max(abs(solute_before),coal_conservation_floor)
+      kappa_err = abs(kappa_after-kappa_before) &
+        /max(abs(kappa_before),coal_conservation_floor)
+
+      if( mult_err.gt.coal_conservation_tol .or. &
+          water_err.gt.coal_conservation_tol .or. &
+          solute_err.gt.coal_conservation_tol .or. &
+          kappa_err.gt.coal_conservation_tol )then
+        stop 'DROPLET COALESCENCE CONSERVATION CHECK FAILED'
+      endif
+
+      !$acc end data
+
+      deallocate(cell_id,cell_count,cell_start,cell_cursor,cell_particles,cell_volume)
+
+   end subroutine droplet_coalescence_driver
 
 
    subroutine project_droplet_qc_effc(xf,yf,zf,sigmaf,rho,pdata,pdata_locind,q3d,qa,effc)
@@ -3451,7 +4118,7 @@
 
       real :: tnumpart_r(nbins)
 
-      integer, parameter :: num0 = 33, num1 = 34   !Number of 0th and 1st order statistics in droplet_diag
+      integer, parameter :: num0 = 39, num1 = 34   !Number of 0th and 1st order statistics in droplet_diag
       real :: rad10_tmp,dry_rad10_tmp
       double precision :: qstar_tmp
       integer :: ibin,ibin_dry
@@ -3560,31 +4227,37 @@
       droplet_diag0(27) = eng_reentry
       droplet_diag0(28) = m1_reentry
       droplet_diag0(29) = m2_reentry
-      droplet_diag0(30) = radmin
-      droplet_diag0(31) = Tpmin
-      droplet_diag0(32) = radmax
-      droplet_diag0(33) = Tpmax
+      droplet_diag0(30) = coal_pair_attempts
+      droplet_diag0(31) = coal_pair_successes
+      droplet_diag0(32) = coal_collision_mult
+      droplet_diag0(33) = coal_palpha_sum
+      droplet_diag0(34) = radmin
+      droplet_diag0(35) = Tpmin
+      droplet_diag0(36) = radmax
+      droplet_diag0(37) = Tpmax
+      droplet_diag0(38) = coal_palpha_max
+      droplet_diag0(39) = coal_gamtil_max
 
       ! The root rank will collect the diagnostic from different MPI ranks
       if ( myid == 0 ) then
-         call mpi_reduce(MPI_IN_PLACE,droplet_diag0(1),num0-4,MPI_DOUBLE_PRECISION, &
+         call mpi_reduce(MPI_IN_PLACE,droplet_diag0(1),num0-6,MPI_DOUBLE_PRECISION, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
       else
-         call mpi_reduce(droplet_diag0(1),droplet_diag0(1),num0-4,MPI_DOUBLE_PRECISION, &
+         call mpi_reduce(droplet_diag0(1),droplet_diag0(1),num0-6,MPI_DOUBLE_PRECISION, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
       end if
       if ( myid == 0 ) then
-         call mpi_reduce(MPI_IN_PLACE,droplet_diag0(num0-3),2,MPI_DOUBLE_PRECISION, &
+         call mpi_reduce(MPI_IN_PLACE,droplet_diag0(num0-5),2,MPI_DOUBLE_PRECISION, &
                          MPI_MIN,0,MPI_COMM_WORLD,ierr)
       else
-         call mpi_reduce(droplet_diag0(num0-3),droplet_diag0(num0-3),2,MPI_DOUBLE_PRECISION, &
+         call mpi_reduce(droplet_diag0(num0-5),droplet_diag0(num0-5),2,MPI_DOUBLE_PRECISION, &
                          MPI_MIN,0,MPI_COMM_WORLD,ierr)
       end if
       if ( myid == 0 ) then
-         call mpi_reduce(MPI_IN_PLACE,droplet_diag0(num0-1),2,MPI_DOUBLE_PRECISION, &
+         call mpi_reduce(MPI_IN_PLACE,droplet_diag0(num0-3),4,MPI_DOUBLE_PRECISION, &
                          MPI_MAX,0,MPI_COMM_WORLD,ierr)
       else
-         call mpi_reduce(droplet_diag0(num0-1),droplet_diag0(num0-1),2,MPI_DOUBLE_PRECISION, &
+         call mpi_reduce(droplet_diag0(num0-3),droplet_diag0(num0-3),4,MPI_DOUBLE_PRECISION, &
                          MPI_MAX,0,MPI_COMM_WORLD,ierr)
       end if
       if ( myid == 0 ) then 
@@ -3617,10 +4290,16 @@
          eng_reentry = droplet_diag0(27)
          m1_reentry = droplet_diag0(28)
          m2_reentry = droplet_diag0(29)
-         radmin = droplet_diag0(30)
-         Tpmin = droplet_diag0(31)
-         radmax = droplet_diag0(32)
-         Tpmax = droplet_diag0(33)
+         coal_pair_attempts = droplet_diag0(30)
+         coal_pair_successes = droplet_diag0(31)
+         coal_collision_mult = droplet_diag0(32)
+         coal_palpha_sum = droplet_diag0(33)
+         radmin = droplet_diag0(34)
+         Tpmin = droplet_diag0(35)
+         radmax = droplet_diag0(36)
+         Tpmax = droplet_diag0(37)
+         coal_palpha_max = droplet_diag0(38)
+         coal_gamtil_max = droplet_diag0(39)
 #endif
          if (tnumpart .gt. 0.0) then
             radavg = radavg/dble(tnumpart)
@@ -3643,6 +4322,26 @@
          end if
 #ifdef MPI
       end if
+#endif
+
+      coal_palpha_mean = 0.0d0
+      if( coal_pair_attempts.gt.0.0d0 )then
+         coal_palpha_mean = coal_palpha_sum/coal_pair_attempts
+      endif
+
+#ifdef MPI
+      if( myid.eq.0 )then
+#endif
+      if( coal_pair_attempts.gt.0.0d0 )then
+         write(*,*) 'DROPLET COALESCENCE DIAG: attempts=',coal_pair_attempts, &
+                    ' successes=',coal_pair_successes, &
+                    ' collision_mult=',coal_collision_mult
+         write(*,*) 'DROPLET COALESCENCE DIAG: palpha_mean=',coal_palpha_mean, &
+                    ' palpha_max=',coal_palpha_max, &
+                    ' gamtil_max=',coal_gamtil_max
+      endif
+#ifdef MPI
+      endif
 #endif
 
 
@@ -4227,6 +4926,13 @@
       m2_injected = 0.0
       num100 = 0.0
       num1000 = 0.0
+      coal_pair_attempts = 0.0d0
+      coal_pair_successes = 0.0d0
+      coal_collision_mult = 0.0d0
+      coal_palpha_sum = 0.0d0
+      coal_palpha_mean = 0.0d0
+      coal_palpha_max = 0.0d0
+      coal_gamtil_max = 0.0d0
       
 
       !$acc update device (hist_restime,hist_fallrad,num_destroyed, &
@@ -4234,6 +4940,8 @@
       !$acc                eng_destroyed,m1_destroyed,m2_destroyed,eng_injected, &
       !$acc                mass_reentry,eng_reentry,m1_reentry,m2_reentry, &
       !$acc                m1_injected,m2_injected, &
+      !$acc                coal_pair_attempts,coal_pair_successes,coal_collision_mult, &
+      !$acc                coal_palpha_sum,coal_palpha_mean,coal_palpha_max,coal_gamtil_max, &
       !$acc                num100,num1000)
 
       !$acc end data
@@ -5660,6 +6368,13 @@
     m2_injected = 0.0
     num100 = 0.0
     num1000 = 0.0
+    coal_pair_attempts = 0.0d0
+    coal_pair_successes = 0.0d0
+    coal_collision_mult = 0.0d0
+    coal_palpha_sum = 0.0d0
+    coal_palpha_mean = 0.0d0
+    coal_palpha_max = 0.0d0
+    coal_gamtil_max = 0.0d0
 
     !$acc update device(hist_restime,hist_fallrad,restime_min, &
     !$acc               restime_max,restime_min10,restime_max10, &
@@ -5667,6 +6382,8 @@
     !$acc               num_destroyed,mass_destroyed,mass_evap,mass_dpten,num_injected,mass_injected, &
     !$acc               eng_destroyed,m1_destroyed,m2_destroyed,eng_injected,m1_injected,m2_injected, &
     !$acc               mass_reentry,eng_reentry,m1_reentry,m2_reentry, &
+    !$acc               coal_pair_attempts,coal_pair_successes,coal_collision_mult, &
+    !$acc               coal_palpha_sum,coal_palpha_mean,coal_palpha_max,coal_gamtil_max, &
     !$acc               num100,num1000)
 
     end subroutine initialize_droplet_histograms
@@ -5902,6 +6619,32 @@
     call disp_err( nf90_def_var(ncid,"m2_injected",nf90_float,timeid,varid) , .true. )
     call disp_err( nf90_put_att(ncid,varid,"long_name","Total y-momentum of droplets injected since last entry") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","kg-m/s") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"coal_pair_attempts",nf90_double,timeid,varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Number of sampled coalescence candidate pairs since last entry") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"coal_pair_successes",nf90_double,timeid,varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "Number of sampled coalescence pairs with nonzero collision count since last entry") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"coal_collision_mult",nf90_double,timeid,varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity removed by droplet coalescence since last entry") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"coal_palpha_mean",nf90_double,timeid,varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Mean coalescence p_alpha over sampled pairs since last entry") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","1") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"coal_palpha_max",nf90_double,timeid,varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Maximum coalescence p_alpha over sampled pairs since last entry") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","1") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"coal_gamtil_max",nf90_double,timeid,varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "Maximum effective coalescence event count gam_til since last entry") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","1") , .true. )
 
 
     !!1st order (horizontal averages)
@@ -6214,6 +6957,24 @@
 
     call disp_err( nf90_inq_varid(ncid,"m2_injected",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,m2_injected,(/time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"coal_pair_attempts",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,coal_pair_attempts,(/time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"coal_pair_successes",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,coal_pair_successes,(/time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"coal_collision_mult",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,coal_collision_mult,(/time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"coal_palpha_mean",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,coal_palpha_mean,(/time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"coal_palpha_max",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,coal_palpha_max,(/time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"coal_gamtil_max",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,coal_gamtil_max,(/time_index/)) , .true. )
 
     !!1st order
     call disp_err( nf90_inq_varid(ncid,"numconc",varid) , .true. )
