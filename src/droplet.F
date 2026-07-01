@@ -14,7 +14,8 @@
   integer, parameter :: nbins = 130  !Bins for the droplet histograms
   real,dimension(nbins) :: bins_restime  !Bins for droplet residence time
   real,dimension(nbins,nbins) :: hist_restime  !Droplet residence time joint pdf (with size)
-  real,dimension(nbins) :: bins_radius,hist_radius,hist_dry_radius,hist_radius10,hist_fallrad  !Histograms for droplet radius
+  real,dimension(nbins) :: bins_radius,hist_radius,hist_dry_radius, &
+                           hist_radius10,hist_fallrad,hist_injected  !Histograms for droplet radius
   real :: restime_min,restime_max,restime_min10,restime_max10,dhres !Bin parameters for droplet residence time
   real :: dhrad,rmin,rmax,rmin10,rmax10  !Bin parameters for droplet size
 
@@ -97,7 +98,7 @@
       4.000d0,4.000d0,4.000d0,4.000d0,4.000d0 /), (/ hall_nr,hall_nq /))
 
   !$acc declare create (hist_restime,hist_radius,hist_dry_radius,hist_radius10, &
-  !$acc                 hist_fallrad,restime_min,restime_max, &
+  !$acc                 hist_fallrad,hist_injected,restime_min,restime_max, &
   !$acc                 restime_min10,restime_max10,dhres,dhrad, &
   !$acc                 rmin,rmax,rmin10,rmax10,num_destroyed,mass_evap,mass_dpten, &
   !$acc                 num_injected,mass_destroyed,mass_injected, &
@@ -4921,7 +4922,7 @@
       end do
       !$acc end parallel
 
-      !$acc update host (hist_radius,hist_dry_radius,hist_radius10,hist_restime,hist_fallrad,tnumpart_r)
+      !$acc update host (hist_radius,hist_dry_radius,hist_radius10,hist_restime,hist_fallrad,hist_injected,tnumpart_r)
 
 #ifdef MPI
        !Sum up the histograms across MPI processes
@@ -4936,6 +4937,8 @@
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
           call mpi_reduce(MPI_IN_PLACE,hist_fallrad,nbins,MPI_REAL, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
+          call mpi_reduce(MPI_IN_PLACE,hist_injected,nbins,MPI_REAL, &
+                         MPI_SUM,0,MPI_COMM_WORLD,ierr)
           call mpi_reduce(MPI_IN_PLACE,tnumpart_r,nbins,MPI_REAL, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
        else
@@ -4948,6 +4951,8 @@
           call mpi_reduce(hist_restime,hist_restime,nbins*nbins,MPI_REAL, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
           call mpi_reduce(hist_fallrad,hist_fallrad,nbins,MPI_REAL, &
+                         MPI_SUM,0,MPI_COMM_WORLD,ierr)
+          call mpi_reduce(hist_injected,hist_injected,nbins,MPI_REAL, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
           call mpi_reduce(tnumpart_r,tnumpart_r,nbins,MPI_REAL, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
@@ -4980,6 +4985,7 @@
       !Now that it's done, remember to zero out the cumulative stats:
       hist_restime = 0.0
       hist_fallrad = 0.0
+      hist_injected = 0.0
       num_destroyed = 0.0
       mass_destroyed = 0.0
       mass_evap = 0.0
@@ -5007,7 +5013,7 @@
       coal_gamtil_max = 0.0d0
       
 
-      !$acc update device (hist_restime,hist_fallrad,num_destroyed, &
+      !$acc update device (hist_restime,hist_fallrad,hist_injected,num_destroyed, &
       !$acc                mass_destroyed,mass_evap,mass_dpten,num_injected,mass_injected, &
       !$acc                eng_destroyed,m1_destroyed,m2_destroyed,eng_injected, &
       !$acc                mass_reentry,eng_reentry,m1_reentry,m2_reentry, &
@@ -6008,7 +6014,7 @@
       integer, intent(out) :: my_reintro
       integer(i8), intent(out) :: bin_inserted(ssgf_nbin)
 
-      integer :: i,np,idx_tmp,ibin
+      integer :: i,np,idx_tmp,ibin,ihist
       integer(i8) :: tot_after_reintro,total_reintro_actual
       integer(i8) :: local_bin_reintro(ssgf_nbin),remaining_count
       integer :: local_capacity_ok,global_capacity_ok
@@ -6022,6 +6028,7 @@
       !implementing the Andreas 1998 sea spray generation function
       !Set the parameters of the two lognormals:
       double precision :: rand,r_interval
+      real :: rad10_tmp
       integer :: j,ierr
 
       integer :: local_seed
@@ -6068,7 +6075,7 @@
          !$acc data copyin(ssgf_binsdata_edge,local_bin_reintro) create(randomNumbers,randomNumbers%state)
          !$acc update device(ngidx)
          !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) &
-         !$acc private(randomNumbers,local_seed,ibin,remaining_count)
+         !$acc private(randomNumbers,local_seed,ibin,ihist,remaining_count,rad10_tmp)
          do j=1,my_reintro
             np=nparcelsLocalActive+j
             if (random_droplets) then
@@ -6125,6 +6132,16 @@
             pdata(np,prtp) = tsk0   !Set to the SST
             pdata(np,prmult) = drop_mult
             pdata(np,pract) = 1.0
+            rad10_tmp = log10(rad_init)
+            if (rad10_tmp .gt. rmax10 + 0.5*dhrad) then
+               ihist = nbins
+            elseif (rad10_tmp .lt. rmin10 - 0.5*dhrad) then
+               ihist = 1
+            else
+               ihist = floor((rad10_tmp-(rmin10-0.5*dhrad))/dhrad)+1
+            end if
+            !$acc atomic update
+            hist_injected(ihist) = hist_injected(ihist) + pdata(np,prmult)
             !Set to something realistic so it doesn't break the stats at initiation
             pdata(np,pru) = 0.0
             pdata(np,prv) = 0.0
@@ -6216,13 +6233,14 @@
       integer, intent(out) :: my_reintro
       integer(i8), intent(out) :: bin_inserted(ssgf_nbin)
     
-      integer :: np,idx_tmp
+      integer :: np,idx_tmp,ihist
       integer(i8) :: tot_after_reintro,total_reintro_actual
       integer(i8) :: local_bin_reintro(ssgf_nbin)
       integer :: local_capacity_ok,global_capacity_ok
 
       double precision :: rad_init  !Initial radius
       double precision :: rand
+      real :: rad10_tmp
       type(randomNumberSequence) :: randomNumbers
 
       real :: xrange,yrange,zrange
@@ -6272,7 +6290,8 @@
 
          !$acc data create(randomNumbers,randomNumbers%state)
          !$acc update device(ngidx)
-         !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) private(randomNumbers,local_seed)
+         !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) &
+         !$acc private(randomNumbers,local_seed,ihist,rad10_tmp)
          do j=1,my_reintro
             np=nparcelsLocalActive+j
             if (random_droplets) then
@@ -6312,6 +6331,16 @@
             pdata(np,prtp) = 290.0  
             pdata(np,prmult) = drop_mult
             pdata(np,pract) = 1.0
+            rad10_tmp = log10(rad_init)
+            if (rad10_tmp .gt. rmax10 + 0.5*dhrad) then
+               ihist = nbins
+            elseif (rad10_tmp .lt. rmin10 - 0.5*dhrad) then
+               ihist = 1
+            else
+               ihist = floor((rad10_tmp-(rmin10-0.5*dhrad))/dhrad)+1
+            end if
+            !$acc atomic update
+            hist_injected(ihist) = hist_injected(ihist) + pdata(np,prmult)
             !Set to something realistic so it doesn't break the stats at initiation
             pdata(np,pru) = 0.0
             pdata(np,prv) = 0.0
@@ -6375,13 +6404,14 @@
       double precision, intent(in) :: mtime
       integer, intent(out) :: my_reintro
 
-      integer :: j,np,idx_tmp
+      integer :: j,np,idx_tmp,ihist
       integer :: local_seed
       integer(i8) :: total_reintro
 #ifdef MPI
       integer :: ierr
 #endif
       real :: xrange,yrange,zrange
+      real :: rad10_tmp
       double precision :: rand
       type(randomNumberSequence) :: randomNumbers
 
@@ -6412,7 +6442,8 @@
 
          !$acc data create(randomNumbers,randomNumbers%state)
          !$acc update device(ngidx)
-         !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) private(randomNumbers,local_seed)
+         !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) &
+         !$acc private(randomNumbers,local_seed,ihist,rad10_tmp)
          do j=1,my_reintro
             np=nparcelsLocalActive+j
 
@@ -6439,6 +6470,16 @@
             pdata(np,prtp) = 290.0
             pdata(np,prmult) = drop_mult
             pdata(np,pract) = 1.0
+            rad10_tmp = log10(pdata(np,prrp))
+            if (rad10_tmp .gt. rmax10 + 0.5*dhrad) then
+               ihist = nbins
+            elseif (rad10_tmp .lt. rmin10 - 0.5*dhrad) then
+               ihist = 1
+            else
+               ihist = floor((rad10_tmp-(rmin10-0.5*dhrad))/dhrad)+1
+            end if
+            !$acc atomic update
+            hist_injected(ihist) = hist_injected(ihist) + pdata(np,prmult)
             pdata(np,pru) = 0.0
             pdata(np,prv) = 0.0
             pdata(np,prw) = 0.0
@@ -6511,6 +6552,7 @@
     !(only those which accumulate between dropdiag I/O)
     hist_restime = 0.0
     hist_fallrad = 0.0
+    hist_injected = 0.0
     num_destroyed = 0.0
     mass_destroyed = 0.0
     mass_evap = 0.0
@@ -6537,7 +6579,7 @@
     coal_palpha_max = 0.0d0
     coal_gamtil_max = 0.0d0
 
-    !$acc update device(hist_restime,hist_fallrad,restime_min, &
+    !$acc update device(hist_restime,hist_fallrad,hist_injected,restime_min, &
     !$acc               restime_max,restime_min10,restime_max10, &
     !$acc               dhres,dhrad,rmin,rmax,rmin10,rmax10, &
     !$acc               num_destroyed,mass_destroyed,mass_evap,mass_dpten,num_injected,mass_injected, &
@@ -6987,6 +7029,10 @@
     call disp_err( nf90_put_att(ncid,varid,"long_name","total radius count of droplet which fell out over the past statfrq time") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
 
+    call disp_err( nf90_def_var(ncid,"hist_injected",nf90_float,(/binsid,timeid/),varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","radius histogram of droplets injected over the past statfrq time") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
+
     call disp_err( nf90_def_var(ncid,"tnumpart_r",nf90_float,(/binsid,timeid/),varid) , .true. )
     call disp_err( nf90_put_att(ncid,varid,"long_name","Droplet count as a function of radius, binned by bins_radius") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
@@ -7269,6 +7315,9 @@
 
     call disp_err( nf90_inq_varid(ncid,"hist_fallrad",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,hist_fallrad,(/1,time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"hist_injected",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,hist_injected,(/1,time_index/)) , .true. )
 
     call disp_err( nf90_inq_varid(ncid,"tnumpart_r",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,tnumpart_r,(/1,time_index/)) , .true. )
