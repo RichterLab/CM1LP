@@ -1538,7 +1538,8 @@
       use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,npvals,nparcelsLocal, &
           nparcelsLocalActive,nx,ny,axisymm,terrain_flag, &
           prx,pry,prz,prsig,prrp,prmult,prms,prkap,prvpx,prvpy,prvpz, &
-          prusgs,prvsgs,prwsgs,coal_enabled,coal_kernel,myid
+          prusgs,prvsgs,prwsgs,coal_enabled,coal_kernel, &
+          coal_Ndx,coal_Ndy,coal_Ndz,myid
       use constants, only : undefined_index,i8,pi
       implicit none
 
@@ -1551,9 +1552,6 @@
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
       integer, intent(inout), dimension(nparcelsLocal,3) :: pdata_locind
 
-      integer, parameter :: coal_nx = 1
-      integer, parameter :: coal_ny = 1
-      integer, parameter :: coal_nz = 1
       double precision, parameter :: coal_conservation_tol = 1.0d-4
       double precision, parameter :: coal_conservation_floor = 1.0d-30
       double precision, parameter :: coal_golovin_b = 1.5d3
@@ -1594,9 +1592,9 @@
       if( nparcelsLocalActive.le.1 ) return
 
       nactive = nparcelsLocalActive
-      nci = max(1,(ni+coal_nx-1)/coal_nx)
-      ncj = max(1,(nj+coal_ny-1)/coal_ny)
-      nck = max(1,(nk+coal_nz-1)/coal_nz)
+      nci = max(1,(ni+coal_Ndx-1)/coal_Ndx)
+      ncj = max(1,(nj+coal_Ndy-1)/coal_Ndy)
+      nck = max(1,(nk+coal_Ndz-1)/coal_Ndz)
       ncoal_cells = nci*ncj*nck
 
       if( ncoal_cells.lt.1 )then
@@ -1637,12 +1635,12 @@
         cj = ((c-1) - nci*ncj*(ck-1))/nci + 1
         ci = c - nci*(cj-1) - nci*ncj*(ck-1)
 
-        ilo = (ci-1)*coal_nx + 1
-        ihi = min(ni,ci*coal_nx)
-        jlo = (cj-1)*coal_ny + 1
-        jhi = min(nj,cj*coal_ny)
-        klo = (ck-1)*coal_nz + 1
-        khi = min(nk,ck*coal_nz)
+        ilo = (ci-1)*coal_Ndx + 1
+        ihi = min(ni,ci*coal_Ndx)
+        jlo = (cj-1)*coal_Ndy + 1
+        jhi = min(nj,cj*coal_Ndy)
+        klo = (ck-1)*coal_Ndz + 1
+        khi = min(nk,ck*coal_Ndz)
 
         vol_tmp = 0.0
         do kk=klo,khi
@@ -1715,9 +1713,9 @@
           endif
 
           if( kflag.ge.1 .and. kflag.le.nk )then
-            ci = (iflag-1)/coal_nx + 1
-            cj = (jflag-1)/coal_ny + 1
-            ck = (kflag-1)/coal_nz + 1
+            ci = (iflag-1)/coal_Ndx + 1
+            cj = (jflag-1)/coal_Ndy + 1
+            ck = (kflag-1)/coal_Ndz + 1
             cell = ci + nci*(cj-1) + nci*ncj*(ck-1)
             cell_id(np) = cell
             !$acc atomic update

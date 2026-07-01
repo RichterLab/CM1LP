@@ -167,6 +167,7 @@
                      nparcelsLocalActive
       integer :: drop_sgs_opt = 0
       integer :: coal_kernel = 2
+      integer :: coal_Ndx = 1, coal_Ndy = 1, coal_Ndz = 1
       logical :: coal_enabled = .false.
 
       !$acc declare create (ib,ie,jb,je,kb,ke,numq,nparcelsInit,npvals,nx,ny, &
@@ -179,6 +180,7 @@
       !$acc                 ibt,iet,jbt,jet,kbt,ket,two_way_coupling,         &
       !$acc                 drop_evap,drop_traj,drop_sgs_opt,                 &
       !$acc                 coal_enabled,coal_kernel,                          &
+      !$acc                 coal_Ndx,coal_Ndy,coal_Ndz,                       &
       !$acc                 prt,prqv,prprs,prrho,nparcelsLocal,               &
       !$acc                 mywest,myeast,mynorth,mysouth,myne,myse,mysw,mynw,&
       !$acc                 prmult,pract,prtime,prth,prpt1,prpt2,prq1,prq2,   &
@@ -347,7 +349,8 @@
               prcl_rho,prcl_qsat,prcl_sfc,                                    &
               nparcelsInit,nparcelsMax,drop_mult,                             &
 	      drop_inject_elapse,drop_inject_time,two_way_coupling,           &
-	      drop_evap,drop_traj,drop_sgs_opt,coal_enabled,coal_kernel
+	      drop_evap,drop_traj,drop_sgs_opt,coal_enabled,coal_kernel,      &
+              coal_Ndx,coal_Ndy,coal_Ndz
       namelist /param14/                                                      &
               dodomaindiag,diagfrq
       namelist /param15/                                                      &

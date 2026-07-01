@@ -1614,6 +1614,12 @@
                    2 = Long, 3 = Hall,
                    4 = Hall with SGS-velocity relative-speed enhancement)
 
+ coal_Ndx      -  Number of Eulerian dx grid cells per coalescence collision cell
+
+ coal_Ndy      -  Number of Eulerian dy grid cells per coalescence collision cell
+
+ coal_Ndz      -  Number of Eulerian dz grid cells per coalescence collision cell
+
 
 ------------------------------------------------------------------------
   nssl2mom_params section - parameters/options for NSSL microphysics scheme
