@@ -13,9 +13,11 @@
   real :: num100,num1000
   integer, parameter :: nbins = 130  !Bins for the droplet histograms
   real,dimension(nbins) :: bins_restime  !Bins for droplet residence time
+  real,dimension(nbins+1) :: bins_restime_edge  !Bin edges for droplet residence time
   real,dimension(nbins,nbins) :: hist_restime  !Droplet residence time joint pdf (with size)
   real,dimension(nbins) :: bins_radius,hist_radius,hist_dry_radius, &
                            hist_radius10,hist_fallrad,hist_injected  !Histograms for droplet radius
+  real,dimension(nbins+1) :: bins_radius_edge  !Bin edges for droplet radius
   real :: restime_min,restime_max,restime_min10,restime_max10,dhres !Bin parameters for droplet residence time
   real :: dhrad,rmin,rmax,rmin10,rmax10  !Bin parameters for droplet size
 
@@ -2881,7 +2883,7 @@
             elseif (restime10_tmp .lt. restime_min10 - 0.5*dhres) then
                ibin_res = 1
             else
-               ibin_res = (floor((restime10_tmp-(restime_min10-0.5*dhres))/dhres)+1)+1
+               ibin_res = floor((restime10_tmp-(restime_min10-0.5*dhres))/dhres)+1
             end if
 
             !The the droplet size at fallout
@@ -2892,7 +2894,7 @@
             elseif (rad10_tmp .lt. rmin10 - 0.5*dhrad) then
                ibin = 1
             else
-               ibin = (floor((rad10_tmp-(rmin10-0.5*dhrad))/dhrad)+1)+1
+               ibin = floor((rad10_tmp-(rmin10-0.5*dhrad))/dhrad)+1
             end if
 
             !$acc atomic update
@@ -4805,7 +4807,7 @@
          elseif (rad10_tmp .lt. rmin10 - 0.5*dhrad) then
             ibin = 1
          else
-            ibin = (floor((rad10_tmp-(rmin10-0.5*dhrad))/dhrad)+1)+1
+            ibin = floor((rad10_tmp-(rmin10-0.5*dhrad))/dhrad)+1
          end if
 
          !$acc atomic update
@@ -6530,9 +6532,10 @@
 
     dhrad = (rmax10-rmin10)/(nbins-1)
 
-    bins_radius(1) = rmin10-dhrad
-    do i=1,nbins-1
-       bins_radius(i+1) = bins_radius(i) + dhrad
+    bins_radius_edge(1) = rmin10-0.5*dhrad
+    do i=1,nbins
+       bins_radius(i) = rmin10 + dhrad*real(i-1)
+       bins_radius_edge(i+1) = bins_radius_edge(i) + dhrad
     end do 
 
     !For the residence time histograms
@@ -6543,9 +6546,10 @@
 
     dhres = (restime_max10-restime_min10)/(nbins-1)
 
-    bins_restime(1) = restime_min10-dhres
-    do i=1,nbins-1
-       bins_restime(i+1) = bins_restime(i) + dhres
+    bins_restime_edge(1) = restime_min10-0.5*dhres
+    do i=1,nbins
+       bins_restime(i) = restime_min10 + dhres*real(i-1)
+       bins_restime_edge(i+1) = bins_restime_edge(i) + dhres
     end do
 
     !Initialize histogram to zero
@@ -6615,7 +6619,7 @@
       integer, intent(in)    :: nbins
       real, intent(in) :: tnumpart
 
-      integer :: i,ncid,status,dimid,varid,time_index,timeid,tfile,zhid,binsid
+      integer :: i,ncid,status,dimid,varid,time_index,timeid,tfile,zhid,binsid,bins_edge_id
       logical :: allinfo
 
       if( myid.eq.0 ) print *,'  Entering writedropdiag_nc '
@@ -6665,6 +6669,7 @@
     call disp_err( nf90_def_dim(ncid,"time",nf90_unlimited,timeid) , .true. )
     call disp_err( nf90_def_dim(ncid,"zh",nk,zhid) , .true. )
     call disp_err( nf90_def_dim(ncid,"bins",nbins,binsid) , .true. )
+    call disp_err( nf90_def_dim(ncid,"bins_edge",nbins+1,bins_edge_id) , .true. )
 
     call disp_err( nf90_def_var(ncid,"time",nf90_float,(/timeid/),varid) , .true. )
     call disp_err( nf90_put_att(ncid,varid,"long_name","time") , .true. )
@@ -7002,12 +7007,20 @@
 
     !!Histograms (histograms of various droplet properties)
     call disp_err( nf90_def_var(ncid,"bins_radius",nf90_float,(/binsid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","histogram bin centers for radius") , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"units","m") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","histogram bin centers for log10 radius") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","log10(m)") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"bins_radius_edge",nf90_float,(/bins_edge_id/),varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","histogram bin edges for log10 radius") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","log10(m)") , .true. )
 
     call disp_err( nf90_def_var(ncid,"bins_restime",nf90_float,(/binsid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","histogram bin centers for droplet residence time") , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"units","s") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","histogram bin centers for log10 droplet residence time") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","log10(s)") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"bins_restime_edge",nf90_float,(/bins_edge_id/),varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","histogram bin edges for log10 droplet residence time") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","log10(s)") , .true. )
 
     call disp_err( nf90_def_var(ncid,"hist_radius",nf90_float,(/binsid,timeid/),varid) , .true. )
     call disp_err( nf90_put_att(ncid,varid,"long_name","total count for each bin") , .true. )
@@ -7298,8 +7311,14 @@
     call disp_err( nf90_inq_varid(ncid,"bins_radius",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,bins_radius,(/1/)) , .true. )
 
+    call disp_err( nf90_inq_varid(ncid,"bins_radius_edge",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,bins_radius_edge,(/1/)) , .true. )
+
     call disp_err( nf90_inq_varid(ncid,"bins_restime",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,bins_restime,(/1/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"bins_restime_edge",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,bins_restime_edge,(/1/)) , .true. )
 
     call disp_err( nf90_inq_varid(ncid,"hist_radius",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,hist_radius,(/1,time_index/)) , .true. )
