@@ -2271,7 +2271,7 @@
       real :: prsmin,prsmax,rhomin,rhomax
       real :: usgsmin,usgsmax,vsgsmin,vsgsmax,wsgsmin,wsgsmax
       real :: minvals(9),maxvals(9)
-      real, parameter :: drop_inject_elapse_tol = 10.0*epsilon(1.0)
+      real, parameter :: drop_inject_elapse_tol = 1.0e-6
       double precision :: source_dt,source_time0,source_time1
       double precision :: bin_source_rate(ssgf_nbin)
 
