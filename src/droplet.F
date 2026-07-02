@@ -18,10 +18,10 @@
   real,dimension(nbins) :: bins_radius,hist_radius,hist_dry_radius, &
                            hist_radius10,hist_fallrad,hist_injected, &
                            hist_dry_injected  !Histograms for droplet radius
-  real,dimension(nbins) :: ssgf_injected  !Injected size distribution normalized as a flux
-  real,dimension(nbins) :: dN_dlogr_injected  !Injected flux normalized by log-radius bin width
-  real,dimension(nbins) :: ssgf_dry_injected  !Injected dry-radius distribution normalized as a flux
-  real,dimension(nbins) :: dN_dlogr_dry_injected  !Injected dry-radius flux normalized by log-radius bin width
+  double precision,dimension(nbins) :: ssgf_injected  !Injected size distribution normalized as a flux
+  double precision,dimension(nbins) :: dN_dlogr_injected  !Injected flux normalized by log-radius bin width
+  double precision,dimension(nbins) :: ssgf_dry_injected  !Injected dry-radius distribution normalized as a flux
+  double precision,dimension(nbins) :: dN_dlogr_dry_injected  !Injected dry-radius flux normalized by log-radius bin width
   real,dimension(nbins+1) :: bins_radius_edge  !Bin edges for droplet radius
   real :: restime_min,restime_max,restime_min10,restime_max10,dhres !Bin parameters for droplet residence time
   real :: dhrad,rmin,rmax,rmin10,rmax10  !Bin parameters for droplet size
@@ -4994,20 +4994,21 @@
       hist_injected_area = hist_injected_xlen*hist_injected_ylen
       if (hist_injected_area .gt. 0.0d0 .and. hist_injected_elapsed .gt. 0.0d0) then
          do ir=1,nbins
-            hist_injected_bin_width = &
-               (10.0d0**dble(bins_radius_edge(ir+1))-10.0d0**dble(bins_radius_edge(ir)))*1.0d6
             hist_injected_log_bin_width = dble(bins_radius_edge(ir+1)-bins_radius_edge(ir))
-            if (hist_injected_bin_width .gt. 0.0d0) then
-               ssgf_injected(ir) = real(dble(hist_injected(ir))/ &
-                  (hist_injected_area*hist_injected_elapsed*hist_injected_bin_width))
-               ssgf_dry_injected(ir) = real(dble(hist_dry_injected(ir))/ &
-                  (hist_injected_area*hist_injected_elapsed*hist_injected_bin_width))
-            end if
             if (hist_injected_log_bin_width .gt. 0.0d0) then
-               dN_dlogr_injected(ir) = real(dble(hist_injected(ir))/ &
-                  (hist_injected_area*hist_injected_elapsed*hist_injected_log_bin_width))
-               dN_dlogr_dry_injected(ir) = real(dble(hist_dry_injected(ir))/ &
-                  (hist_injected_area*hist_injected_elapsed*hist_injected_log_bin_width))
+               dN_dlogr_injected(ir) = dble(hist_injected(ir))/ &
+                  (hist_injected_area*hist_injected_elapsed*hist_injected_log_bin_width)
+               dN_dlogr_dry_injected(ir) = dble(hist_dry_injected(ir))/ &
+                  (hist_injected_area*hist_injected_elapsed*hist_injected_log_bin_width)
+               hist_injected_bin_width = 10.0d0**dble(bins_radius(ir))* &
+                  (10.0d0**(0.5d0*hist_injected_log_bin_width) - &
+                   10.0d0**(-0.5d0*hist_injected_log_bin_width))*1.0d6
+               if (hist_injected_bin_width .gt. 0.0d0) then
+                  ssgf_injected(ir) = dN_dlogr_injected(ir)* &
+                     hist_injected_log_bin_width/hist_injected_bin_width
+                  ssgf_dry_injected(ir) = dN_dlogr_dry_injected(ir)* &
+                     hist_injected_log_bin_width/hist_injected_bin_width
+               end if
             end if
          end do
       end if
@@ -7153,22 +7154,22 @@
          "dry-radius histogram of droplets injected over the past statfrq time") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
 
-    call disp_err( nf90_def_var(ncid,"SSGF_injected",nf90_float,(/binsid,timeid/),varid) , .true. )
+    call disp_err( nf90_def_var(ncid,"SSGF_injected",nf90_double,(/binsid,timeid/),varid) , .true. )
     call disp_err( nf90_put_att(ncid,varid,"long_name", &
          "injected droplet size distribution normalized by area, time, and radius-bin width") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m^-2 s^-1 um^-1") , .true. )
 
-    call disp_err( nf90_def_var(ncid,"SSGF_dry_injected",nf90_float,(/binsid,timeid/),varid) , .true. )
+    call disp_err( nf90_def_var(ncid,"SSGF_dry_injected",nf90_double,(/binsid,timeid/),varid) , .true. )
     call disp_err( nf90_put_att(ncid,varid,"long_name", &
          "injected dry-radius distribution normalized by area, time, and radius-bin width") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m^-2 s^-1 um^-1") , .true. )
 
-    call disp_err( nf90_def_var(ncid,"dN_dlogr_injected",nf90_float,(/binsid,timeid/),varid) , .true. )
+    call disp_err( nf90_def_var(ncid,"dN_dlogr_injected",nf90_double,(/binsid,timeid/),varid) , .true. )
     call disp_err( nf90_put_att(ncid,varid,"long_name", &
          "injected droplet size distribution normalized by area, time, and log10 radius-bin width") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m^-2 s^-1") , .true. )
 
-    call disp_err( nf90_def_var(ncid,"dN_dlogr_dry_injected",nf90_float,(/binsid,timeid/),varid) , .true. )
+    call disp_err( nf90_def_var(ncid,"dN_dlogr_dry_injected",nf90_double,(/binsid,timeid/),varid) , .true. )
     call disp_err( nf90_put_att(ncid,varid,"long_name", &
          "injected dry-radius distribution normalized by area, time, and log10 radius-bin width") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m^-2 s^-1") , .true. )
