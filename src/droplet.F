@@ -59,6 +59,7 @@
   logical :: ssgf_bins_initialized = .false.
   double precision :: drop_inject_bin_owed(ssgf_nbin) = 0.0d0
   logical :: drop_inject_zero_warned = .false.
+  integer :: drop_inject_sample_count = 0
 
   integer, parameter :: hall_nr = 15
   integer, parameter :: hall_nq = 21
@@ -2375,8 +2376,8 @@
       if (doinject .eq. 1) then
 
         ! Convert accumulated fractional source into integer bin requests at
-        ! materialization time.  The largest-remainder selection avoids losing
-        ! source to per-bin truncation.
+        ! materialization time.  Bin requests are sampled from the owed source
+        ! distribution to avoid imposing an artificial per-bin plateau.
         if (scheduled_inject.eq.1 .and. (testcase.eq.15 .or. testcase.eq.16)) then
           call droplet_bin_request(drop_inject_bin_owed,bin_request,total_request)
         end if
@@ -2392,12 +2393,13 @@
           call droplet_injection_pi(pdata,xf,yf,bin_request,mtime,my_reintro,bin_inserted)
         end if
 
-        ! Subtract only what was actually inserted.  If capacity checks reject
-        ! the injection, bin_inserted remains zero and the accumulated source
-        ! stays owed for a later materialization attempt.
+        ! Subtract only what was actually inserted.  The sampled request can
+        ! slightly overdraw individual bins, so keep signed residuals and let
+        ! later source accumulation repay that bin-level debt.
+        ! If capacity checks reject the injection, bin_inserted remains zero.
         if (scheduled_inject.eq.1 .and. (testcase.eq.15 .or. testcase.eq.16)) then
           do i=1,ssgf_nbin
-             drop_inject_bin_owed(i) = max(0.0d0,drop_inject_bin_owed(i)-dble(bin_inserted(i)))
+             drop_inject_bin_owed(i) = drop_inject_bin_owed(i)-dble(bin_inserted(i))
           end do
         end if
 
@@ -5884,44 +5886,53 @@
       subroutine droplet_bin_request(bin_owed,bin_request,total_request)
 
       use constants, only : i8
+      use MersenneTwister_mod
       implicit none
 
       double precision, intent(in) :: bin_owed(ssgf_nbin)
       integer(i8), intent(out) :: bin_request(ssgf_nbin)
       integer(i8), intent(out) :: total_request
 
-      integer :: i,best_i
-      integer(i8) :: base_total,remaining
-      logical :: selected(ssgf_nbin)
-      double precision :: owed,frac,best_frac
+      integer :: i,request_seed
+      integer(i8) :: n,assigned_total
+      double precision :: total_owed,positive_owed,cumulative,draw
+      type(randomNumberSequence) :: randomNumbers
 
-      total_request = floor(sum(max(bin_owed,0.0d0)),kind=i8)
-      base_total = 0_i8
-      selected(:) = .false.
-      do i=1,ssgf_nbin
-         owed = max(bin_owed(i),0.0d0)
-         bin_request(i) = floor(owed,kind=i8)
-         base_total = base_total + bin_request(i)
-      end do
+      bin_request(:) = 0_i8
+      total_owed = sum(bin_owed)
+      positive_owed = sum(max(bin_owed,0.0d0))
+      total_request = floor(max(total_owed,0.0d0),kind=i8)
+      if (total_request.le.0_i8 .or. positive_owed.le.0.0d0) return
 
-      remaining = total_request - base_total
-      do while (remaining.gt.0_i8)
-         best_i = 1
-         best_frac = -1.0d0
+      ! Every MPI rank builds the same global request before local distribution.
+      ! Keep the sampler seed rank-independent so those requests stay identical.
+      drop_inject_sample_count = mod(drop_inject_sample_count,200000) + 1
+      request_seed = 104729 + 7919*drop_inject_sample_count
+      call new_RandomNumberSequence(randomNumbers, request_seed)
+
+      do n=1_i8,total_request
+         draw = getRandomReal(randomNumbers)*positive_owed
+         cumulative = 0.0d0
          do i=1,ssgf_nbin
-            if (.not. selected(i)) then
-               owed = max(bin_owed(i),0.0d0)
-               frac = owed - dble(floor(owed,kind=i8))
-               if (frac.gt.best_frac) then
-                  best_frac = frac
-                  best_i = i
-               end if
+            cumulative = cumulative + max(bin_owed(i),0.0d0)
+            if (draw.le.cumulative) then
+               bin_request(i) = bin_request(i) + 1_i8
+               exit
             end if
          end do
-         bin_request(best_i) = bin_request(best_i) + 1_i8
-         selected(best_i) = .true.
-         remaining = remaining - 1_i8
       end do
+
+      assigned_total = sum(bin_request)
+      if (assigned_total.lt.total_request) then
+         do i=ssgf_nbin,1,-1
+            if (bin_owed(i).gt.0.0d0) then
+               bin_request(i) = bin_request(i) + (total_request-assigned_total)
+               exit
+            end if
+         end do
+      end if
+
+      call finalize_RandomNumberSequence(randomNumbers)
 
       end subroutine droplet_bin_request
 
