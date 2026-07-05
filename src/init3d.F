@@ -84,7 +84,8 @@
       use module_mp_nssl_2mom, only: ccn, lccn
       use poiss_module
       use parcel_module , only : getparcelzs
-      use droplet_module, only: initialize_droplet_histograms,particle_seed,ngidx,lognormal_droplet
+      use droplet_module, only: initialize_droplet_histograms,particle_seed,ngidx, &
+                                lognormal_droplet,aerosol_kappa_background
 #ifdef MPI
       use mpi
 #endif
@@ -481,9 +482,9 @@
              pdata(i,prsigsgs) = 0.0
      
              if (testcase.eq.17) then
-                ! Case 17 samples dry aerosol diameter from a lognormal,
-                ! then rehydrates it to equilibrium at 80% RH.
-                pdata(i,prkap) = 0.6
+                ! Testcase 17 background aerosols are identified by this kappa.
+                ! They are reinjected after fallout until the reinjection timer ends.
+                pdata(i,prkap) = aerosol_kappa_background
                 call lognormal_droplet(pdata(i,prrp),pdata(i,prms),pdata(i,prkap),randomNumbers)
                 pdata(i,prrp0) = pdata(i,prrp)
              else

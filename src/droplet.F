@@ -8,7 +8,8 @@
             droplet_diag,initialize_droplet_histograms, &
             check_droplet_ownership,particle_seed,ngidx, &
             kohler_equil_radius,lognormal_droplet, &
-            ssgf_nbin,drop_inject_bin_owed,drop_inject_sample_count
+            ssgf_nbin,drop_inject_bin_owed,drop_inject_sample_count, &
+            aerosol_kappa_background
 
   !These are quantities which are needed in the droplet_diag output, so must be public
   real :: num100,num1000
@@ -52,6 +53,13 @@
 
   !For testing: set this parameter to ".false." to make droplet injection deterministic (not random)
   logical, parameter :: random_droplets = .true.
+  real, parameter :: aerosol_kappa_background = 0.6
+  real, parameter :: aerosol_kappa_monahan = 1.2
+  real, parameter :: aerosol_kappa_tol = 1.0e-6
+  real, parameter :: monahan_aerosol_mult = 3.0e6
+  double precision, parameter :: aerosols_inject_start_time = 0.0d0
+  double precision, parameter :: aerosols_inject_end_time = 1.0d30
+  double precision, parameter :: aerosols_reinject_end_time = 1.0d30
   integer, parameter :: ssgf_nbin = 100
   double precision :: ssgf_binsdata(ssgf_nbin) = 0.0d0
   double precision :: ssgf_binsdata10(ssgf_nbin) = 0.0d0
@@ -237,7 +245,7 @@
 
       type(randomNumberSequence) :: randomNumbers
 
-      integer :: num_fallout,idx                        !droplets which fell out of domain
+      integer :: num_fallout,num_fallout_reinject,idx   !droplets which fell out of domain
       integer :: dlogsig_valid,dlogsig_count
       integer :: dlogsig_gt05,dlogsig_gt1,dlogsig_gt2,dlogsig_gt5
       integer :: numDepart
@@ -296,6 +304,7 @@
       call new_RandomNumberSequence(randomNumbers, particle_seed)
 
       num_fallout = 0  !Reset the number of droplets that have fallen out of physical domain
+      num_fallout_reinject = 0
       errcode     = 0  ! Number of errors that occurred in the index search 
       numDepartN  = 0
       numDepartS  = 0
@@ -489,7 +498,8 @@
 
     !JMD WARNING: Loop does not yet match CPU version.
     !$acc parallel default(present)
-    !$acc loop gang vector private(dlogsig_abs,dlogsig_valid) reduction(+:num_fallout) reduction(max:errcode) &
+    !$acc loop gang vector private(dlogsig_abs,dlogsig_valid) &
+    !$acc reduction(+:num_fallout,num_fallout_reinject) reduction(max:errcode) &
     !$acc reduction(+:dlogsig_sum,dlogsig_count,dlogsig_gt05,dlogsig_gt1,dlogsig_gt2,dlogsig_gt5) &
     !$acc reduction(max:dlogsig_max) &
     !$acc reduction(+:numDepartN,numDepartS,numDepartE,numDepartW) &
@@ -614,6 +624,10 @@
                            rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                            part_grav1,part_grav2,part_grav3,debug, &
                            dlogsig_abs,dlogsig_valid,neighbor,num_fallout,errcode)
+      if (testcase.eq.17 .and. pdata(np,pract).lt.0.0 .and. &
+          abs(pdata(np,prkap)-aerosol_kappa_background).le.aerosol_kappa_tol) then
+         num_fallout_reinject = num_fallout_reinject + 1
+      end if
       if (dlogsig_valid.eq.1) then
          dlogsig_sum = dlogsig_sum + dble(dlogsig_abs)
          dlogsig_max = max(dlogsig_max,dlogsig_abs)
@@ -1353,7 +1367,11 @@
 
     if(timestats.ge.1) time_droplet=time_droplet+mytime()
 
-    num_fallout_out = num_fallout
+    if (testcase.eq.17) then
+       num_fallout_out = num_fallout_reinject
+    else
+       num_fallout_out = num_fallout
+    end if
 
    end subroutine droplet_driver
 
@@ -2360,10 +2378,10 @@
       end if
       doinject = scheduled_inject
 
-      ! Testcase 17 is event-driven: reinject according to how many particles
-      ! fell out during this timestep, independent of the scheduled source
-      ! accumulator used by testcases 15 and 16.
-      if (testcase.eq.17) then
+      ! Testcase 17 fallout reinjection is event-driven and independent of
+      ! the scheduled source accumulator.  Its fallout count has already been
+      ! filtered to the background aerosol kappa in droplet_driver.
+      if (testcase.eq.17 .and. source_time0.lt.aerosols_reinject_end_time) then
          total_fallout = int(num_fallout,i8)
 #ifdef MPI
          call mpi_allreduce(mpi_in_place,total_fallout,1,mpi_integer8,mpi_sum,mpi_comm_world,ierr)
@@ -2406,7 +2424,7 @@
 
         ! Fallout reinjection is intentionally kept separate from the scheduled
         ! source accumulator because its source is the per-rank fallout count.
-        if (testcase.eq.17) then
+        if (testcase.eq.17 .and. total_fallout.gt.0_i8) then
           call droplet_fallout_reinjection(pdata,xf,yf,num_fallout,mtime,my_reintro)
         end if
         !$acc wait
@@ -6561,7 +6579,7 @@
             pdata(np,prvsgs) = 0.0
             pdata(np,prwsgs) = 0.0
             pdata(np,prsigsgs) = 0.0
-            pdata(np,prkap) = 0.6
+            pdata(np,prkap) = aerosol_kappa_background
             call lognormal_droplet(pdata(np,prrp),pdata(np,prms),pdata(np,prkap),randomNumbers)
             pdata(np,prrp0) = pdata(np,prrp)
             pdata(np,prtp) = 290.0
