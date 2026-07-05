@@ -393,7 +393,7 @@ pdcomp.o: constants.o input.o adv.o poiss.o ib_module.o
 poiss.o: input.o singleton.o
 radiation_driver.o: constants.o input.o bc.o radtrns3d.o module_ra_etc.o module_ra_rrtmg_lw.o module_ra_rrtmg_sw.o
 radtrns3d.o: irrad3d.o sorad3d.o radlib3d.o
-restart.o: constants.o input.o writeout_nc.o lsnudge.o goddard.o lfoice.o
+restart.o: constants.o input.o writeout_nc.o lsnudge.o goddard.o lfoice.o comm_droplet.o droplet.o
 sfcphys.o: constants.o input.o cm1libs.o
 solve1.o: constants.o input.o bc.o comm.o diff2.o turbtend.o misclibs.o testcase_simple_phys.o ib_module.o eddy_recycle.o lsnudge.o
 solve2.o: constants.o input.o bc.o comm.o adv.o adv_routines.o sound.o sounde.o soundns.o soundcb.o anelp.o misclibs.o module_mp_nssl_2mom.o ib_module.o eddy_recycle.o
