@@ -7,7 +7,8 @@
             droplet_coalescence_driver,project_droplet_qc_effc, &
             droplet_diag,initialize_droplet_histograms, &
             check_droplet_ownership,particle_seed,ngidx, &
-            kohler_equil_radius,lognormal_droplet
+            kohler_equil_radius,lognormal_droplet, &
+            ssgf_nbin,drop_inject_bin_owed,drop_inject_sample_count
 
   !These are quantities which are needed in the droplet_diag output, so must be public
   real :: num100,num1000

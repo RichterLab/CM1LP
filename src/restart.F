@@ -47,6 +47,7 @@
       use input
       use constants
       use lsnudge_module
+      use droplet_module, only : ssgf_nbin,drop_inject_bin_owed,drop_inject_sample_count
 #ifdef MPI
       use mpi
       use comm_droplet_module, only : CollectDropCount, CollectDropInfo
@@ -1702,6 +1703,9 @@
 #endif
         if(myid.eq.0)then
           if( restart_format.eq.1 )then
+            ! Keep adaptive droplet source accumulation continuous across restarts.
+            write(50) drop_inject_bin_owed
+            write(50) drop_inject_sample_count
             write(50) nparcelsRest
             ! write out the number of active droplets per MPI rank
             do i = 1, numprocs
@@ -2152,6 +2156,7 @@
       use lsnudge_module
       use goddard_module, only : consat,consat2
       use lfoice_module, only : lfoice_init
+      use droplet_module, only : ssgf_nbin,drop_inject_bin_owed,drop_inject_sample_count
 #ifdef MPI
       use mpi
 #endif
@@ -3678,6 +3683,9 @@
 
       if( myid.eq.0 )then
         if( restart_format.eq.1 )then
+          ! Keep adaptive droplet source accumulation continuous across restarts.
+          read(50) drop_inject_bin_owed
+          read(50) drop_inject_sample_count
           read(50) nparcelsRest
           ! Read in the number of active droplets for each MPI rank
           do i = 1, numprocs
@@ -3693,6 +3701,8 @@
         print *,'  nparcelsRest = ',nparcelsRest
       endif
 
+      call bcast_double(drop_inject_bin_owed,1,ssgf_nbin)
+      call bcast_int(drop_inject_sample_count)
       call bcast_int(nparcelsRest)
       nvar = int(nparcelsRest)
 
