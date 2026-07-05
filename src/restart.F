@@ -1703,7 +1703,7 @@
 #endif
         if(myid.eq.0)then
           if( restart_format.eq.1 )then
-            ! Keep adaptive droplet source accumulation continuous across restarts.
+            ! Keep adaptive particle source accumulation continuous across restarts.
             write(50) drop_inject_bin_owed
             write(50) drop_inject_sample_count
             write(50) nparcelsRest
@@ -3683,7 +3683,7 @@
 
       if( myid.eq.0 )then
         if( restart_format.eq.1 )then
-          ! Keep adaptive droplet source accumulation continuous across restarts.
+          ! Keep adaptive particle source accumulation continuous across restarts.
           read(50) drop_inject_bin_owed
           read(50) drop_inject_sample_count
           read(50) nparcelsRest

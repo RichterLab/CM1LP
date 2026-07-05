@@ -61,11 +61,14 @@
   double precision, parameter :: aerosols_inject_end_time = 1.0d30
   double precision, parameter :: aerosols_reinject_end_time = 1.0d30
   integer, parameter :: ssgf_nbin = 100
+  integer, parameter :: source_bins_sea_spray = 1
+  integer, parameter :: source_bins_monahan = 2
   double precision :: ssgf_binsdata(ssgf_nbin) = 0.0d0
   double precision :: ssgf_binsdata10(ssgf_nbin) = 0.0d0
   double precision :: ssgf_binsdata_edge(ssgf_nbin+1) = 0.0d0
   double precision :: ssgf_binsdata10_edge(ssgf_nbin+1) = 0.0d0
   logical :: ssgf_bins_initialized = .false.
+  integer :: ssgf_bins_source = 0
   double precision :: drop_inject_bin_owed(ssgf_nbin) = 0.0d0
   logical :: drop_inject_zero_warned = .false.
   integer :: drop_inject_sample_count = 0
@@ -2291,7 +2294,7 @@
       integer, intent(in) :: num_fallout
 
       integer :: i,j,np,iflag,jflag,kflag
-      integer :: doinject,my_reintro,scheduled_inject
+      integer :: doinject,my_reintro,scheduled_inject,nparcels_before_inject
       real :: x3d,y3d,z3d,sig3d
       integer(i8) :: np_tmp,total_fallout,total_request
       integer(i8) :: bin_request(ssgf_nbin),bin_inserted(ssgf_nbin)
@@ -2303,6 +2306,7 @@
       real :: minvals(9),maxvals(9)
       real, parameter :: drop_inject_elapse_tol = 1.0e-6
       double precision :: source_dt,source_time0,source_time1
+      double precision :: source_start_time,source_end_time
       double precision :: bin_source_rate(ssgf_nbin)
 
       !----------------------------------------------------------------------
@@ -2333,25 +2337,36 @@
       source_time0 = mtime
       source_time1 = mtime + dble(dt)
       source_dt = 0.0d0
+      source_start_time = 0.0d0
+      source_end_time = 1.0d30
       ! Track the actual adaptive-timestep interval represented by hist_injected.
       hist_injected_elapsed = hist_injected_elapsed + dble(dt)
 
-      ! Testcases 15 and 16 have time-based droplet sources.  Accumulate
-      ! their continuous source over the actual timestep first; only later
-      ! decide whether accumulated source should be materialized as particles.
-      if (testcase.eq.15 .or. testcase.eq.16) then
+      ! Testcases 15, 16, and 17 have time-based sources.  Accumulate their
+      ! continuous source over the actual timestep first; only later decide
+      ! whether accumulated source should be materialized as particles.
+      if (testcase.eq.15 .or. testcase.eq.16 .or. testcase.eq.17) then
          ! A zero injection interval would make the schedule ambiguous, so
          ! treat it as an explicit "off" state and warn only once.
          if (abs(drop_inject_elapse) .le. drop_inject_elapse_tol) then
             if (myid.eq.0 .and. .not. drop_inject_zero_warned) then
-               write(*,*) 'WARNING drop_inject_elapse is near zero; disabling scheduled droplet injection'
+               write(*,*) 'WARNING drop_inject_elapse is near zero; disabling scheduled source injection'
             end if
             drop_inject_zero_warned = .true.
          else
-            ! Only the portion of this timestep after drop_inject_time
+            if (testcase.eq.17) then
+               source_start_time = aerosols_inject_start_time
+               source_end_time = aerosols_inject_end_time
+            else
+               source_start_time = dble(drop_inject_time)
+               source_end_time = 1.0d30
+            end if
+
+            ! Only the portion of this timestep inside the source window
             ! contributes source.  This keeps adaptive dt cases tied to
             ! elapsed physical time instead of the materialization interval.
-            source_dt = max(0.0d0,source_time1 - max(source_time0,dble(drop_inject_time)))
+            source_dt = max(0.0d0,min(source_time1,source_end_time) &
+                                  - max(source_time0,source_start_time))
             if (source_dt .gt. 0.0d0) then
                call droplet_scheduled_bin_source(testcase,bin_source_rate)
                do i=1,ssgf_nbin
@@ -2360,16 +2375,18 @@
 
                ! Negative drop_inject_elapse means materialize every timestep.
                ! Positive values materialize only when this timestep crosses
-               ! a scheduled interval boundary measured from drop_inject_time.
+               ! a scheduled interval boundary measured from the source start time.
                if (drop_inject_elapse .lt. -drop_inject_elapse_tol) then
                   scheduled_inject = 1
                elseif (drop_inject_elapse .gt. drop_inject_elapse_tol) then
                   ! If this is the first timestep with active source, allow
                   ! immediate materialization rather than waiting one interval.
-                  if (source_time0 .le. dble(drop_inject_time)) then
+                  if (source_time0 .le. source_start_time) then
                      scheduled_inject = 1
-                  elseif (floor((source_time0-dble(drop_inject_time))/dble(drop_inject_elapse)) .ne. &
-                          floor((source_time1-dble(drop_inject_time))/dble(drop_inject_elapse))) then
+                  elseif (floor((source_time0-source_start_time)/dble(drop_inject_elapse)) .ne. &
+                          floor((source_time1-source_start_time)/dble(drop_inject_elapse))) then
+                     scheduled_inject = 1
+                  elseif (source_time0.lt.source_end_time .and. source_time1.ge.source_end_time) then
                      scheduled_inject = 1
                   end if
                end if
@@ -2393,12 +2410,22 @@
       end if
 
       if (doinject .eq. 1) then
+        nparcels_before_inject = nparcelsLocalActive
 
         ! Convert accumulated fractional source into integer bin requests at
         ! materialization time.  Bin requests are sampled from the owed source
         ! distribution to avoid imposing an artificial per-bin plateau.
-        if (scheduled_inject.eq.1 .and. (testcase.eq.15 .or. testcase.eq.16)) then
+        if (scheduled_inject.eq.1 .and. &
+            (testcase.eq.15 .or. testcase.eq.16 .or. testcase.eq.17)) then
           call droplet_bin_request(drop_inject_bin_owed,bin_request,total_request)
+        end if
+
+        ! Fallout reinjection is intentionally kept separate from the scheduled
+        ! source accumulator because its source is the per-rank fallout count.
+        ! Do it before Monahan source injection so background-aerosol
+        ! replacement has priority if particle capacity is tight.
+        if (testcase.eq.17 .and. total_fallout.gt.0_i8) then
+          call droplet_fallout_reinjection(pdata,xf,yf,num_fallout,mtime,my_reintro)
         end if
 
         ! Testcase 15 interprets the bin requests as a sea-spray size
@@ -2412,28 +2439,28 @@
           call droplet_injection_pi(pdata,xf,yf,bin_request,mtime,my_reintro,bin_inserted)
         end if
 
+        if (testcase.eq.17 .and. total_request.gt.0_i8) then
+          call droplet_injection_monahan(pdata,xf,yf,bin_request,mtime,my_reintro,bin_inserted)
+        end if
+
         ! Subtract only what was actually inserted.  The sampled request can
         ! slightly overdraw individual bins, so keep signed residuals and let
         ! later source accumulation repay that bin-level debt.
         ! If capacity checks reject the injection, bin_inserted remains zero.
-        if (scheduled_inject.eq.1 .and. (testcase.eq.15 .or. testcase.eq.16)) then
+        if (scheduled_inject.eq.1 .and. &
+            (testcase.eq.15 .or. testcase.eq.16 .or. testcase.eq.17)) then
           do i=1,ssgf_nbin
              drop_inject_bin_owed(i) = drop_inject_bin_owed(i)-dble(bin_inserted(i))
           end do
         end if
 
-        ! Fallout reinjection is intentionally kept separate from the scheduled
-        ! source accumulator because its source is the per-rank fallout count.
-        if (testcase.eq.17 .and. total_fallout.gt.0_i8) then
-          call droplet_fallout_reinjection(pdata,xf,yf,num_fallout,mtime,my_reintro)
-        end if
         !$acc wait
 
         !This loop isn't strictly necessary, but populate the interpolated values to the newly injected particles
         !Doesn't affect solution at all! Since interpolation happens at start of droplet_driver
         !But makes sure that the interpolated mean quantities in droplet_diag are meaningful
         !$acc parallel loop gang vector default(present)
-        do np=nparcelsLocalActive-my_reintro+1,nparcelsLocalActive
+        do np=nparcels_before_inject+1,nparcelsLocalActive
           pdata_locind(np,1) = undefined_index
           pdata_locind(np,2) = undefined_index
           pdata_locind(np,3) = undefined_index
@@ -5978,6 +6005,12 @@
          end do
       elseif (testcase_in.eq.16) then
          bin_source_rate(1) = 0.01d0*(1.0d0/60.0d0)*(10.0d0**6)*4.0d0
+      elseif (testcase_in.eq.17) then
+         call build_monahan_aerosol_distribution(bin_flux)
+         domain_area = dble(dx)*dble(nx)*dble(dy)*dble(ny)
+         do i=1,ssgf_nbin
+            bin_source_rate(i) = domain_area*bin_flux(i)/dble(monahan_aerosol_mult)
+         end do
       end if
 
       end subroutine droplet_scheduled_bin_source
@@ -5991,7 +6024,7 @@
       double precision :: dh_ssgf,rmin10_ssgf,rmax10_ssgf
       integer :: i
 
-      if (ssgf_bins_initialized) return
+      if (ssgf_bins_initialized .and. ssgf_bins_source.eq.source_bins_sea_spray) return
 
       rmin10_ssgf = log10(2d-06)
       rmax10_ssgf = log10(500d-06)
@@ -6013,6 +6046,7 @@
       ssgf_binsdata10_edge(ssgf_nbin+1) = ssgf_binsdata10_edge(ssgf_nbin) + dh_ssgf/2.0
       ssgf_binsdata_edge(ssgf_nbin+1) = 1.0d6*(10**ssgf_binsdata10_edge(ssgf_nbin+1))
       ssgf_bins_initialized = .true.
+      ssgf_bins_source = source_bins_sea_spray
 
       end subroutine build_sea_spray_bins
 
@@ -6074,6 +6108,66 @@
       end do
 
       end subroutine build_sea_spray_distribution
+
+!----------------------------------------------------------------------
+
+      subroutine build_monahan_aerosol_bins()
+
+      implicit none
+
+      double precision :: dh_ssgf,rmin10_ssgf,rmax10_ssgf
+      integer :: i
+
+      if (ssgf_bins_initialized .and. ssgf_bins_source.eq.source_bins_monahan) return
+
+      rmin10_ssgf = log10(0.3d-06)
+      rmax10_ssgf = log10(20.0d-06)
+      dh_ssgf = (rmax10_ssgf-rmin10_ssgf)/dble(ssgf_nbin-1)
+
+      ssgf_binsdata10(1) = rmin10_ssgf
+      ssgf_binsdata(1) = 1.0d6*(10**ssgf_binsdata10(1))
+      ssgf_binsdata10_edge(1) = rmin10_ssgf - dh_ssgf/2.0d0
+      ssgf_binsdata_edge(1) = 1.0d6*(10**ssgf_binsdata10_edge(1))
+
+      do i = 1,ssgf_nbin-1
+        ssgf_binsdata10(i+1)= dh_ssgf+ssgf_binsdata10(i)
+        ssgf_binsdata(i+1) = 1.0d6*(10**ssgf_binsdata10(i+1))
+
+        ssgf_binsdata10_edge(i+1) = dh_ssgf + ssgf_binsdata10_edge(i)
+        ssgf_binsdata_edge(i+1) = 1.0d6*(10**ssgf_binsdata10_edge(i+1))
+      end do
+
+      ssgf_binsdata10_edge(ssgf_nbin+1) = rmax10_ssgf + dh_ssgf/2.0d0
+      ssgf_binsdata_edge(ssgf_nbin+1) = 1.0d6*(10**ssgf_binsdata10_edge(ssgf_nbin+1))
+      ssgf_bins_initialized = .true.
+      ssgf_bins_source = source_bins_monahan
+
+      end subroutine build_monahan_aerosol_bins
+
+!----------------------------------------------------------------------
+
+      subroutine build_monahan_aerosol_distribution(bin_flux)
+
+      implicit none
+
+      double precision, intent(out) :: bin_flux(ssgf_nbin)
+
+      double precision :: B,dFdlogr,r_um,u10
+      integer :: i
+
+      call build_monahan_aerosol_bins()
+
+      u10 = max(0.0d0,dble(u10_ssgf))
+      do i = 1,ssgf_nbin
+         r_um = ssgf_binsdata(i)
+         B = (0.38d0-log10(r_um))/0.65d0
+         dFdlogr = 1.373d0*(u10**3.41d0)*(r_um**(-3.0d0)) &
+                  *(1.0d0 + 0.057d0*(r_um**1.05d0)) &
+                  *(10.0d0**(1.19d0*exp(-(B**2))))
+         bin_flux(i) = dFdlogr*(ssgf_binsdata10_edge(i+1)-ssgf_binsdata10_edge(i))
+      end do
+
+      end subroutine build_monahan_aerosol_distribution
 
 !----------------------------------------------------------------------
 
@@ -6283,6 +6377,197 @@
       end if
 
     end subroutine droplet_injection
+
+!----------------------------------------------------------------------
+
+    subroutine droplet_injection_monahan(pdata,xf,yf,total_bin_reintro,mtime,my_reintro,bin_inserted)
+      !Inject Monahan coarse marine aerosols for testcase 17.
+      use input, only : nparcelsLocal,npvals,myid,ni,nj,ib,ie,jb,je, &
+                        prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
+                        prusgs,prvsgs,prwsgs,prsigsgs, &
+                        prrp,prrp0,prtp,prms,prkap,pract,prtime, &
+                        prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive, &
+                        numprocs,nparcelsMax,tsk0,pi_sp
+      use constants
+      use MersenneTwister_mod
+#ifdef MPI
+      use mpi
+#endif
+
+      real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
+      real, intent(in), dimension(ib:ie+1) :: xf
+      real, intent(in), dimension(jb:je+1) :: yf
+      integer(i8), intent(in) :: total_bin_reintro(ssgf_nbin)
+      double precision, intent(in) :: mtime
+      integer, intent(out) :: my_reintro
+      integer(i8), intent(out) :: bin_inserted(ssgf_nbin)
+
+      integer :: i,np,idx_tmp,ibin,ihist,idryhist
+      integer(i8) :: tot_after_reintro,total_reintro_actual
+      integer(i8) :: local_bin_reintro(ssgf_nbin),remaining_count
+      integer :: local_capacity_ok,global_capacity_ok
+
+      double precision :: rad_init,dry_rad_init
+      double precision :: rand,logr_interval
+      real :: xrange,yrange,zrange
+      real :: rad10_tmp,dry_rad10_tmp
+      type(randomNumberSequence) :: randomNumbers
+      integer :: j,ierr
+      integer :: local_seed
+
+      call build_monahan_aerosol_bins()
+      call distribute_injection_bins(total_bin_reintro,local_bin_reintro,my_reintro)
+      bin_inserted(:) = 0_i8
+
+      xrange = xf(ni+1)-xf(1)
+      yrange = yf(nj+1)-yf(1)
+      zrange = 1.5
+
+      total_reintro_actual = sum(total_bin_reintro)
+
+      local_capacity_ok = 1
+      if (nparcelsLocalActive + my_reintro .gt. nparcelsLocal) local_capacity_ok = 0
+#ifdef MPI
+      call mpi_allreduce(local_capacity_ok,global_capacity_ok,1,mpi_integer,mpi_min,mpi_comm_world,ierr)
+      call mpi_allreduce(my_reintro+nparcelsLocalActive, &
+                         tot_after_reintro,1,mpi_integer8, &
+                         mpi_comm_world,ierr)
+#else
+      global_capacity_ok = local_capacity_ok
+      tot_after_reintro = my_reintro+nparcelsLocalActive
+#endif
+
+      if (tot_after_reintro .le. nparcelsMax .and. global_capacity_ok.eq.1) then
+         num_injected = num_injected + real(my_reintro)*monahan_aerosol_mult
+         !$acc update device (num_injected)
+
+         if (myid==0 .and. total_reintro_actual.gt.0_i8) then
+            write(*,'(a,1pe15.6,a,i18)') 'AEROSOL INJECTION: mtime=',mtime, &
+                                         ' superdroplets=',total_reintro_actual
+         end if
+
+         bin_inserted(:) = total_bin_reintro(:)
+
+         !$acc data copyin(ssgf_binsdata10_edge,local_bin_reintro) create(randomNumbers,randomNumbers%state)
+         !$acc update device(ngidx)
+         !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) &
+         !$acc private(randomNumbers,local_seed,ibin,ihist,idryhist,remaining_count,rad10_tmp,dry_rad10_tmp)
+         do j=1,my_reintro
+            np=nparcelsLocalActive+j
+            if (random_droplets) then
+               local_seed = floor(29.*mtime) + (97*myid) + (7*j)
+               call new_RandomNumberSequence(randomNumbers, local_seed)
+
+               remaining_count = int(j,i8)
+               ibin = 0
+               !$acc loop seq
+               do i = 1,ssgf_nbin
+                  if (ibin.eq.0) then
+                     if (remaining_count.gt.local_bin_reintro(i)) then
+                        remaining_count = remaining_count - local_bin_reintro(i)
+                     else
+                        ibin = i
+                     end if
+                  end if
+               end do
+               if (ibin.eq.0) ibin = ssgf_nbin
+
+               rand = getRandomReal(randomNumbers)
+               logr_interval = ssgf_binsdata10_edge(ibin+1) - ssgf_binsdata10_edge(ibin)
+               rad_init = 10.0d0**(ssgf_binsdata10_edge(ibin) + rand*logr_interval)
+
+               rand = getRandomReal(randomNumbers)
+               pdata(np,prx) = xf(1)+rand*xrange
+               rand = getRandomReal(randomNumbers)
+               pdata(np,pry) = yf(1)+rand*yrange
+               rand = getRandomReal(randomNumbers)
+               pdata(np,prz) = rand*zrange
+            else
+               rad_init = 1.0d-6
+               pdata(np,prx) = xf(1) + xrange/2.0
+               pdata(np,pry) = yf(1) + yrange/2.0
+               pdata(np,prz) = zrange
+            end if
+
+            dry_rad_init = 0.5d0*rad_init
+            pdata(np,prvpx) = 0.0
+            pdata(np,prvpy) = 0.0
+            pdata(np,prvpz) = 0.0
+            pdata(np,prusgs) = 0.0
+            pdata(np,prvsgs) = 0.0
+            pdata(np,prwsgs) = 0.0
+            pdata(np,prsigsgs) = 0.0
+            pdata(np,prrp) = rad_init
+            pdata(np,prrp0) = rad_init
+            pdata(np,prms) = rho_solute*4.0d0/3.0d0*dble(pi)*dry_rad_init**3
+            pdata(np,prkap) = aerosol_kappa_monahan
+            pdata(np,prtp) = tsk0
+            pdata(np,prmult) = monahan_aerosol_mult
+            pdata(np,pract) = 1.0
+
+            rad10_tmp = log10(rad_init)
+            if (rad10_tmp .gt. rmax10 + 0.5*dhrad) then
+               ihist = nbins
+            elseif (rad10_tmp .lt. rmin10 - 0.5*dhrad) then
+               ihist = 1
+            else
+               ihist = floor((rad10_tmp-(rmin10-0.5*dhrad))/dhrad)+1
+            end if
+            !$acc atomic update
+            hist_injected(ihist) = hist_injected(ihist) + pdata(np,prmult)
+
+            if (pdata(np,prms) .gt. 0.0) then
+               dry_rad10_tmp = log10((3.0*pdata(np,prms)/(4.0*pi*real(rho_solute)))**(1.0/3.0))
+            else
+               dry_rad10_tmp = rmin10 - 0.5*dhrad
+            end if
+            if (dry_rad10_tmp .gt. rmax10 + 0.5*dhrad) then
+               idryhist = nbins
+            elseif (dry_rad10_tmp .lt. rmin10 - 0.5*dhrad) then
+               idryhist = 1
+            else
+               idryhist = floor((dry_rad10_tmp-(rmin10-0.5*dhrad))/dhrad)+1
+            end if
+            !$acc atomic update
+            hist_dry_injected(idryhist) = hist_dry_injected(idryhist) + pdata(np,prmult)
+
+            pdata(np,pru) = 0.0
+            pdata(np,prv) = 0.0
+            pdata(np,prw) = 0.0
+            pdata(np,prt) = tsk0
+            pdata(np,prqv) = 0.01
+            pdata(np,prprs) = 101325.0
+            pdata(np,prrho) = 1.0
+            pdata(np,prtime) = 0.0
+
+            !$acc atomic capture
+            idx_tmp = ngidx
+            ngidx = ngidx+1
+            !$acc end atomic
+
+            pdata(np,prpidx) = transfer(idx_tmp,0.0)
+            pdata(np,prprocidx) = transfer(myid,0.0)
+
+            mass_injected = mass_injected + (pdata(np,prms)+rhow*4.0/3.0*pi*pdata(np,prrp)**3)*pdata(np,prmult)
+            eng_injected = eng_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp)
+            m1_injected = m1_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpx)
+            m2_injected = m2_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy)
+
+            call finalize_randomNumberSequence(randomNumbers)
+         end do
+         !$acc update host(ngidx)
+         !$acc end data
+         !$acc wait
+
+         nparcelsLocalActive = nparcelsLocalActive + my_reintro
+      else
+         if (myid == 0) write(*,*) 'WARNING CANNOT ADD MONAHAN AEROSOLS, WILL EXCEED NPARCELSMAX OR NPARCELSLOCAL'
+         my_reintro = 0
+      end if
+
+    end subroutine droplet_injection_monahan
+
+!----------------------------------------------------------------------
 
     function smithssgf(u10,r80,vk)
     implicit none
