@@ -710,13 +710,6 @@
        else
           dlogsig_mean = 0.0
        endif
-       if (myid.eq.0) then
-          write(*,'(a,i8,a,f12.4,a,1pe12.4,a,1pe12.4,a,i12,a,i12,a,i12,a,i12,a,i12)') &
-               'SGS_DLOGSIG nstep=',nstep,' mtime=',real(mtime),' mean=',dlogsig_mean, &
-               ' max=',dlogsig_max,' n=',dlogsig_count,' n0p5=',dlogsig_gt05, &
-               ' n1=',dlogsig_gt1,' n2=',dlogsig_gt2,' n5=',dlogsig_gt5
-          call flush(6)
-       endif
     endif
     if (errcode .gt. 0) then 
        stop 'FATAL error occurred in the index search BE_integration'
@@ -5838,9 +5831,29 @@
       double precision, intent(in) :: dry_radius3,kappa_p,temp_p,rh
       double precision :: radius
       double precision :: a,c,Q,R,M,theta,S,T
+      double precision :: log_rh
 
-      a = -(2.0d0*mw*surften)/(ru*rhow_dp*temp_p)/LOG(rh)
-      c = kappa_p*dry_radius3/LOG(rh)
+      if (rh.le.0.0d0 .or. rh.ge.1.0d0 .or. rh.ne.rh .or. &
+          temp_p.le.0.0d0 .or. temp_p.ne.temp_p .or. &
+          dry_radius3.lt.0.0d0 .or. dry_radius3.ne.dry_radius3 .or. &
+          kappa_p.ne.kappa_p) then
+        print *, 'BAD KOHLER INPUT'
+        print *, '  rh=',rh,' temp_p=',temp_p
+        print *, '  dry_radius3=',dry_radius3,' kappa_p=',kappa_p
+        stop 'BAD KOHLER INPUT'
+      end if
+
+      log_rh = LOG(rh)
+      if (log_rh.ne.log_rh .or. abs(log_rh).lt.1.0d-12) then
+        print *, 'BAD KOHLER LOG'
+        print *, '  rh=',rh,' log_rh=',log_rh
+        print *, '  temp_p=',temp_p,' dry_radius3=',dry_radius3
+        print *, '  kappa_p=',kappa_p
+        stop 'BAD KOHLER LOG'
+      end if
+
+      a = -(2.0d0*mw*surften)/(ru*rhow_dp*temp_p)/log_rh
+      c = kappa_p*dry_radius3/log_rh
 
       !Use Cardano's method for cubic solution
       Q = (a*a)/9.0d0
