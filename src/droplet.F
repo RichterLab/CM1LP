@@ -57,9 +57,9 @@
   real, parameter :: aerosol_kappa_monahan = 1.2
   real, parameter :: aerosol_kappa_tol = 1.0e-6
   real, parameter :: monahan_aerosol_mult = 3.0e6
-  double precision, parameter :: aerosols_inject_start_time = 0.0d0
-  double precision, parameter :: aerosols_inject_end_time = 1.0d30
-  double precision, parameter :: aerosols_reinject_end_time = 1.0d30
+  double precision, parameter :: aerosols_inject_start_time = 1800.0d0
+  double precision, parameter :: aerosols_inject_end_time = 12600.0d0
+  double precision, parameter :: aerosols_reinject_end_time = 12600.0d0
   integer, parameter :: ssgf_nbin = 100
   integer, parameter :: source_bins_sea_spray = 1
   integer, parameter :: source_bins_monahan = 2
