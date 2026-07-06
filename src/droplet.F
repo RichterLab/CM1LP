@@ -6443,7 +6443,7 @@
 #ifdef MPI
       call mpi_allreduce(local_capacity_ok,global_capacity_ok,1,mpi_integer,mpi_min,mpi_comm_world,ierr)
       call mpi_allreduce(my_reintro+nparcelsLocalActive, &
-                         tot_after_reintro,1,mpi_integer8, &
+                         tot_after_reintro,1,mpi_integer8,mpi_sum, &
                          mpi_comm_world,ierr)
 #else
       global_capacity_ok = local_capacity_ok
