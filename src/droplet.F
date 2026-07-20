@@ -6,6 +6,7 @@
   public :: droplet_driver,droplet_injection_driver,compute_droplet_substeps, &
             droplet_coalescence_driver,project_droplet_qc_effc, &
             droplet_diag,initialize_droplet_histograms, &
+            write_drop_traj, &
             check_droplet_ownership,particle_seed,ngidx, &
             kohler_equil_radius,lognormal_droplet, &
             ssgf_nbin,drop_inject_bin_owed,drop_inject_sample_count, &
@@ -156,7 +157,7 @@
           maxy,maxz,ierr,mynw,mysw,myne,myse,mynorth,mysouth,myeast, &
           mywest,myid,nparcelsLocal,nparcelsLocalActive, &
           time_phys_H2D,time_phys_D2H,time_dropC1,time_dropC2,time_dropC3, &
-          time_dropC4,ngxy,dx,dy,dz,testcase,drop_traj,drop_sgs_opt
+          time_dropC4,ngxy,dx,dy,dz,testcase,drop_sgs_opt
       use constants
       use comm_module
       use comm_droplet_module
@@ -484,12 +485,6 @@
        part_grav3 = -2.3122
     end if
 
-
-    !Before entering the droplet update loop, save droplet trajectories
-
-    if (drop_traj.eq.1) then
-       call write_drop_traj(nstep,real(mtime),pdata)
-    end if
 
     dlogsig_sum = 0.0d0
     dlogsig_max = 0.0
@@ -5140,12 +5135,13 @@
       character*180 :: fname
       character*4 :: myid_char
 
-      !$acc data create(compacted)
+      pcount = 0
 
-      !$acc update device(ngidx)
+      !$acc data create(compacted,pcount)
+
+      !$acc update device(ngidx,pcount)
       
       !Pull out some subset of trajectories
-      pcount = 0
 
       !$acc parallel loop gang vector default(present) private(idx)
       do np=1,nparcelsLocalActive
@@ -5161,10 +5157,8 @@
            idx = pcount
            !$acc end atomic
 
-           if (idx.lt.num_local_traj) then
+           if (idx.le.num_local_traj) then
              compacted(idx,:) = pdata(np,:)
-           else
-             print *, 'WARNING: SELECTED TRAJECTORIES EXCEED MAXIMUM NUMBER'
            end if
 
          end if
@@ -5172,7 +5166,14 @@
       end do
       !$acc end parallel
 
-      !$acc update host(compacted)
+      !$acc update host(compacted,pcount)
+
+      ! Never allow the host write loop to exceed the compacted buffer.
+      if (pcount.gt.num_local_traj) then
+         print *, 'WARNING: SELECTED TRAJECTORIES EXCEED MAXIMUM NUMBER ON RANK ',myid, &
+                  '; WRITING AT MOST ',num_local_traj
+         pcount = num_local_traj
+      end if
       
       !$acc end data
 

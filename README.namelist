@@ -1596,6 +1596,9 @@
 
  drop_inject_time  - Time after which particle injection begins
 
+ drop_traj_elapse  - Time between Lagrangian droplet trajectory writes
+                     (default/negative = every model timestep, zero = disabled)
+
  two_way_coupling  -  Whether the change in the particles is coupled to the surrounding flow
                       (1 = coupled, 0 = particles feel flow, flow does not feel particles)
    

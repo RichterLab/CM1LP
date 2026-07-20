@@ -301,6 +301,7 @@
       call bcast_int(two_way_coupling) ! DEVICE
       call bcast_int(drop_evap) ! DEVICE
       call bcast_int(drop_traj) ! DEVICE
+      call bcast_real(drop_traj_elapse)
       call bcast_int(drop_sgs_opt) ! DEVICE
       call bcast_log(coal_enabled) ! DEVICE
       call bcast_int(coal_kernel) ! DEVICE

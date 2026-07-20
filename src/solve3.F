@@ -162,7 +162,8 @@
           kd_turb,ud_rdamp,vd_rdamp,wd_rdamp,td_rdamp,td_hediff,td_vediff,qd_hediff,qd_vediff, &
           td_diss,td_rad,td_pbl,td_hturb,td_vturb,qd_hturb,qd_vturb,ud_pbl,vd_pbl,qd_pbl, &
           td_nudge,qd_nudge,prcl_droplet,ntwk,pdcomp,nbc,ebc,sbc,wbc,two_way_coupling, &
-          output_rain,output_sws,output_svs,output_sps,output_srs,output_sgs,output_sus,output_shs
+          output_rain,output_sws,output_svs,output_sps,output_srs,output_sgs,output_sus,output_shs, &
+          drop_traj,drop_traj_elapse
 
       use constants
       use bc_module, only: bc2d, bcs, bcu, bcv, bcw, bcwsfc, &
@@ -174,7 +175,7 @@
       use parcel_module, only : parcel_driver
       use droplet_module, only : droplet_driver,droplet_injection_driver, &
           compute_droplet_substeps,droplet_coalescence_driver, &
-          project_droplet_qc_effc
+          project_droplet_qc_effc,write_drop_traj
       use pdcomp_module, only : pidcomp
       use lsnudge_module
       use ib_module
@@ -355,6 +356,8 @@
       integer :: num_dropsub,i_dropsub,num_drop_fallout,num_drop_fallout_step
       real :: dt_dropsub
       double precision :: dbldt_dropsub,mtime_dropsub
+      real, parameter :: drop_traj_elapse_tol = 1.0e-6
+      logical, save :: drop_traj_zero_warned = .false.
 
 !--------------------------------------------------------------------
       !$acc declare present(rrw)
@@ -959,6 +962,24 @@
 
         ifdroplet:  &
         if (prcl_droplet.ge.1) then
+
+          ! Save the pre-update particle state at most once per main timestep.
+          ! For a positive interval, write the first available state after an
+          ! output-time boundary is crossed.
+          if (drop_traj.eq.1) then
+            if (drop_traj_elapse.lt.-drop_traj_elapse_tol) then
+              call write_drop_traj(nstep,real(mtime),pdata)
+            elseif (drop_traj_elapse.gt.drop_traj_elapse_tol) then
+              if (nstep.eq.1 .or. &
+                  floor((mtime-dble(dtlast))/dble(drop_traj_elapse)).ne. &
+                  floor(mtime/dble(drop_traj_elapse))) then
+                call write_drop_traj(nstep,real(mtime),pdata)
+              endif
+            elseif (myid.eq.0 .and. .not. drop_traj_zero_warned) then
+              write(*,*) 'WARNING drop_traj_elapse is near zero; disabling trajectory output'
+              drop_traj_zero_warned = .true.
+            endif
+          endif
 
           if( ptype.eq.7 .and. two_way_coupling.eq.1 )then
             call compute_droplet_substeps(dt,xf,yf,zf,sigmaf,pdata,pdata_locind,num_dropsub)

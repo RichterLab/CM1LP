@@ -166,6 +166,7 @@
       integer(i8) :: nparcelsInit,nparcelsMax,nparcelsRest,nparcelsLocal, &
                      nparcelsLocalActive
       integer :: drop_sgs_opt = 0
+      real :: drop_traj_elapse = -1.0
       integer :: coal_kernel = 2
       integer :: coal_Ndx = 1, coal_Ndy = 1, coal_Ndz = 1
       logical :: coal_enabled = .false.
@@ -348,8 +349,9 @@
               prcl_km,prcl_kh,prcl_tke,prcl_dbz,prcl_b,prcl_vpg,prcl_vort,    &
               prcl_rho,prcl_qsat,prcl_sfc,                                    &
               nparcelsInit,nparcelsMax,drop_mult,                             &
-	      drop_inject_elapse,drop_inject_time,two_way_coupling,           &
-	      drop_evap,drop_traj,drop_sgs_opt,coal_enabled,coal_kernel,      &
+	      drop_inject_elapse,drop_inject_time,drop_traj_elapse,           &
+	      two_way_coupling,drop_evap,drop_traj,drop_sgs_opt,              &
+	      coal_enabled,coal_kernel,                                       &
               coal_Ndx,coal_Ndy,coal_Ndz
       namelist /param14/                                                      &
               dodomaindiag,diagfrq
