@@ -167,6 +167,7 @@
                      nparcelsLocalActive
       integer :: drop_sgs_opt = 0
       real :: drop_traj_elapse = -1.0
+      real :: tauc_mult_factor = 1.0
       integer :: coal_kernel = 2
       integer :: coal_Ndx = 1, coal_Ndy = 1, coal_Ndz = 1
       logical :: coal_enabled = .false.
@@ -350,6 +351,7 @@
               prcl_rho,prcl_qsat,prcl_sfc,                                    &
               nparcelsInit,nparcelsMax,drop_mult,                             &
 	      drop_inject_elapse,drop_inject_time,drop_traj_elapse,           &
+              tauc_mult_factor,                                           &
 	      two_way_coupling,drop_evap,drop_traj,drop_sgs_opt,              &
 	      coal_enabled,coal_kernel,                                       &
               coal_Ndx,coal_Ndy,coal_Ndz

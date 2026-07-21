@@ -1372,7 +1372,7 @@
 
       use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,npvals,nparcelsLocal, &
           nparcelsLocalActive,nx,ny,axisymm,terrain_flag,viscosity,sc_num, &
-          prx,pry,prz,prsig,prrp,prmult,ierr
+          prx,pry,prz,prsig,prrp,prmult,tauc_mult_factor,ierr
       use constants
 #ifdef MPI
       use mpi
@@ -1491,6 +1491,7 @@
       diffv = viscosity/max(sc_num,1.0e-12)
       if( drop_radnc_global.gt.0.0 .and. diffv.gt.0.0 )then
         tauc_min = 1.0/(pi*diffv*drop_radnc_global)
+        tauc_min = tauc_mult_factor*tauc_min
         if( tauc_min.gt.0.0 .and. dt.gt.tauc_min )then
           num_dropsub = max(1,ceiling(dt/tauc_min))
         endif

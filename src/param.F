@@ -302,6 +302,7 @@
       call bcast_int(drop_evap) ! DEVICE
       call bcast_int(drop_traj) ! DEVICE
       call bcast_real(drop_traj_elapse)
+      call bcast_real(tauc_mult_factor)
       call bcast_int(drop_sgs_opt) ! DEVICE
       call bcast_log(coal_enabled) ! DEVICE
       call bcast_int(coal_kernel) ! DEVICE
@@ -2436,6 +2437,21 @@
 
       ! for parcels:
       nparcelsInit = max(1_i8,nparcelsInit)
+      IF( tauc_mult_factor.le.0.0 )THEN
+        if(myid.eq.0)then
+        print *
+        print *,'  tauc_mult_factor = ',tauc_mult_factor
+        print *
+        print *,'  tauc_mult_factor must be greater than zero '
+        print *
+        print *,'   stopping model .... '
+        print *
+        endif
+#ifdef MPI
+        call MPI_BARRIER (MPI_COMM_WORLD,ierr)
+#endif
+        call stopcm1
+      ENDIF
       IF( coal_kernel.lt.0 .or. coal_kernel.gt.4 )THEN
         if(myid.eq.0)then
         print *
@@ -2736,6 +2752,7 @@
       if(dowr) write(outfile,*) 'nparcelsMax=',nparcelsMax
       if(dowr) write(outfile,*) 'two_way_coupling=',two_way_coupling
       if(dowr) write(outfile,*) 'drop_evap=',drop_evap
+      if(dowr) write(outfile,*) 'tauc_mult_factor=',tauc_mult_factor
       if(dowr) write(outfile,*) 'drop_sgs_opt=',drop_sgs_opt
       if(dowr) write(outfile,*) 'coal_enabled=',coal_enabled
       if(dowr) write(outfile,*) 'coal_kernel=',coal_kernel
