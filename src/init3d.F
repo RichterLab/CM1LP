@@ -85,7 +85,8 @@
       use poiss_module
       use parcel_module , only : getparcelzs
       use droplet_module, only: initialize_droplet_histograms,particle_seed,ngidx, &
-                                lognormal_droplet,aerosol_kappa_background
+                                lognormal_droplet,bomex_lognormal_droplet, &
+                                aerosol_kappa_background
 #ifdef MPI
       use mpi
 #endif
@@ -173,6 +174,11 @@
 
       real :: salinity
       integer :: values(8)
+
+      ! Temporary testcase-3 selector for the BOMEX aerosol initialization.
+      !   0: sample the PSD with uniform superdroplet multiplicity
+      !   1: sample uniformly in log10(Ddry) with PSD-weighted multiplicity
+      integer, parameter :: bomex_size_sampling = 0
 
       ! Note:  By default, CM1 uses the same set of psuedorandom numbers 
       !        every time it is called.  To use truly random perturbations 
@@ -487,6 +493,17 @@
                 pdata(i,prkap) = aerosol_kappa_background
                 call lognormal_droplet(pdata(i,prrp),pdata(i,prms),pdata(i,prkap),randomNumbers)
                 pdata(i,prrp0) = pdata(i,prrp)
+             else if (testcase.eq.3) then
+                pdata(i,prkap) = kappa_s
+                if (bomex_size_sampling.eq.0) then
+                   call bomex_lognormal_droplet(pdata(i,prrp), &
+                        pdata(i,prms),pdata(i,prkap),randomNumbers)
+                   pdata(i,prrp0) = pdata(i,prrp)
+                else if (bomex_size_sampling.eq.1) then
+                   stop 'BOMEX size-sampling option 1 is not implemented'
+                else
+                   stop 'Invalid bomex_size_sampling value'
+                end if
              else
                 !Droplet size (radius)
                 pdata(i,prrp) = 2.0e-6

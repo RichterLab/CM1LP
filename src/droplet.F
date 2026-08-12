@@ -8,7 +8,7 @@
             droplet_diag,initialize_droplet_histograms, &
             write_drop_traj, &
             check_droplet_ownership,particle_seed,ngidx, &
-            kohler_equil_radius,lognormal_droplet, &
+            kohler_equil_radius,lognormal_droplet,bomex_lognormal_droplet, &
             ssgf_nbin,drop_inject_bin_owed,drop_inject_sample_count, &
             aerosol_kappa_background
 
@@ -5822,6 +5822,58 @@
       m_s = real(rho_solute*4.0d0/3.0d0*dble(pi)*dry_radius**3)
 
       end subroutine lognormal_droplet
+
+      subroutine bomex_lognormal_droplet(rad_init,m_s,kappa_p,randomNumbers)
+      ! Sample the testcase-3 dry aerosol PSD.  The three modal number
+      ! concentrations set the probability of selecting each lognormal mode.
+      use constants, only : rho_solute,pi
+      use MersenneTwister_mod
+
+      implicit none
+
+      real, intent(out) :: rad_init,m_s
+      real, intent(in) :: kappa_p
+      type(randomNumberSequence), intent(inout) :: randomNumbers
+
+      double precision, parameter :: mode_n(3) = &
+                                      (/ 260.0d0,12.0d0,1.4d0 /)
+      double precision, parameter :: mode_dg_um(3) = &
+                                      (/ 0.180d0,0.72d0,2.30d0 /)
+      double precision, parameter :: mode_sigma(3) = &
+                                      (/ 1.45d0,1.65d0,1.90d0 /)
+      double precision, parameter :: init_rh = 0.80d0
+      double precision, parameter :: init_temp = 290.0d0
+      double precision :: mode_total,mode_draw
+      double precision :: rand_dp,rand2_dp,normal_sample
+      double precision :: dry_diameter_um,dry_radius,wet_radius
+      integer :: imode
+
+      mode_total = sum(mode_n)
+
+      mode_draw = getRandomReal(randomNumbers)*mode_total
+      if (mode_draw.lt.mode_n(1)) then
+        imode = 1
+      else if (mode_draw.lt.mode_n(1)+mode_n(2)) then
+        imode = 2
+      else
+        imode = 3
+      end if
+
+      rand_dp = max(getRandomReal(randomNumbers),1.0d-12)
+      rand2_dp = getRandomReal(randomNumbers)
+      normal_sample = sqrt(-2.0d0*log(rand_dp)) &
+                      *cos(2.0d0*dble(pi)*rand2_dp)
+      dry_diameter_um = mode_dg_um(imode) &
+                        *exp(log(mode_sigma(imode))*normal_sample)
+
+      dry_radius = 0.5d0*dry_diameter_um*1.0d-6
+      wet_radius = kohler_equil_radius(dry_radius,dble(kappa_p), &
+                                       init_temp,init_rh)
+
+      rad_init = real(wet_radius)
+      m_s = real(rho_solute*4.0d0/3.0d0*dble(pi)*dry_radius**3)
+
+      end subroutine bomex_lognormal_droplet
 
       function kohler_equil_radius_dry3(dry_radius3,kappa_p,temp_p,rh) result(radius)
       !$acc routine seq
