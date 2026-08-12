@@ -4238,11 +4238,15 @@
       real :: partnumrz(nk,nbins),multnumrz(nk,nbins),vp3meanrz(nk,nbins)
 
       real :: tnumpart_r(nbins)
+      double precision :: dN_dr(nbins),dN_dlogr(nbins), &
+                          dN_dr_dry(nbins),dN_dlogr_dry(nbins)
 
       integer, parameter :: num0 = 39, num1 = 34   !Number of 0th and 1st order statistics in droplet_diag
       real :: rad10_tmp,dry_rad10_tmp
       double precision :: hist_injected_area,hist_injected_xlen,hist_injected_ylen, &
                           hist_injected_bin_width,hist_injected_log_bin_width
+      double precision :: hist_domain_xlen,hist_domain_ylen,hist_domain_volume, &
+                          hist_radius_bin_width_um,hist_radius_log_bin_width
       double precision :: qstar_tmp
       integer :: ibin,ibin_dry
 
@@ -5014,6 +5018,52 @@
       end if
 #endif
 
+      dN_dr = 0.0d0
+      dN_dlogr = 0.0d0
+      dN_dr_dry = 0.0d0
+      dN_dlogr_dry = 0.0d0
+#ifdef MPI
+      if (myid.eq.0) then
+#endif
+         if (stretch_x.eq.0) then
+            hist_domain_xlen = dble(dx)*dble(nx)
+         else
+            hist_domain_xlen = dble(tot_x_len)
+         end if
+         if (stretch_y.eq.0) then
+            hist_domain_ylen = dble(dy)*dble(ny)
+         else
+            hist_domain_ylen = dble(tot_y_len)
+         end if
+         hist_domain_volume = hist_domain_xlen*hist_domain_ylen* &
+                              dble(dumzf(ke+1)-dumzf(kb))
+
+         if (hist_domain_volume.gt.0.0d0) then
+            do ir=1,nbins
+               hist_radius_log_bin_width = &
+                  dble(bins_radius_edge(ir+1)-bins_radius_edge(ir))
+               hist_radius_bin_width_um = &
+                  (10.0d0**dble(bins_radius_edge(ir+1)) - &
+                   10.0d0**dble(bins_radius_edge(ir)))*1.0d6
+
+               if (hist_radius_bin_width_um.gt.0.0d0) then
+                  dN_dr(ir) = dble(hist_radius(ir))/ &
+                     (hist_domain_volume*1.0d6*hist_radius_bin_width_um)
+                  dN_dr_dry(ir) = dble(hist_dry_radius(ir))/ &
+                     (hist_domain_volume*1.0d6*hist_radius_bin_width_um)
+               end if
+               if (hist_radius_log_bin_width.gt.0.0d0) then
+                  dN_dlogr(ir) = dble(hist_radius(ir))/ &
+                     (hist_domain_volume*1.0d6*hist_radius_log_bin_width)
+                  dN_dlogr_dry(ir) = dble(hist_dry_radius(ir))/ &
+                     (hist_domain_volume*1.0d6*hist_radius_log_bin_width)
+               end if
+            end do
+         end if
+#ifdef MPI
+      end if
+#endif
+
       ssgf_injected = 0.0
       dN_dlogr_injected = 0.0
       ssgf_dry_injected = 0.0
@@ -5068,7 +5118,8 @@
            dumzh,numconc,sd_numconc,massconc,vp1mean,vp2mean,vp3mean,uf1mean,uf2mean,uf3mean, &
            usgsmean,vsgsmean,wsgsmean,sigm_smean,fsmean, &
            vp1msqr,vp2msqr,vp3msqr,m1src,m2src,m3src,Tpsrc,qvsrc,rhovsrc,Tf,qf,Tpmean,Tpmsqr, &
-           radmean,radmsqr,qfsat,qstarmean,kmoist,mse,wk,multnumrz,vp3meanrz,tnumpart_r)
+           radmean,radmsqr,qfsat,qstarmean,kmoist,mse,wk,multnumrz,vp3meanrz,tnumpart_r, &
+           dN_dr,dN_dlogr,dN_dr_dry,dN_dlogr_dry)
 #ifdef MPI
       end if
 #endif
@@ -7088,7 +7139,8 @@
                                   zhvec,numconc,sd_numconc,massconc,vp1mean,vp2mean,vp3mean,uf1mean,uf2mean,uf3mean,&
                                   usgsmean,vsgsmean,wsgsmean,sigm_smean,fsmean,&
                                   vp1msqr,vp2msqr,vp3msqr,m1src,m2src,m3src,Tpsrc,qvsrc,rhovsrc,Tf,qf,Tpmean,Tpmsqr,&
-                                  radmean,radmsqr,qfsat,qstarmean,kmoist,mse,wk,multnumrz,vp3meanrz,tnumpart_r)
+                                  radmean,radmsqr,qfsat,qstarmean,kmoist,mse,wk,multnumrz,vp3meanrz,tnumpart_r, &
+                                  dN_dr,dN_dlogr,dN_dr_dry,dN_dlogr_dry)
       use input
       use constants
       use netcdf
@@ -7101,6 +7153,8 @@
       real,    intent(in)    :: usgsmean(nk),vsgsmean(nk),wsgsmean(nk),sigm_smean(nk),fsmean(nk)
       real,    intent(in)    :: multnumrz(nk,nbins),vp3meanrz(nk,nbins)
       real,    intent(in)    :: tnumpart_r(nbins)
+      double precision, intent(in) :: dN_dr(nbins),dN_dlogr(nbins), &
+                                      dN_dr_dry(nbins),dN_dlogr_dry(nbins)
       integer, intent(in)    :: nbins
       real, intent(in) :: tnumpart
 
@@ -7515,6 +7569,26 @@
     call disp_err( nf90_put_att(ncid,varid,"long_name","total count for each dry-radius bin from solute mass") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
 
+    call disp_err( nf90_def_var(ncid,"dN_dr",nf90_double,(/binsid,timeid/),varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "droplet number concentration per wet-radius interval") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","cm^-3 um^-1") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"dN_dlogr",nf90_double,(/binsid,timeid/),varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "droplet number concentration per log10 wet-radius interval") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","cm^-3") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"dN_dr_dry",nf90_double,(/binsid,timeid/),varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "aerosol number concentration per dry-radius interval") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","cm^-3 um^-1") , .true. )
+
+    call disp_err( nf90_def_var(ncid,"dN_dlogr_dry",nf90_double,(/binsid,timeid/),varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "aerosol number concentration per log10 dry-radius interval") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","cm^-3") , .true. )
+
     call disp_err( nf90_def_var(ncid,"hist_radius10",nf90_float,(/binsid,timeid/),varid) , .true. )
     call disp_err( nf90_put_att(ncid,varid,"long_name","total count for each bin only for those under 10m") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
@@ -7835,6 +7909,18 @@
 
     call disp_err( nf90_inq_varid(ncid,"hist_dry_radius",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,hist_dry_radius,(/1,time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"dN_dr",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,dN_dr,(/1,time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"dN_dlogr",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,dN_dlogr,(/1,time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"dN_dr_dry",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,dN_dr_dry,(/1,time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"dN_dlogr_dry",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,dN_dlogr_dry,(/1,time_index/)) , .true. )
 
     call disp_err( nf90_inq_varid(ncid,"hist_radius10",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,hist_radius10,(/1,time_index/)) , .true. )
