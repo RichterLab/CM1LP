@@ -507,7 +507,7 @@
                 call lognormal_droplet(pdata(i,prrp),pdata(i,prms),pdata(i,prkap),randomNumbers)
                 pdata(i,prrp0) = pdata(i,prrp)
              else if (testcase.eq.3) then
-                pdata(i,prkap) = kappa_s
+                pdata(i,prkap) = 0.6
                 if (bomex_size_sampling.eq.0) then
                    call bomex_lognormal_droplet(pdata(i,prrp), &
                         pdata(i,prms),pdata(i,prkap),randomNumbers)
