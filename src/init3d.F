@@ -86,6 +86,7 @@
       use parcel_module , only : getparcelzs
       use droplet_module, only: initialize_droplet_histograms,particle_seed,ngidx, &
                                 lognormal_droplet,bomex_lognormal_droplet, &
+                                bomex_logspaced_droplet, &
                                 aerosol_kappa_background
 #ifdef MPI
       use mpi
@@ -178,7 +179,7 @@
       ! Temporary testcase-3 selector for the BOMEX aerosol initialization.
       !   0: sample the PSD with uniform superdroplet multiplicity
       !   1: sample uniformly in log10(Ddry) with PSD-weighted multiplicity
-      integer, parameter :: bomex_size_sampling = 0
+      integer, parameter :: bomex_size_sampling = 1
 
       ! Note:  By default, CM1 uses the same set of psuedorandom numbers 
       !        every time it is called.  To use truly random perturbations 
@@ -190,7 +191,8 @@
       real :: xrange, yrange, zrange
       real :: dzbot, dztop, zbuf_bot, zbuf_top
       integer :: iloc, jloc
-      integer(i8) :: np_tmp
+      integer(i8) :: np_tmp,particles_per_rank,particle_remainder, &
+                     global_particle_offset,global_particle_index
 
 !--------------------------
 
@@ -451,7 +453,18 @@
            if ( myid == 0 ) iter = nparcelsInit - iter * (numprocs - 1)
         end if
 
+        particles_per_rank = nparcelsInit/int(numprocs,i8)
+        particle_remainder = mod(nparcelsInit,int(numprocs,i8))
+        if (myid.eq.0) then
+           global_particle_offset = 0_i8
+        else
+           global_particle_offset = particles_per_rank+particle_remainder &
+                                    +int(myid-1,i8)*particles_per_rank
+        end if
+
         do n = 1, iter
+
+          global_particle_index = global_particle_offset+int(n-1,i8)
 
           rand = getRandomReal(randomNumbers)
           tmpx = xf(1)+rand*xrange
@@ -500,7 +513,10 @@
                         pdata(i,prms),pdata(i,prkap),randomNumbers)
                    pdata(i,prrp0) = pdata(i,prrp)
                 else if (bomex_size_sampling.eq.1) then
-                   stop 'BOMEX size-sampling option 1 is not implemented'
+                   call bomex_logspaced_droplet(global_particle_index, &
+                        nparcelsInit,drop_mult,pdata(i,prrp), &
+                        pdata(i,prms),pdata(i,prkap),pdata(i,prmult))
+                   pdata(i,prrp0) = pdata(i,prrp)
                 else
                    stop 'Invalid bomex_size_sampling value'
                 end if
@@ -526,7 +542,8 @@
              pdata(i,prtp) = 290.0
      
              !Droplet multiplicity
-             pdata(i,prmult) = drop_mult
+             if (testcase.ne.3 .or. bomex_size_sampling.eq.0) &
+                pdata(i,prmult) = drop_mult
         
              !Is droplet alive?
              pdata(i,pract) = 1.0

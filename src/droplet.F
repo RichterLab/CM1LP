@@ -9,6 +9,7 @@
             write_drop_traj, &
             check_droplet_ownership,particle_seed,ngidx, &
             kohler_equil_radius,lognormal_droplet,bomex_lognormal_droplet, &
+            bomex_logspaced_droplet, &
             ssgf_nbin,drop_inject_bin_owed,drop_inject_sample_count, &
             aerosol_kappa_background
 
@@ -43,6 +44,10 @@
   integer :: particle_seed
 
   integer :: ngidx  !Each MPI rank will keep a "global" particle index counter which increases for every new particle created on this rank
+
+  double precision :: bomex_bin_weight(nbins) = 0.0d0
+  double precision :: bomex_total_weight = 0.0d0
+  logical :: bomex_bins_initialized = .false.
 
   ! If we already know that a parcel stays on the same process 
   !    in the previous time step and it is still here, we start 
@@ -5925,6 +5930,87 @@
       m_s = real(rho_solute*4.0d0/3.0d0*dble(pi)*dry_radius**3)
 
       end subroutine bomex_lognormal_droplet
+
+      subroutine initialize_bomex_log_bins
+      use constants, only : pi
+
+      implicit none
+
+      double precision, parameter :: mode_n(3) = &
+                                      (/ 260.0d0,12.0d0,1.4d0 /)
+      double precision, parameter :: mode_dg_um(3) = &
+                                      (/ 0.180d0,0.72d0,2.30d0 /)
+      double precision, parameter :: mode_sigma(3) = &
+                                      (/ 1.45d0,1.65d0,1.90d0 /)
+      double precision, parameter :: dry_radius_min_log10 = -8.0d0
+      double precision, parameter :: dry_radius_max_log10 = -3.0d0
+      double precision :: log_bin_width,log_dry_radius,dry_diameter_um
+      double precision :: log_sigma,z
+      integer :: ibin,imode
+
+      log_bin_width = (dry_radius_max_log10-dry_radius_min_log10) &
+                      /dble(nbins-1)
+      bomex_bin_weight = 0.0d0
+      do ibin=1,nbins
+         log_dry_radius = dry_radius_min_log10 &
+                          +log_bin_width*dble(ibin-1)
+         dry_diameter_um = 2.0d0*(10.0d0**log_dry_radius)*1.0d6
+         do imode=1,3
+            log_sigma = log10(mode_sigma(imode))
+            z = log10(dry_diameter_um/mode_dg_um(imode))/log_sigma
+            bomex_bin_weight(ibin) = bomex_bin_weight(ibin) &
+               +mode_n(imode)*exp(-0.5d0*z*z) &
+               /(sqrt(2.0d0*dble(pi))*log_sigma)*log_bin_width
+         end do
+      end do
+      bomex_total_weight = sum(bomex_bin_weight)
+      bomex_bins_initialized = .true.
+
+      end subroutine initialize_bomex_log_bins
+
+      subroutine bomex_logspaced_droplet(global_index,nparcels_total, &
+                                          base_mult,rad_init,m_s, &
+                                          kappa_p,particle_mult)
+      ! Assign equal numbers of testcase-3 superdroplets to the existing
+      ! log10 dry-radius histogram bins.  Multiplicity carries the PSD weight.
+      use constants, only : i8,rho_solute,pi
+
+      implicit none
+
+      integer(i8), intent(in) :: global_index,nparcels_total
+      real, intent(in) :: base_mult,kappa_p
+      real, intent(out) :: rad_init,m_s,particle_mult
+
+      double precision, parameter :: dry_radius_min_log10 = -8.0d0
+      double precision, parameter :: dry_radius_max_log10 = -3.0d0
+      double precision, parameter :: init_rh = 0.80d0
+      double precision, parameter :: init_temp = 290.0d0
+      double precision :: log_bin_width,log_dry_radius,dry_radius
+      double precision :: wet_radius
+      integer(i8) :: particles_in_bin
+      integer :: ibin
+
+      if (.not.bomex_bins_initialized) call initialize_bomex_log_bins
+
+      log_bin_width = (dry_radius_max_log10-dry_radius_min_log10) &
+                      /dble(nbins-1)
+      ibin = int(mod(global_index,int(nbins,i8)))+1
+      particles_in_bin = nparcels_total/int(nbins,i8)
+      if (int(ibin,i8).le.mod(nparcels_total,int(nbins,i8))) &
+         particles_in_bin = particles_in_bin+1_i8
+
+      log_dry_radius = dry_radius_min_log10+log_bin_width*dble(ibin-1)
+      dry_radius = 10.0d0**log_dry_radius
+      wet_radius = kohler_equil_radius(dry_radius,dble(kappa_p), &
+                                       init_temp,init_rh)
+
+      rad_init = real(wet_radius)
+      m_s = real(rho_solute*4.0d0/3.0d0*dble(pi)*dry_radius**3)
+      particle_mult = real(dble(nparcels_total)*dble(base_mult) &
+                           *bomex_bin_weight(ibin) &
+                           /(bomex_total_weight*dble(particles_in_bin)))
+
+      end subroutine bomex_logspaced_droplet
 
       function kohler_equil_radius_dry3(dry_radius3,kappa_p,temp_p,rh) result(radius)
       !$acc routine seq
