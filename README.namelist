@@ -1599,6 +1599,10 @@
  drop_traj_elapse  - Time between Lagrangian droplet trajectory writes
                      (default/negative = every model timestep, zero = disabled)
 
+ tauc_mult_factor  - Multiplier applied to the minimum cloud relaxation time
+                     1/(4*pi*Dv*sum(multiplicity*radius)/cell volume) when
+                     selecting the Lagrangian droplet coupling substep.
+
  two_way_coupling  -  Whether the change in the particles is coupled to the surrounding flow
                       (1 = coupled, 0 = particles feel flow, flow does not feel particles)
    

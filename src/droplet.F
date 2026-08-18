@@ -1547,7 +1547,9 @@
       if( drop_radnc_global.gt.0.0 .and. diffv.gt.0.0 )then
         tauc_pi = 1.0/(pi*diffv*drop_radnc_global)
         tauc_4pi = 0.25*tauc_pi
-        tauc_selected = tauc_mult_factor*tauc_pi
+        ! The implemented droplet growth law gives a vapor relaxation rate
+        ! of 4*pi*Dv*sum(mult*radius)/V in the Sh=2 limit.
+        tauc_selected = tauc_mult_factor*tauc_4pi
         if( tauc_selected.gt.0.0 .and. dt.gt.tauc_selected )then
           num_dropsub = max(1,ceiling(dt/tauc_selected))
         endif
