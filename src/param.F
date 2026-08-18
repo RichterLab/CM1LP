@@ -304,6 +304,7 @@
       call bcast_real(drop_traj_elapse)
       call bcast_real(tauc_mult_factor)
       call bcast_int(drop_sgs_opt) ! DEVICE
+      call bcast_int(drop_stability_diag)
       call bcast_log(coal_enabled) ! DEVICE
       call bcast_int(coal_kernel) ! DEVICE
       call bcast_int(coal_Ndx) ! DEVICE
@@ -2437,6 +2438,8 @@
 
       ! for parcels:
       nparcelsInit = max(1_i8,nparcelsInit)
+      drop_stability_diag = max(0,min(2,drop_stability_diag))
+      !$acc update device(drop_stability_diag) if_present
       IF( tauc_mult_factor.le.0.0 )THEN
         if(myid.eq.0)then
         print *
@@ -2754,6 +2757,7 @@
       if(dowr) write(outfile,*) 'drop_evap=',drop_evap
       if(dowr) write(outfile,*) 'tauc_mult_factor=',tauc_mult_factor
       if(dowr) write(outfile,*) 'drop_sgs_opt=',drop_sgs_opt
+      if(dowr) write(outfile,*) 'drop_stability_diag=',drop_stability_diag
       if(dowr) write(outfile,*) 'coal_enabled=',coal_enabled
       if(dowr) write(outfile,*) 'coal_kernel=',coal_kernel
       if(dowr) write(outfile,*) 'coal_Ndx=',coal_Ndx

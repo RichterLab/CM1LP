@@ -1609,6 +1609,10 @@
                   (0 = off, 1 = stochastic position update,
                    2 = stochastic SGS velocity update)
 
+ drop_stability_diag  -  Lagrangian droplet coupling stability diagnostics
+                         (0 = off [default], 1 = DROP_SUBSTEP output,
+                          2 = DROP_SUBSTEP and conditional DROP_COUPLING output)
+
  coal_enabled  -  Lagrangian droplet collision-coalescence switch
                   (.false. = off, .true. = on)
 

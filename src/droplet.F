@@ -15,6 +15,8 @@
 
   !These are quantities which are needed in the droplet_diag output, so must be public
   real :: num100,num1000
+  integer :: drop_solver_fallback_substep = 0
+  integer :: drop_solver_failure_substep = 0
   integer, parameter :: nbins = 130  !Bins for the droplet histograms
   real,dimension(nbins) :: bins_restime  !Bins for droplet residence time
   real,dimension(nbins+1) :: bins_restime_edge  !Bin edges for droplet residence time
@@ -134,7 +136,8 @@
   !$acc                 eng_destroyed,eng_injected,m1_destroyed,m2_destroyed,m1_injected,m2_injected, &
   !$acc                 coal_pair_attempts,coal_pair_successes,coal_collision_mult, &
   !$acc                 coal_palpha_sum,coal_palpha_mean,coal_palpha_max,coal_gamtil_max, &
-  !$acc                 num100,num1000,ngidx)
+  !$acc                 num100,num1000,ngidx,drop_solver_fallback_substep, &
+  !$acc                 drop_solver_failure_substep)
   !$acc declare copyin(hall_r0,hall_rat,hall_ecoll)
 
   CONTAINS
@@ -148,7 +151,8 @@
                                  ne2,sw1,sw2,se1,se2,reqs_p,sw31,sw32, &
                                  se31,se32,ss31,ss32,sn31,sn32,n3w1, &
                                  n3w2,n3e1,n3e2,s3w1,s3w2,s3e1,s3e2, &
-                                 reqs_s,dpten,pdata_locind,nstep,num_fallout_out)
+                                 reqs_s,dpten,pdata_locind,nstep,num_fallout_out, &
+                                 solver_fallback_out,solver_failure_out)
 
       use input, only : ib,ie,jb,je,kb,ke,ibl,iel,jbl,jel,numq,ni,nj, &
           nk,nkp1,imp,jmp,kmp,rmp,cmp,kmt,npvals,npvars,cgs1,cgs2,cgs3, &
@@ -162,7 +166,7 @@
           maxy,maxz,ierr,mynw,mysw,myne,myse,mynorth,mysouth,myeast, &
           mywest,myid,nparcelsLocal,nparcelsLocalActive, &
           time_phys_H2D,time_phys_D2H,time_dropC1,time_dropC2,time_dropC3, &
-          time_dropC4,ngxy,dx,dy,dz,testcase,drop_sgs_opt
+          time_dropC4,ngxy,dx,dy,dz,testcase,drop_sgs_opt,drop_stability_diag
       use constants
       use comm_module
       use comm_droplet_module
@@ -184,6 +188,7 @@
       real, intent(in) :: dt
       integer, intent(in) :: nstep
       integer, intent(out) :: num_fallout_out
+      integer, intent(out) :: solver_fallback_out,solver_failure_out
       double precision, intent(in) :: dbldt
       double precision, intent(in) :: mtime
       real, intent(in), dimension(ib:ie) :: xh,uh,ruh
@@ -315,6 +320,13 @@
       num_fallout = 0  !Reset the number of droplets that have fallen out of physical domain
       num_fallout_reinject = 0
       errcode     = 0  ! Number of errors that occurred in the index search 
+      solver_fallback_out = 0
+      solver_failure_out = 0
+      if (drop_stability_diag.ge.2) then
+         drop_solver_fallback_substep = 0
+         drop_solver_failure_substep = 0
+         !$acc update device(drop_solver_fallback_substep,drop_solver_failure_substep)
+      endif
       numDepartN  = 0
       numDepartS  = 0
       numDepartE  = 0
@@ -1369,21 +1381,31 @@
        num_fallout_out = num_fallout
     end if
 
+    if (drop_stability_diag.ge.2) then
+       !$acc update self(drop_solver_fallback_substep,drop_solver_failure_substep)
+       solver_fallback_out = drop_solver_fallback_substep
+       solver_failure_out = drop_solver_failure_substep
+    endif
+
    end subroutine droplet_driver
 
 !----------------------------------------------------------------------
 
-   subroutine compute_droplet_substeps(dt,xf,yf,zf,sigmaf,pdata,pdata_locind,num_dropsub)
+   subroutine compute_droplet_substeps(nstep,mtime,dt,xf,yf,zf,sigmaf,pdata, &
+                                      pdata_locind,num_dropsub,cq4pi)
 
       use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,npvals,nparcelsLocal, &
           nparcelsLocalActive,nx,ny,axisymm,terrain_flag,viscosity,sc_num, &
-          prx,pry,prz,prsig,prrp,prmult,tauc_mult_factor,ierr
+          prx,pry,prz,prsig,prrp,prmult,tauc_mult_factor, &
+          drop_stability_diag,myid,ierr
       use constants
 #ifdef MPI
       use mpi
 #endif
       implicit none
 
+      integer, intent(in) :: nstep
+      double precision, intent(in) :: mtime
       real, intent(in) :: dt
       real, intent(in), dimension(ib:ie+1) :: xf
       real, intent(in), dimension(jb:je+1) :: yf
@@ -1392,13 +1414,21 @@
       real, intent(inout), dimension(nparcelsLocal,npvals) :: pdata
       integer, intent(inout), dimension(nparcelsLocal,3) :: pdata_locind
       integer, intent(out) :: num_dropsub
+      real, intent(out) :: cq4pi
 
-      integer :: i,j,k,np,iflag,jflag,kflag
-      real :: x3d,y3d,z3d,sig3d,dV,diffv,tauc_min
+      integer :: i,j,k,np,iflag,jflag,kflag,lim_index_local
+      integer :: lim_i_local,lim_j_local,lim_k_local,lim_rank
+      integer :: lim_i,lim_j,lim_k,lim_nsd
+      real :: x3d,y3d,z3d,sig3d,dV,diffv,tauc_selected
+      real :: tauc_pi,tauc_4pi,dt_dropsub_diag
       real :: drop_radnc_local,drop_radnc_global
+      real :: maxloc_send(2),maxloc_recv(2)
+      double precision :: lim_sum_mult,lim_sum_xir,lim_max_xir
+      double precision :: lim_max_mult,lim_rmin,lim_rmax,lim_mean_r
       real, dimension(ib:ie,jb:je,kb:ke) :: drop_radnc
 
       num_dropsub = 1
+      cq4pi = 0.0
 
       if( dt.le.0.0 ) return
 
@@ -1484,6 +1514,22 @@
       enddo
       enddo
 
+      lim_index_local = huge(lim_index_local)
+      if (drop_stability_diag.ge.1 .and. drop_radnc_local.gt.0.0) then
+        !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k) &
+        !$acc reduction(min:lim_index_local)
+        do k=1,nk
+        do j=1,nj
+        do i=1,ni
+          if (drop_radnc(i,j,k).ge.drop_radnc_local*(1.0-1.0e-6)) then
+            lim_index_local = min(lim_index_local, &
+                                  i+(j-1)*ni+(k-1)*ni*nj)
+          endif
+        enddo
+        enddo
+        enddo
+      endif
+
       !$acc end data
 
 #ifdef MPI
@@ -1494,11 +1540,106 @@
 #endif
 
       diffv = viscosity/max(sc_num,1.0e-12)
+      tauc_pi = -1.0
+      tauc_4pi = -1.0
+      tauc_selected = -1.0
+      dt_dropsub_diag = dt
       if( drop_radnc_global.gt.0.0 .and. diffv.gt.0.0 )then
-        tauc_min = 1.0/(pi*diffv*drop_radnc_global)
-        tauc_min = tauc_mult_factor*tauc_min
-        if( tauc_min.gt.0.0 .and. dt.gt.tauc_min )then
-          num_dropsub = max(1,ceiling(dt/tauc_min))
+        tauc_pi = 1.0/(pi*diffv*drop_radnc_global)
+        tauc_4pi = 0.25*tauc_pi
+        tauc_selected = tauc_mult_factor*tauc_pi
+        if( tauc_selected.gt.0.0 .and. dt.gt.tauc_selected )then
+          num_dropsub = max(1,ceiling(dt/tauc_selected))
+        endif
+        dt_dropsub_diag = dt/real(num_dropsub)
+        cq4pi = dt_dropsub_diag/tauc_4pi
+      endif
+
+      if (drop_stability_diag.ge.1) then
+        lim_i_local = 0
+        lim_j_local = 0
+        lim_k_local = 0
+        if (lim_index_local.lt.huge(lim_index_local)) then
+          lim_i_local = mod(lim_index_local-1,ni)+1
+          lim_j_local = mod((lim_index_local-1)/ni,nj)+1
+          lim_k_local = (lim_index_local-1)/(ni*nj)+1
+        endif
+
+#ifdef MPI
+        maxloc_send(1) = drop_radnc_local
+        maxloc_send(2) = real(myid)
+        call MPI_ALLREDUCE(maxloc_send,maxloc_recv,1,MPI_2REAL,MPI_MAXLOC, &
+                           MPI_COMM_WORLD,ierr)
+        lim_rank = nint(maxloc_recv(2))
+#else
+        lim_rank = myid
+#endif
+
+        lim_i = lim_i_local
+        lim_j = lim_j_local
+        lim_k = lim_k_local
+#ifdef MPI
+        call MPI_BCAST(lim_i,1,MPI_INTEGER,lim_rank,MPI_COMM_WORLD,ierr)
+        call MPI_BCAST(lim_j,1,MPI_INTEGER,lim_rank,MPI_COMM_WORLD,ierr)
+        call MPI_BCAST(lim_k,1,MPI_INTEGER,lim_rank,MPI_COMM_WORLD,ierr)
+#endif
+
+        lim_nsd = 0
+        lim_sum_mult = 0.0d0
+        lim_sum_xir = 0.0d0
+        lim_max_xir = 0.0d0
+        lim_max_mult = 0.0d0
+        lim_rmin = huge(lim_rmin)
+        lim_rmax = 0.0d0
+        if (myid.eq.lim_rank .and. lim_i.gt.0) then
+          !$acc parallel loop gang vector default(present) private(np) &
+          !$acc reduction(+:lim_nsd,lim_sum_mult,lim_sum_xir) &
+          !$acc reduction(max:lim_max_xir,lim_max_mult,lim_rmax) &
+          !$acc reduction(min:lim_rmin)
+          do np=1,nparcelsLocalActive
+            if (pdata_locind(np,1).eq.lim_i .and. &
+                pdata_locind(np,2).eq.lim_j .and. &
+                pdata_locind(np,3).eq.lim_k) then
+              lim_nsd = lim_nsd + 1
+              lim_sum_mult = lim_sum_mult+dble(pdata(np,prmult))
+              lim_sum_xir = lim_sum_xir+dble(pdata(np,prmult))* &
+                                           dble(pdata(np,prrp))
+              lim_max_xir = max(lim_max_xir,dble(pdata(np,prmult))* &
+                                             dble(pdata(np,prrp)))
+              lim_max_mult = max(lim_max_mult,dble(pdata(np,prmult)))
+              lim_rmin = min(lim_rmin,dble(pdata(np,prrp)))
+              lim_rmax = max(lim_rmax,dble(pdata(np,prrp)))
+            endif
+          enddo
+        endif
+#ifdef MPI
+        call MPI_BCAST(lim_nsd,1,MPI_INTEGER,lim_rank,MPI_COMM_WORLD,ierr)
+        call MPI_BCAST(lim_sum_mult,1,MPI_DOUBLE_PRECISION,lim_rank,MPI_COMM_WORLD,ierr)
+        call MPI_BCAST(lim_sum_xir,1,MPI_DOUBLE_PRECISION,lim_rank,MPI_COMM_WORLD,ierr)
+        call MPI_BCAST(lim_max_xir,1,MPI_DOUBLE_PRECISION,lim_rank,MPI_COMM_WORLD,ierr)
+        call MPI_BCAST(lim_max_mult,1,MPI_DOUBLE_PRECISION,lim_rank,MPI_COMM_WORLD,ierr)
+        call MPI_BCAST(lim_rmin,1,MPI_DOUBLE_PRECISION,lim_rank,MPI_COMM_WORLD,ierr)
+        call MPI_BCAST(lim_rmax,1,MPI_DOUBLE_PRECISION,lim_rank,MPI_COMM_WORLD,ierr)
+#endif
+        if (lim_sum_mult.gt.0.0d0) then
+          lim_mean_r = lim_sum_xir/lim_sum_mult
+        else
+          lim_mean_r = 0.0d0
+          lim_rmin = 0.0d0
+        endif
+
+        if (myid.eq.0) then
+          write(*,*) 'DROP_SUBSTEP step=',nstep,' time=',mtime,' dt=',dt, &
+                     ' Smax=',drop_radnc_global,' rank=',lim_rank, &
+                     ' i=',lim_i,' j=',lim_j,' k=',lim_k,' Dv=',diffv, &
+                     ' tauc_pi=',tauc_pi,' tauc_4pi=',tauc_4pi, &
+                     ' factor=',tauc_mult_factor, &
+                     ' tauc_selected=',tauc_selected,' nsub=',num_dropsub, &
+                     ' dtsub=',dt_dropsub_diag,' Cq4pi=',cq4pi, &
+                     ' nsd_cell=',lim_nsd,' sum_mult=',lim_sum_mult, &
+                     ' mean_r=',lim_mean_r,' min_r=',lim_rmin, &
+                     ' max_r=',lim_rmax,' max_mult=',lim_max_mult, &
+                     ' max_xi_r=',lim_max_xir
         endif
       endif
 
@@ -2636,7 +2777,8 @@
           prz,pru,prv, &
           prw,prt,prqv,prprs,prrho,pract,prtime,prmult,ni,nj,mywest, &
           mysw,mynw,myeast,myse,myne,mysouth,mynorth,nparcelsLocal, &
-          myid,dx,dy,pi_sp,pi_dp,ngxy,nbc,sbc,ebc,wbc,tsk0,drop_evap,drop_sgs_opt
+          myid,dx,dy,pi_sp,pi_dp,ngxy,nbc,sbc,ebc,wbc,tsk0,drop_evap,drop_sgs_opt, &
+          drop_stability_diag
       use constants , only : rhow,rhow_dp,undefined_index,cpl,cpl_dp,cp_dp,i8
       use comm_module
       use parcel_module
@@ -2801,6 +2943,10 @@
       !If Gauss-Newton failed to converge, flag is set to 1 and try Levenberg-Marquardt algorithm
       if (flag==1) then
          num100 = num100+1.0
+         if (drop_stability_diag.ge.2) then
+            !$acc atomic update
+            drop_solver_fallback_substep = drop_solver_fallback_substep + 1
+         endif
          call LV_solver(dble(diffnorm),dt_nondim,taup_scale,rt_start, &
                         rt_zeros,flag,dble(prsval),dble(rhoval), &
                         dble(tval),dble(qval),dble(pdata(np,prtp)), &
@@ -2812,6 +2958,10 @@
       if (flag==1)  then
 
        num1000 = num1000+1.0
+       if (drop_stability_diag.ge.2) then
+          !$acc atomic update
+          drop_solver_failure_substep = drop_solver_failure_substep + 1
+       endif
 
        !If this happens keep radius unchanged and temp equal to surrounding
        rt_zeros(1) = 1.0

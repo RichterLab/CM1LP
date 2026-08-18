@@ -162,6 +162,7 @@
           kd_turb,ud_rdamp,vd_rdamp,wd_rdamp,td_rdamp,td_hediff,td_vediff,qd_hediff,qd_vediff, &
           td_diss,td_rad,td_pbl,td_hturb,td_vturb,qd_hturb,qd_vturb,ud_pbl,vd_pbl,qd_pbl, &
           td_nudge,qd_nudge,prcl_droplet,ntwk,pdcomp,nbc,ebc,sbc,wbc,two_way_coupling, &
+          drop_stability_diag, &
           output_rain,output_sws,output_svs,output_sps,output_srs,output_sgs,output_sus,output_shs, &
           drop_traj,drop_traj_elapse
 
@@ -354,10 +355,22 @@
       character(len=20) :: text1,text2
 
       integer :: num_dropsub,i_dropsub,num_drop_fallout,num_drop_fallout_step
+      integer :: drop_solver_fallback,drop_solver_failure
+      integer :: drop_diag_neg_local,drop_diag_bad_local
+      integer :: drop_diag_counts_local(4),drop_diag_counts_global(4)
       real :: dt_dropsub
+      real :: drop_cq4pi,drop_diag_qafter,drop_diag_dqv,drop_diag_dtheta
+      real :: drop_diag_du,drop_diag_dv,drop_diag_dw,drop_diag_frac
+      real :: drop_diag_thafter,drop_diag_uafter,drop_diag_vafter,drop_diag_wafter
+      real :: drop_diag_min_qv_before_local,drop_diag_min_qv_after_local
+      real :: drop_diag_max_dqv_local,drop_diag_max_frac_local
+      real :: drop_diag_max_dtheta_local,drop_diag_max_duvw_local
+      real :: drop_diag_min_local(2),drop_diag_min_global(2)
+      real :: drop_diag_max_local(4),drop_diag_max_global(4)
       double precision :: dbldt_dropsub,mtime_dropsub
       real, parameter :: drop_traj_elapse_tol = 1.0e-6
       logical, save :: drop_traj_zero_warned = .false.
+      logical :: drop_cq_warned
 
 !--------------------------------------------------------------------
       !$acc declare present(rrw)
@@ -982,12 +995,15 @@
           endif
 
           if( ptype.eq.7 .and. two_way_coupling.eq.1 )then
-            call compute_droplet_substeps(dt,xf,yf,zf,sigmaf,pdata,pdata_locind,num_dropsub)
+            call compute_droplet_substeps(nstep,mtime,dt,xf,yf,zf,sigmaf,pdata, &
+                                          pdata_locind,num_dropsub,drop_cq4pi)
           else
             num_dropsub = 1
+            drop_cq4pi = 0.0
           endif
           mtime_dropsub = mtime
           num_drop_fallout_step = 0
+          drop_cq_warned = .false.
           do i_dropsub = 1,num_dropsub
 
           if (myid.eq.0) write(*,'(a,i8,a,i8)') 'Drop sub-loop: ',i_dropsub,' out of ',num_dropsub
@@ -1019,7 +1035,8 @@
                                nw1,nw2,ne1,ne2,sw1,sw2,se1,se2,reqs_p,                    &
                                sw31,sw32,se31,se32,ss31,ss32,sn31,sn32,                   &
                                n3w1,n3w2,n3e1,n3e2,s3w1,s3w2,s3e1,s3e2,reqs_s,            &
-                               dpten,pdata_locind,nstep,num_drop_fallout)
+                               dpten,pdata_locind,nstep,num_drop_fallout,              &
+                               drop_solver_fallback,drop_solver_failure)
           num_drop_fallout_step = num_drop_fallout_step + num_drop_fallout
           if (i_dropsub.eq.num_dropsub) then
             if( coal_enabled )then
@@ -1067,6 +1084,82 @@
             enddo
           endif
           IF( two_way_coupling.eq.1 )THEN
+            if (drop_stability_diag.ge.2) then
+              drop_diag_min_qv_before_local = huge(drop_diag_min_qv_before_local)
+              drop_diag_min_qv_after_local = huge(drop_diag_min_qv_after_local)
+              drop_diag_max_dqv_local = 0.0
+              drop_diag_max_frac_local = 0.0
+              drop_diag_max_dtheta_local = 0.0
+              drop_diag_max_duvw_local = 0.0
+              drop_diag_neg_local = 0
+              drop_diag_bad_local = 0
+              !$acc parallel loop gang vector collapse(3) default(present) &
+              !$acc private(i,j,k,drop_diag_qafter,drop_diag_dqv,drop_diag_dtheta, &
+              !$acc         drop_diag_du,drop_diag_dv,drop_diag_dw,drop_diag_frac, &
+              !$acc         drop_diag_thafter,drop_diag_uafter,drop_diag_vafter, &
+              !$acc         drop_diag_wafter) &
+              !$acc reduction(min:drop_diag_min_qv_before_local, &
+              !$acc               drop_diag_min_qv_after_local) &
+              !$acc reduction(max:drop_diag_max_dqv_local,drop_diag_max_frac_local, &
+              !$acc               drop_diag_max_dtheta_local,drop_diag_max_duvw_local) &
+              !$acc reduction(+:drop_diag_neg_local,drop_diag_bad_local)
+              do k=1,nk
+              do j=1,nj
+              do i=1,ni
+                drop_diag_dqv = dt_dropsub*real(dpten(i,j,k,2))
+                drop_diag_qafter = q3d(i,j,k,nqv)+drop_diag_dqv
+                drop_diag_dtheta = dt_dropsub*real(dpten(i,j,k,1))
+                drop_diag_du = dt_dropsub*real(dpten(i,j,k,3))
+                drop_diag_dv = dt_dropsub*real(dpten(i,j,k,4))
+                drop_diag_dw = dt_dropsub*real(dpten(i,j,k,5))
+                drop_diag_thafter = th3d(i,j,k)+drop_diag_dtheta
+                drop_diag_uafter = u3d(i,j,k)+drop_diag_du
+                drop_diag_vafter = v3d(i,j,k)+drop_diag_dv
+                drop_diag_wafter = w3d(i,j,k)+drop_diag_dw
+                drop_diag_frac = abs(drop_diag_dqv)/ &
+                                 max(abs(q3d(i,j,k,nqv)),1.0e-12)
+
+                drop_diag_min_qv_before_local = min(drop_diag_min_qv_before_local, &
+                                                     q3d(i,j,k,nqv))
+                drop_diag_min_qv_after_local = min(drop_diag_min_qv_after_local, &
+                                                    drop_diag_qafter)
+                drop_diag_max_dqv_local = max(drop_diag_max_dqv_local, &
+                                               abs(drop_diag_dqv))
+                drop_diag_max_frac_local = max(drop_diag_max_frac_local, &
+                                                drop_diag_frac)
+                drop_diag_max_dtheta_local = max(drop_diag_max_dtheta_local, &
+                                                  abs(drop_diag_dtheta))
+                drop_diag_max_duvw_local = max(drop_diag_max_duvw_local, &
+                                                abs(drop_diag_du),abs(drop_diag_dv), &
+                                                abs(drop_diag_dw))
+                if (drop_diag_qafter.lt.0.0) then
+                  drop_diag_neg_local = drop_diag_neg_local+1
+                endif
+                if (drop_diag_qafter.ne.drop_diag_qafter .or. &
+                    abs(drop_diag_qafter).gt.huge(drop_diag_qafter)) then
+                  drop_diag_bad_local = drop_diag_bad_local+1
+                endif
+                if (drop_diag_thafter.ne.drop_diag_thafter .or. &
+                    abs(drop_diag_thafter).gt.huge(drop_diag_thafter)) then
+                  drop_diag_bad_local = drop_diag_bad_local+1
+                endif
+                if (drop_diag_uafter.ne.drop_diag_uafter .or. &
+                    abs(drop_diag_uafter).gt.huge(drop_diag_uafter)) then
+                  drop_diag_bad_local = drop_diag_bad_local+1
+                endif
+                if (drop_diag_vafter.ne.drop_diag_vafter .or. &
+                    abs(drop_diag_vafter).gt.huge(drop_diag_vafter)) then
+                  drop_diag_bad_local = drop_diag_bad_local+1
+                endif
+                if (drop_diag_wafter.ne.drop_diag_wafter .or. &
+                    abs(drop_diag_wafter).gt.huge(drop_diag_wafter)) then
+                  drop_diag_bad_local = drop_diag_bad_local+1
+                endif
+              enddo
+              enddo
+              enddo
+            endif
+
             !$omp parallel do default(shared) private(i,j,k)
             !$acc parallel loop gang vector collapse(3) default(present) private(i,j,k)
             do k=1,nk
@@ -1087,6 +1180,53 @@
             enddo
             enddo
             enddo
+
+            if (drop_stability_diag.ge.2) then
+              drop_diag_min_local(1) = drop_diag_min_qv_before_local
+              drop_diag_min_local(2) = drop_diag_min_qv_after_local
+              drop_diag_max_local(1) = drop_diag_max_dqv_local
+              drop_diag_max_local(2) = drop_diag_max_frac_local
+              drop_diag_max_local(3) = drop_diag_max_dtheta_local
+              drop_diag_max_local(4) = drop_diag_max_duvw_local
+              drop_diag_counts_local(1) = drop_diag_neg_local
+              drop_diag_counts_local(2) = drop_diag_bad_local
+              drop_diag_counts_local(3) = drop_solver_fallback
+              drop_diag_counts_local(4) = drop_solver_failure
+#ifdef MPI
+              call MPI_ALLREDUCE(drop_diag_min_local,drop_diag_min_global,2, &
+                                 MPI_REAL,MPI_MIN,MPI_COMM_WORLD,ierr)
+              call MPI_ALLREDUCE(drop_diag_max_local,drop_diag_max_global,4, &
+                                 MPI_REAL,MPI_MAX,MPI_COMM_WORLD,ierr)
+              call MPI_ALLREDUCE(drop_diag_counts_local,drop_diag_counts_global,4, &
+                                 MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,ierr)
+#else
+              drop_diag_min_global = drop_diag_min_local
+              drop_diag_max_global = drop_diag_max_local
+              drop_diag_counts_global = drop_diag_counts_local
+#endif
+              if (drop_diag_min_global(2).lt.0.0 .or. &
+                  drop_diag_max_global(2).gt.0.1 .or. &
+                  drop_diag_counts_global(3).gt.0 .or. &
+                  drop_diag_counts_global(4).gt.0 .or. &
+                  drop_diag_counts_global(2).gt.0 .or. &
+                  (drop_cq4pi.gt.0.5 .and. .not.drop_cq_warned)) then
+                if (myid.eq.0) then
+                  write(*,*) 'DROP_COUPLING step=',nstep,' sub=',i_dropsub, &
+                             '/',num_dropsub,' Cq4pi=',drop_cq4pi, &
+                             ' min_qv_before=',drop_diag_min_global(1), &
+                             ' min_qv_after=',drop_diag_min_global(2), &
+                             ' neg_qv=',drop_diag_counts_global(1), &
+                             ' max_dqv=',drop_diag_max_global(1), &
+                             ' max_frac_dqv=',drop_diag_max_global(2), &
+                             ' max_dtheta=',drop_diag_max_global(3), &
+                             ' max_duvw=',drop_diag_max_global(4), &
+                             ' solver_fallback=',drop_diag_counts_global(3), &
+                             ' solver_failure=',drop_diag_counts_global(4), &
+                             ' bad_values=',drop_diag_counts_global(2)
+                endif
+                if (drop_cq4pi.gt.0.5) drop_cq_warned = .true.
+              endif
+            endif
 
 
             if(timestats.ge.1) time_parcels=time_parcels+mytime()
