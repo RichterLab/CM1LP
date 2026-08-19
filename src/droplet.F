@@ -5591,6 +5591,8 @@
         !Initialize the solution vector
         v1(1) = rt_start(1)
         v1(2) = rt_start(2)
+        rt_zeros(1) = v1(1)
+        rt_zeros(2) = v1(2)
          
         !Initialize the correction to zero
         correct(1) = 0.0d0
@@ -5720,6 +5722,8 @@
         flag = 0
         v1(1) = rt_start(1)
         v1(2) = rt_start(2)
+        rt_zeros(1) = v1(1)
+        rt_zeros(2) = v1(2)
         fv2(1) = 1.0d0
         fv2(2) = 1.0d0
 
@@ -5731,6 +5735,15 @@
         do while ((sqrt(fv2(1)*fv2(1)+fv2(2)*fv2(2)) > error) .AND. (iterations<iterations_max))
 
         iterations = iterations + 1
+
+        !Do not evaluate the residual at a singular or nonfinite trial state.
+        if (v1(1).lt.0.01d0 .or. v1(2).lt.0.01d0 .or. &
+            v1(1).ne.v1(1) .or. v1(2).ne.v1(2) .or. &
+            abs(v1(1)).gt.huge(v1(1)) .or. &
+            abs(v1(2)).gt.huge(v1(2))) then
+          flag = 1
+          exit
+        endif
 
         !Approximate the Jacobian of the system
         call jacob_approx_2d(diffnorm,v1(1),v1(2),dt_nondim,J, &
@@ -5778,15 +5791,19 @@
         rt_zeros(1) = v1(1) - correct(1)
         rt_zeros(2) = v1(2) - correct(2)
 
+        !Reject a singular or nonfinite trial before evaluating the residual.
+        if (rt_zeros(1).lt.0.01d0 .or. rt_zeros(2).lt.0.01d0 .or. &
+            rt_zeros(1).ne.rt_zeros(1) .or. &
+            rt_zeros(2).ne.rt_zeros(2) .or. &
+            abs(rt_zeros(1)).gt.huge(rt_zeros(1)) .or. &
+            abs(rt_zeros(2)).gt.huge(rt_zeros(2))) then
+            flag = 1
+            EXIT
+        end if
+
         !Successful convergence if correction is small
         if (sqrt(correct(1)*correct(1)+correct(2)*correct(2)) < error) then
            EXIT
-        end if
-
-        !Failed if temperature or radius goes negative
-        if (rt_zeros(1)<0.0d0 .OR. rt_zeros(2)<0.0d0) then
-            flag = 1
-            EXIT
         end if
 
         !Use the RHS to update the lambda parameter
@@ -5821,8 +5838,12 @@
            flag = 1
         end if
 
-        !Failed if it returns negative radius or temperature
-        if (rt_zeros(1) < 0.0d0 .OR. rt_zeros(2) < 0.0d0) then
+        !Failed if it returns an unsafe radius or temperature ratio.
+        if (rt_zeros(1).lt.0.01d0 .or. rt_zeros(2).lt.0.01d0 .or. &
+            rt_zeros(1).ne.rt_zeros(1) .or. &
+            rt_zeros(2).ne.rt_zeros(2) .or. &
+            abs(rt_zeros(1)).gt.huge(rt_zeros(1)) .or. &
+            abs(rt_zeros(2)).gt.huge(rt_zeros(2))) then
            flag = 1
         end if
 
@@ -5858,11 +5879,13 @@
 
         ynext(1) = rnext
         ynext(2) = tnext
+        J = 0.0d0
 
         !Evaluate RHS 
         call ie_vrt_nd(diffnorm,rnext,tnext,rt_output,dt_nondim, &
                        taup_scale,prsval,rhoval,tval,qval,Tp,m_s, &
                        kappa_p,radius,np,flag)
+        if (flag.ne.0) return
 
         xper(1) = ynext(1)
         xper(2) = ynext(2)
@@ -5877,9 +5900,11 @@
            call ie_vrt_nd(diffnorm,xper(1),xper(2),fxper,dt_nondim, &
                           taup_scale,prsval,rhoval,tval,qval,Tp,m_s, &
                           kappa_p,radius,np,flag)
+           if (flag.ne.0) return
            call ie_vrt_nd(diffnorm,xper2(1),xper2(2),fxper2,dt_nondim, &
                           taup_scale,prsval,rhoval,tval,qval,Tp,m_s, &
                           kappa_p,radius,np,flag)
+           if (flag.ne.0) return
 
            !Use these differences to compute the Jacobian
            J(1,n) = (fxper(1)-rt_output(1))/diff
@@ -5909,18 +5934,78 @@
       double precision :: Tnext,rnext
       double precision :: tmp
 
+        !A nonlinear solver can propose an unphysical trial state.  Reject it
+        !before evaluating any of the singular radius/temperature expressions.
+        rT_output(1) = 0.0d0
+        rT_output(2) = 0.0d0
+        if (flag.ne.0) return
+        if (tempr.le.0.0d0 .or. tempt.le.0.0d0 .or. &
+            radius.le.0.0d0 .or. Tp.le.0.0d0 .or. &
+            rhoval.le.0.0d0 .or. taup_scale.le.0.0d0 .or. &
+            tval.le.0.0d0 .or. prsval.le.0.0d0 .or. qval.lt.0.0d0 .or. &
+            viscosity.le.0.0 .or. sc_num.le.0.0 .or. pr_num.le.0.0 .or. &
+            m_s.lt.0.0d0 .or. kappa_p.lt.0.0d0 .or. &
+            diffnorm.lt.0.0d0 .or. dt_nondim.lt.0.0d0 .or. &
+            tempr.ne.tempr .or. tempt.ne.tempt .or. radius.ne.radius .or. &
+            Tp.ne.Tp .or. rhoval.ne.rhoval .or. &
+            taup_scale.ne.taup_scale .or. tval.ne.tval .or. &
+            prsval.ne.prsval .or. qval.ne.qval .or. &
+            viscosity.ne.viscosity .or. sc_num.ne.sc_num .or. &
+            pr_num.ne.pr_num .or. m_s.ne.m_s .or. kappa_p.ne.kappa_p .or. &
+            diffnorm.ne.diffnorm .or. dt_nondim.ne.dt_nondim .or. &
+            abs(tempr).gt.huge(tempr) .or. &
+            abs(tempt).gt.huge(tempt) .or. &
+            abs(radius).gt.huge(radius) .or. abs(Tp).gt.huge(Tp) .or. &
+            abs(rhoval).gt.huge(rhoval) .or. &
+            abs(taup_scale).gt.huge(taup_scale) .or. &
+            abs(tval).gt.huge(tval) .or. abs(prsval).gt.huge(prsval) .or. &
+            abs(qval).gt.huge(qval) .or. &
+            abs(viscosity).gt.huge(viscosity) .or. &
+            abs(sc_num).gt.huge(sc_num) .or. abs(pr_num).gt.huge(pr_num) .or. &
+            abs(m_s).gt.huge(m_s) .or. abs(kappa_p).gt.huge(kappa_p) .or. &
+            abs(diffnorm).gt.huge(diffnorm) .or. &
+            abs(dt_nondim).gt.huge(dt_nondim)) then
+          flag = 1
+          return
+        endif
+
         ! quantities come in already non-dimensionalized, so must be converted back;
         rnext = tempr*radius
         Tnext = tempt*Tp
-        Tnext = max(Tnext,1.0d-12) !To avoid divide by zero if the solution starts to diverge; gets flagged later
         dnext = rnext*2.0d0
+
+        if (rnext.le.0.0d0 .or. Tnext.le.0.0d0 .or. dnext.le.0.0d0 .or. &
+            rnext.ne.rnext .or. Tnext.ne.Tnext .or. dnext.ne.dnext .or. &
+            abs(rnext).gt.huge(rnext) .or. &
+            abs(Tnext).gt.huge(Tnext) .or. &
+            abs(dnext).gt.huge(dnext)) then
+          flag = 1
+          return
+        endif
 
         esa = deslf(prsval,tval)
         VolP = (4.0d0/3.0d0)*pi_dp*rnext**3
+        if (VolP.le.0.0d0 .or. VolP.ne.VolP .or. &
+            abs(VolP).gt.huge(VolP) .or. esa.le.0.0d0 .or. &
+            esa.ne.esa .or. abs(esa).gt.huge(esa)) then
+          flag = 1
+          return
+        endif
         rhop = (m_s + VolP*rhow_dp)/VolP
+
+        if (rhop.le.0.0d0 .or. rhop.ne.rhop .or. &
+            abs(rhop).gt.huge(rhop)) then
+          flag = 1
+          return
+        endif
 
         Rep = max( 0.0d0 , dnext*diffnorm/dble(viscosity) )
         taup = (rhop*dnext**2)/(18.0d0*rhoval*dble(viscosity))
+        if (taup.le.0.0d0 .or. taup.ne.taup .or. &
+            abs(taup).gt.huge(taup)) then
+          flag = 1
+          return
+        endif
         Nup = 2.0d0 + 0.6d0*dsqrt(Rep)*dble(pr_num)**(1.0d0/3.0d0)
         Shp = 2.0d0 + 0.6d0*dsqrt(Rep)*dble(sc_num)**(1.0d0/3.0d0)
 
@@ -5928,16 +6013,31 @@
 
         !!! Humidity !!!
         ! GHB prevent overflow by limiting term inside exponent:
+        ! The final term below is algebraically equivalent to the original
+        ! (kappa_p*m_s*rhow_dp/rho_solute)/(VolP*rhop-m_s).  The original
+        ! denominator more clearly represents liquid-water mass, but
+        ! VolP*rhop-m_s = VolP*rhow_dp; this form avoids cancellation.
         tmp = ((lhv*mw/ru)*((1.0d0/max(1.0d-10,tval))- &
               (1.0d0/max(1.0d-10,Tnext)))) + &
               ((2.0d0*mw*surften)/(ru*rhow_dp*rnext*Tnext)) - &
-              ((kappa_p*m_s*rhow_dp/rho_solute)/(VolP*rhop-m_s))
+              ((kappa_p*m_s)/(rho_solute*VolP))
+        if (tmp.ne.tmp .or. abs(tmp).gt.huge(tmp)) then
+          flag = 1
+          return
+        endif
         if( tmp.gt.600.0 )then
           qstr = qval
           flag = 1
         else
           qstr = (mw/(ru*Tnext*rhoval))*esa*dexp( tmp )
           qstr_test = drslf(dble(prsval),dble(tval))*dexp( tmp )
+        endif
+        if (qstr.lt.0.0d0 .or. qstr.ne.qstr .or. &
+            abs(qstr).gt.huge(qstr)) then
+          flag = 1
+          rT_output(1) = 0.0d0
+          rT_output(2) = 0.0d0
+          return
         endif
 
         !!!!!!!!!!!!!!!!!!
@@ -5952,6 +6052,16 @@
 
         rT_output(1) = rnext/radius - 1.0d0  - dt_nondim*rprime
         rT_output(2) = Tnext/Tp - 1.0d0  - dt_nondim*Tprime
+
+        if (rT_output(1).ne.rT_output(1) .or. &
+            rT_output(2).ne.rT_output(2) .or. &
+            abs(rT_output(1)).gt.huge(rT_output(1)) .or. &
+            abs(rT_output(2)).gt.huge(rT_output(2))) then
+          flag = 1
+          rT_output(1) = 0.0d0
+          rT_output(2) = 0.0d0
+          return
+        endif
 
       end subroutine ie_vrt_nd
 
