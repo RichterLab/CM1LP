@@ -166,6 +166,8 @@
       integer(i8) :: nparcelsInit,nparcelsMax,nparcelsRest,nparcelsLocal, &
                      nparcelsLocalActive
       integer :: drop_sgs_opt = 0
+      ! 0: off; 1: substep diagnostics; 2: coupling diagnostics;
+      ! 3: nonlinear-solver reasons, iterations, and failure-size histogram.
       integer :: drop_stability_diag = 0
       real :: drop_traj_elapse = -1.0
       real :: tauc_mult_factor = 1.0

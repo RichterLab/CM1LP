@@ -2438,7 +2438,7 @@
 
       ! for parcels:
       nparcelsInit = max(1_i8,nparcelsInit)
-      drop_stability_diag = max(0,min(2,drop_stability_diag))
+      drop_stability_diag = max(0,min(3,drop_stability_diag))
       !$acc update device(drop_stability_diag) if_present
       IF( tauc_mult_factor.le.0.0 )THEN
         if(myid.eq.0)then

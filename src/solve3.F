@@ -176,7 +176,8 @@
       use parcel_module, only : parcel_driver
       use droplet_module, only : droplet_driver,droplet_injection_driver, &
           compute_droplet_substeps,droplet_coalescence_driver, &
-          project_droplet_qc_effc,write_drop_traj
+          project_droplet_qc_effc,write_drop_traj, &
+          report_droplet_solver_diagnostics
       use pdcomp_module, only : pidcomp
       use lsnudge_module
       use ib_module
@@ -1037,6 +1038,7 @@
                                n3w1,n3w2,n3e1,n3e2,s3w1,s3w2,s3e1,s3e2,reqs_s,            &
                                dpten,pdata_locind,nstep,num_drop_fallout,              &
                                drop_solver_fallback,drop_solver_failure)
+          call report_droplet_solver_diagnostics(nstep,i_dropsub,num_dropsub)
           num_drop_fallout_step = num_drop_fallout_step + num_drop_fallout
           if (i_dropsub.eq.num_dropsub) then
             if( coal_enabled )then

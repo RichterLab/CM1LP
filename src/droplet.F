@@ -6,6 +6,7 @@
   public :: droplet_driver,droplet_injection_driver,compute_droplet_substeps, &
             droplet_coalescence_driver,project_droplet_qc_effc, &
             droplet_diag,initialize_droplet_histograms, &
+            report_droplet_solver_diagnostics, &
             write_drop_traj, &
             check_droplet_ownership,particle_seed,ngidx, &
             kohler_equil_radius,lognormal_droplet,bomex_lognormal_droplet, &
@@ -18,6 +19,16 @@
   integer :: drop_solver_fallback_substep = 0
   integer :: drop_solver_failure_substep = 0
   integer, parameter :: nbins = 130  !Bins for the droplet histograms
+  integer, parameter :: n_solver_fail_reasons = 6
+  integer, parameter :: solver_fail_initial = 1
+  integer, parameter :: solver_fail_trial = 2
+  integer, parameter :: solver_fail_thermo = 3
+  integer, parameter :: solver_fail_matrix = 4
+  integer, parameter :: solver_fail_nonfinite = 5
+  integer, parameter :: solver_fail_iterations = 6
+  integer :: drop_solver_fallback_reason(n_solver_fail_reasons) = 0
+  integer :: drop_solver_failure_reason(n_solver_fail_reasons) = 0
+  double precision :: drop_solver_iteration_sums(3) = 0.0d0
   real,dimension(nbins) :: bins_restime  !Bins for droplet residence time
   real,dimension(nbins+1) :: bins_restime_edge  !Bin edges for droplet residence time
   real,dimension(nbins,nbins) :: hist_restime  !Droplet residence time joint pdf (with size)
@@ -28,6 +39,7 @@
   double precision,dimension(nbins) :: dN_dlogr_injected  !Injected flux normalized by log-radius bin width
   double precision,dimension(nbins) :: ssgf_dry_injected  !Injected dry-radius distribution normalized as a flux
   double precision,dimension(nbins) :: dN_dlogr_dry_injected  !Injected dry-radius flux normalized by log-radius bin width
+  double precision,dimension(nbins) :: hist_solver_failure_dry_radius = 0.0d0
   real,dimension(nbins+1) :: bins_radius_edge  !Bin edges for droplet radius
   real :: restime_min,restime_max,restime_min10,restime_max10,dhres !Bin parameters for droplet residence time
   real :: dhrad,rmin,rmax,rmin10,rmax10  !Bin parameters for droplet size
@@ -137,7 +149,9 @@
   !$acc                 coal_pair_attempts,coal_pair_successes,coal_collision_mult, &
   !$acc                 coal_palpha_sum,coal_palpha_mean,coal_palpha_max,coal_gamtil_max, &
   !$acc                 num100,num1000,ngidx,drop_solver_fallback_substep, &
-  !$acc                 drop_solver_failure_substep)
+  !$acc                 drop_solver_failure_substep,drop_solver_fallback_reason, &
+  !$acc                 drop_solver_failure_reason,hist_solver_failure_dry_radius, &
+  !$acc                 drop_solver_iteration_sums)
   !$acc declare copyin(hall_r0,hall_rat,hall_ecoll)
 
   CONTAINS
@@ -326,6 +340,13 @@
          drop_solver_fallback_substep = 0
          drop_solver_failure_substep = 0
          !$acc update device(drop_solver_fallback_substep,drop_solver_failure_substep)
+      endif
+      if (drop_stability_diag.ge.3) then
+         drop_solver_fallback_reason = 0
+         drop_solver_failure_reason = 0
+         drop_solver_iteration_sums = 0.0d0
+         !$acc update device(drop_solver_fallback_reason,drop_solver_failure_reason, &
+         !$acc               drop_solver_iteration_sums)
       endif
       numDepartN  = 0
       numDepartS  = 0
@@ -1386,8 +1407,83 @@
        solver_fallback_out = drop_solver_fallback_substep
        solver_failure_out = drop_solver_failure_substep
     endif
+    if (drop_stability_diag.ge.3) then
+       !$acc update self(drop_solver_fallback_reason,drop_solver_failure_reason, &
+       !$acc             drop_solver_iteration_sums)
+    endif
 
    end subroutine droplet_driver
+
+!----------------------------------------------------------------------
+
+   subroutine report_droplet_solver_diagnostics(nstep,isub,nsub)
+
+      use input, only : drop_stability_diag,myid,ierr
+#ifdef MPI
+      use mpi
+#endif
+      implicit none
+
+      integer, intent(in) :: nstep,isub,nsub
+      integer :: fallback_reason_global(n_solver_fail_reasons)
+      integer :: failure_reason_global(n_solver_fail_reasons)
+      integer :: integer_diag_local(2*n_solver_fail_reasons)
+      integer :: integer_diag_global(2*n_solver_fail_reasons)
+      double precision :: iteration_sums_global(3)
+      integer :: fallback_total,failure_total
+      double precision :: gn_iter_mean,lv_iter_mean,failed_lv_iter_mean
+
+      if (drop_stability_diag.lt.3) return
+
+#ifdef MPI
+      integer_diag_local(1:n_solver_fail_reasons) = &
+         drop_solver_fallback_reason
+      integer_diag_local(n_solver_fail_reasons+1:2*n_solver_fail_reasons) = &
+         drop_solver_failure_reason
+      call MPI_ALLREDUCE(integer_diag_local,integer_diag_global, &
+                         2*n_solver_fail_reasons,MPI_INTEGER,MPI_SUM, &
+                         MPI_COMM_WORLD,ierr)
+      fallback_reason_global = integer_diag_global(1:n_solver_fail_reasons)
+      failure_reason_global = &
+         integer_diag_global(n_solver_fail_reasons+1:2*n_solver_fail_reasons)
+      call MPI_ALLREDUCE(drop_solver_iteration_sums,iteration_sums_global,3, &
+                         MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+#else
+      fallback_reason_global = drop_solver_fallback_reason
+      failure_reason_global = drop_solver_failure_reason
+      iteration_sums_global = drop_solver_iteration_sums
+#endif
+
+      fallback_total = sum(fallback_reason_global)
+      failure_total = sum(failure_reason_global)
+      gn_iter_mean = iteration_sums_global(1)/dble(max(1,fallback_total))
+      lv_iter_mean = iteration_sums_global(2)/dble(max(1,fallback_total))
+      failed_lv_iter_mean = iteration_sums_global(3)/dble(max(1,failure_total))
+
+      if (myid.eq.0 .and. fallback_total.gt.0) then
+         write(*,*) 'DROP_SOLVER_REASONS step=',nstep,' sub=',isub,'/',nsub, &
+                    ' fallback_initial=',fallback_reason_global(solver_fail_initial), &
+                    ' fallback_trial=',fallback_reason_global(solver_fail_trial), &
+                    ' fallback_thermo=',fallback_reason_global(solver_fail_thermo), &
+                    ' fallback_matrix=',fallback_reason_global(solver_fail_matrix), &
+                    ' fallback_nonfinite=',fallback_reason_global(solver_fail_nonfinite), &
+                    ' fallback_iterations=',fallback_reason_global(solver_fail_iterations), &
+                    ' failure_initial=',failure_reason_global(solver_fail_initial), &
+                    ' failure_trial=',failure_reason_global(solver_fail_trial), &
+                    ' failure_thermo=',failure_reason_global(solver_fail_thermo), &
+                    ' failure_matrix=',failure_reason_global(solver_fail_matrix), &
+                    ' failure_nonfinite=',failure_reason_global(solver_fail_nonfinite), &
+                    ' failure_iterations=',failure_reason_global(solver_fail_iterations)
+         write(*,*) 'DROP_SOLVER_ITERS step=',nstep,' sub=',isub,'/',nsub, &
+                    ' fallback_gn_total=',iteration_sums_global(1), &
+                    ' fallback_gn_mean=',gn_iter_mean, &
+                    ' fallback_lm_total=',iteration_sums_global(2), &
+                    ' fallback_lm_mean=',lv_iter_mean, &
+                    ' failed_lm_total=',iteration_sums_global(3), &
+                    ' failed_lm_mean=',failed_lv_iter_mean
+      endif
+
+   end subroutine report_droplet_solver_diagnostics
 
 !----------------------------------------------------------------------
 
@@ -2781,7 +2877,7 @@
           mysw,mynw,myeast,myse,myne,mysouth,mynorth,nparcelsLocal, &
           myid,dx,dy,pi_sp,pi_dp,ngxy,nbc,sbc,ebc,wbc,tsk0,drop_evap,drop_sgs_opt, &
           drop_stability_diag
-      use constants , only : rhow,rhow_dp,undefined_index,cpl,cpl_dp,cp_dp,i8
+      use constants , only : rhow,rhow_dp,rho_solute,undefined_index,cpl,cpl_dp,cp_dp,i8
       use comm_module
       use parcel_module
       use mpi
@@ -2830,8 +2926,10 @@
       double precision :: taup_scale,dt_nondim
       double precision :: guess
       double precision :: rt_zeros(2),rt_start(2)
+      double precision :: dry_radius_fail,dry_rad10_fail
       logical :: is_local
-      integer :: mflag,flag
+      integer :: mflag,flag,gn_reason,gn_iterations,lv_iterations
+      integer :: fail_dry_bin
 
       dlogsig_abs = 0.0
       dlogsig_valid = 0
@@ -2940,29 +3038,71 @@
                            rt_start,rt_zeros,flag,dble(prsval), &
                            dble(rhoval),dble(tval),dble(qval), &
                            dble(pdata(np,prtp)),dble(pdata(np,prms)), &
-                           dble(pdata(np,prkap)),dble(pdata(np,prrp)),np)
+                           dble(pdata(np,prkap)),dble(pdata(np,prrp)),np, &
+                           gn_iterations)
 
-      !If Gauss-Newton failed to converge, flag is set to 1 and try Levenberg-Marquardt algorithm
-      if (flag==1) then
+      !If Gauss-Newton failed, flag identifies the reason; try Levenberg-Marquardt.
+      if (flag.ne.0) then
+         gn_reason = flag
          num100 = num100+1.0
          if (drop_stability_diag.ge.2) then
             !$acc atomic update
             drop_solver_fallback_substep = drop_solver_fallback_substep + 1
          endif
+         if (drop_stability_diag.ge.3) then
+            !$acc atomic update
+            drop_solver_fallback_reason(gn_reason) = &
+               drop_solver_fallback_reason(gn_reason) + 1
+            !$acc atomic update
+            drop_solver_iteration_sums(1) = &
+               drop_solver_iteration_sums(1) + dble(gn_iterations)
+         endif
          call LV_solver(dble(diffnorm),dt_nondim,taup_scale,rt_start, &
                         rt_zeros,flag,dble(prsval),dble(rhoval), &
                         dble(tval),dble(qval),dble(pdata(np,prtp)), &
                         dble(pdata(np,prms)),dble(pdata(np,prkap)), &
-                        dble(pdata(np,prrp)),np)
+                        dble(pdata(np,prrp)),np,lv_iterations)
+         if (drop_stability_diag.ge.3) then
+            !$acc atomic update
+            drop_solver_iteration_sums(2) = &
+               drop_solver_iteration_sums(2) + dble(lv_iterations)
+         endif
       end if
 
       !In rare cases both nonlinear solvers fail to converge
-      if (flag==1)  then
+      if (flag.ne.0)  then
 
        num1000 = num1000+1.0
        if (drop_stability_diag.ge.2) then
           !$acc atomic update
           drop_solver_failure_substep = drop_solver_failure_substep + 1
+       endif
+       if (drop_stability_diag.ge.3) then
+          !$acc atomic update
+          drop_solver_failure_reason(flag) = &
+             drop_solver_failure_reason(flag) + 1
+          !$acc atomic update
+          drop_solver_iteration_sums(3) = &
+             drop_solver_iteration_sums(3) + dble(lv_iterations)
+
+          if (pdata(np,prms).gt.0.0) then
+             dry_radius_fail = (3.0d0*dble(pdata(np,prms))/ &
+                  (4.0d0*pi_dp*rho_solute))**(1.0d0/3.0d0)
+             dry_rad10_fail = log10(dry_radius_fail)
+          else
+             dry_rad10_fail = dble(rmin10)-0.5d0*dble(dhrad)
+          endif
+          if (dry_rad10_fail.gt.dble(rmax10)+0.5d0*dble(dhrad)) then
+             fail_dry_bin = nbins
+          elseif (dry_rad10_fail.lt.dble(rmin10)-0.5d0*dble(dhrad)) then
+             fail_dry_bin = 1
+          else
+             fail_dry_bin = floor((dry_rad10_fail- &
+                  (dble(rmin10)-0.5d0*dble(dhrad)))/dble(dhrad))+1
+          endif
+          !$acc atomic update
+          hist_solver_failure_dry_radius(fail_dry_bin) = &
+             hist_solver_failure_dry_radius(fail_dry_bin) + 1.0d0
        endif
 
        !If this happens keep radius unchanged and temp equal to surrounding
@@ -5134,7 +5274,8 @@
       !$acc end parallel
 
       !$acc update host (hist_radius,hist_dry_radius,hist_radius10,hist_restime, &
-      !$acc              hist_fallrad,hist_injected,hist_dry_injected,tnumpart_r)
+      !$acc              hist_fallrad,hist_injected,hist_dry_injected, &
+      !$acc              hist_solver_failure_dry_radius,tnumpart_r)
 
 #ifdef MPI
        !Sum up the histograms across MPI processes
@@ -5153,6 +5294,8 @@
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
           call mpi_reduce(MPI_IN_PLACE,hist_dry_injected,nbins,MPI_REAL, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
+          call mpi_reduce(MPI_IN_PLACE,hist_solver_failure_dry_radius,nbins, &
+                          MPI_DOUBLE_PRECISION,MPI_SUM,0,MPI_COMM_WORLD,ierr)
           call mpi_reduce(MPI_IN_PLACE,tnumpart_r,nbins,MPI_REAL, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
        else
@@ -5170,6 +5313,9 @@
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
           call mpi_reduce(hist_dry_injected,hist_dry_injected,nbins,MPI_REAL, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
+          call mpi_reduce(hist_solver_failure_dry_radius, &
+                          hist_solver_failure_dry_radius,nbins, &
+                          MPI_DOUBLE_PRECISION,MPI_SUM,0,MPI_COMM_WORLD,ierr)
           call mpi_reduce(tnumpart_r,tnumpart_r,nbins,MPI_REAL, &
                          MPI_SUM,0,MPI_COMM_WORLD,ierr)
       end if
@@ -5276,7 +5422,8 @@
            usgsmean,vsgsmean,wsgsmean,sigm_smean,fsmean, &
            vp1msqr,vp2msqr,vp3msqr,m1src,m2src,m3src,Tpsrc,qvsrc,rhovsrc,Tf,qf,Tpmean,Tpmsqr, &
            radmean,radmsqr,qfsat,qstarmean,kmoist,mse,wk,multnumrz,vp3meanrz,tnumpart_r, &
-           dN_dr,dN_dlogr,dN_dr_dry,dN_dlogr_dry)
+           dN_dr,dN_dlogr,dN_dr_dry,dN_dlogr_dry, &
+           hist_solver_failure_dry_radius)
 #ifdef MPI
       end if
 #endif
@@ -5286,6 +5433,7 @@
       hist_fallrad = 0.0
       hist_injected = 0.0
       hist_dry_injected = 0.0
+      hist_solver_failure_dry_radius = 0.0d0
       hist_injected_elapsed = 0.0d0
       num_destroyed = 0.0
       mass_destroyed = 0.0
@@ -5315,6 +5463,7 @@
       
 
       !$acc update device (hist_restime,hist_fallrad,hist_injected,hist_dry_injected, &
+      !$acc                hist_solver_failure_dry_radius, &
       !$acc                num_destroyed, &
       !$acc                mass_destroyed,mass_evap,mass_dpten,num_injected,mass_injected, &
       !$acc                eng_destroyed,m1_destroyed,m2_destroyed,eng_injected, &
@@ -5566,7 +5715,7 @@
 
       subroutine gauss_newton_2d(diffnorm,dt_nondim,taup_scale,rt_start, &
                                  rt_zeros,flag,prsval,rhoval,tval,qval, &
-                                 Tp,m_s,kappa_p,radius,np)
+                                 Tp,m_s,kappa_p,radius,np,iterations_out)
         !$acc routine seq
 
         implicit none
@@ -5575,6 +5724,7 @@
         double precision, intent(in) :: prsval,rhoval,tval,qval,Tp,m_s,kappa_p,radius
         double precision, intent(out) :: rt_zeros(2)
         integer, intent(out) :: flag
+        integer, intent(out) :: iterations_out
         integer, intent(in) :: np
 
         double precision :: error,fv1(2),fv2(2),v1(2),rel,det
@@ -5593,6 +5743,13 @@
         v1(2) = rt_start(2)
         rt_zeros(1) = v1(1)
         rt_zeros(2) = v1(2)
+
+        if (v1(1).le.0.0d0 .or. v1(2).le.0.0d0 .or. &
+            v1(1).ne.v1(1) .or. v1(2).ne.v1(2) .or. &
+            abs(v1(1)).gt.huge(v1(1)) .or. &
+            abs(v1(2)).gt.huge(v1(2))) then
+           flag = solver_fail_initial
+        endif
          
         !Initialize the correction to zero
         correct(1) = 0.0d0
@@ -5602,7 +5759,7 @@
         !Rare that it gets above ~5
         iteration_max = 50
 
-        do while (iterations<iteration_max)
+        do while (iterations<iteration_max .and. flag.eq.0)
 
                 iterations = iterations + 1
 
@@ -5615,10 +5772,10 @@
                                      taup_scale,prsval,rhoval,tval,qval, &
                                      Tp,m_s,kappa_p,radius,np,flag)
 
-              if( abs(J(1,1)).gt.1.0d76 ) flag = 1
-              if( abs(J(1,2)).gt.1.0d76 ) flag = 1
-              if( abs(J(2,1)).gt.1.0d76 ) flag = 1
-              if( abs(J(2,2)).gt.1.0d76 ) flag = 1
+              if( abs(J(1,1)).gt.1.0d76 ) flag = solver_fail_nonfinite
+              if( abs(J(1,2)).gt.1.0d76 ) flag = solver_fail_nonfinite
+              if( abs(J(2,1)).gt.1.0d76 ) flag = solver_fail_nonfinite
+              if( abs(J(2,2)).gt.1.0d76 ) flag = solver_fail_nonfinite
 
               if( flag.eq.0 )then
                 !Matrix to be inverted via G-N method
@@ -5631,7 +5788,7 @@
                 det = fancy(1,1)*fancy(2,2) - fancy(1,2)*fancy(2,1)
                 ! GHB: try this
                 if (  (abs(det) .lt. 1.0d-10) .or. (abs(det).gt.1.0d100) ) then
-                   flag = 1
+                   flag = solver_fail_matrix
                    EXIT
                 end if
               else
@@ -5669,7 +5826,7 @@
 
                 !Failure to converge if these drop too low -- send to LV solver
                 if (rt_zeros(1)<0.01d0 .OR. rt_zeros(2)<0.01d0) then
-                   flag = 1
+                   flag = solver_fail_trial
                    EXIT
                 end if
 
@@ -5682,15 +5839,19 @@
                 v1(2) = rt_zeros(2)
 
         end do
-      !These indicate that this failed -- set flag = 1 to send to LV solver
-      if (iterations == iteration_max) flag = 1
-      if ((rt_zeros(1) .ne. rt_zeros(1)) .OR. rt_zeros(1)<0.0d0 .OR. (rt_zeros(2) .ne. rt_zeros(2)) .OR. rt_zeros(2)<0.0d0) flag = 1
+      !These indicate failure and send the particle to the LV solver.
+      if (iterations == iteration_max .and. flag.eq.0) &
+         flag = solver_fail_iterations
+      if (flag.eq.0 .and. ((rt_zeros(1) .ne. rt_zeros(1)) .OR. &
+          rt_zeros(1)<0.0d0 .OR. (rt_zeros(2) .ne. rt_zeros(2)) .OR. &
+          rt_zeros(2)<0.0d0)) flag = solver_fail_trial
+      iterations_out = iterations
 
       end subroutine gauss_newton_2d
 
       subroutine LV_solver(diffnorm,dt_nondim,taup_scale,rt_start, &
                            rt_zeros,flag,prsval,rhoval,tval,qval, &
-                           Tp,m_s,kappa_p,radius,np)
+                           Tp,m_s,kappa_p,radius,np,iterations_out)
         !$acc routine seq
         implicit none
 
@@ -5698,6 +5859,7 @@
         double precision, intent(in) :: prsval,rhoval,tval,qval,Tp,m_s,kappa_p,radius
         double precision, intent(out) :: rt_zeros(2)
         integer, intent(out) :: flag
+        integer, intent(out) :: iterations_out
         integer, intent(in) :: np
 
         double precision :: error,fv1(2),fv2(2),v1(2),rel,det
@@ -5727,12 +5889,20 @@
         fv2(1) = 1.0d0
         fv2(2) = 1.0d0
 
+        if (v1(1).lt.0.01d0 .or. v1(2).lt.0.01d0 .or. &
+            v1(1).ne.v1(1) .or. v1(2).ne.v1(2) .or. &
+            abs(v1(1)).gt.huge(v1(1)) .or. &
+            abs(v1(2)).gt.huge(v1(2))) then
+          flag = solver_fail_initial
+        endif
+
         !These are parameters to the solver, could be adjusted but these work
         lambda = 0.001d0
         lup = 2.0d0
         ldown = 2.0d0
 
-        do while ((sqrt(fv2(1)*fv2(1)+fv2(2)*fv2(2)) > error) .AND. (iterations<iterations_max))
+        do while ((sqrt(fv2(1)*fv2(1)+fv2(2)*fv2(2)) > error) .AND. &
+                  (iterations<iterations_max) .and. flag.eq.0)
 
         iterations = iterations + 1
 
@@ -5741,7 +5911,7 @@
             v1(1).ne.v1(1) .or. v1(2).ne.v1(2) .or. &
             abs(v1(1)).gt.huge(v1(1)) .or. &
             abs(v1(2)).gt.huge(v1(2))) then
-          flag = 1
+          flag = solver_fail_trial
           exit
         endif
 
@@ -5754,10 +5924,10 @@
                        prsval,rhoval,tval,qval,Tp,m_s,kappa_p, &
                        radius,np,flag)
 
-      if( abs(J(1,1)).gt.1.0d76 ) flag = 1
-      if( abs(J(1,2)).gt.1.0d76 ) flag = 1
-      if( abs(J(2,1)).gt.1.0d76 ) flag = 1
-      if( abs(J(2,2)).gt.1.0d76 ) flag = 1
+      if( abs(J(1,1)).gt.1.0d76 ) flag = solver_fail_nonfinite
+      if( abs(J(1,2)).gt.1.0d76 ) flag = solver_fail_nonfinite
+      if( abs(J(2,1)).gt.1.0d76 ) flag = solver_fail_nonfinite
+      if( abs(J(2,2)).gt.1.0d76 ) flag = solver_fail_nonfinite
 
       if( flag.eq.0 )then
         !Calculate the update matrix which must be inverted
@@ -5776,7 +5946,7 @@
         det = g(1,1)*g(2,2) - g(1,2)*g(2,1)
         ! GHB: try this
         if ( (abs(det) .lt. 1.0d-10) .or. (abs(det).gt.1.0d100) ) then
-             flag = 1
+             flag = solver_fail_matrix
              EXIT
         end if
         call inverse_finder_2d(g,det,invg)
@@ -5797,7 +5967,7 @@
             rt_zeros(2).ne.rt_zeros(2) .or. &
             abs(rt_zeros(1)).gt.huge(rt_zeros(1)) .or. &
             abs(rt_zeros(2)).gt.huge(rt_zeros(2))) then
-            flag = 1
+            flag = solver_fail_trial
             EXIT
         end if
 
@@ -5811,10 +5981,10 @@
                        taup_scale,prsval,rhoval,tval,qval,Tp,m_s, &
                        kappa_p,radius,np,flag)
 
-      if( abs(fv1(1)).gt.1.0d76 ) flag = 1
-      if( abs(fv1(2)).gt.1.0d76 ) flag = 1
-      if( abs(fv2(1)).gt.1.0d76 ) flag = 1
-      if( abs(fv2(2)).gt.1.0d76 ) flag = 1
+      if( abs(fv1(1)).gt.1.0d76 ) flag = solver_fail_nonfinite
+      if( abs(fv1(2)).gt.1.0d76 ) flag = solver_fail_nonfinite
+      if( abs(fv2(1)).gt.1.0d76 ) flag = solver_fail_nonfinite
+      if( abs(fv2(2)).gt.1.0d76 ) flag = solver_fail_nonfinite
 
       if( flag.eq.0 )then
         newC(1) = 0.5d0*fv2(1)*fv2(1)
@@ -5834,18 +6004,20 @@
         end do
 
         !Failed if iterations hits maximum
-        if (iterations==iterations_max) then
-           flag = 1
+        if (iterations==iterations_max .and. flag.eq.0) then
+           flag = solver_fail_iterations
         end if
 
         !Failed if it returns an unsafe radius or temperature ratio.
-        if (rt_zeros(1).lt.0.01d0 .or. rt_zeros(2).lt.0.01d0 .or. &
+        if (flag.eq.0 .and. (rt_zeros(1).lt.0.01d0 .or. &
+            rt_zeros(2).lt.0.01d0 .or. &
             rt_zeros(1).ne.rt_zeros(1) .or. &
             rt_zeros(2).ne.rt_zeros(2) .or. &
             abs(rt_zeros(1)).gt.huge(rt_zeros(1)) .or. &
-            abs(rt_zeros(2)).gt.huge(rt_zeros(2))) then
-           flag = 1
+            abs(rt_zeros(2)).gt.huge(rt_zeros(2)))) then
+           flag = solver_fail_trial
         end if
+        iterations_out = iterations
 
       end subroutine LV_solver
 
@@ -5940,21 +6112,24 @@
         rT_output(2) = 0.0d0
         if (flag.ne.0) return
         if (tempr.le.0.0d0 .or. tempt.le.0.0d0 .or. &
-            radius.le.0.0d0 .or. Tp.le.0.0d0 .or. &
+            tempr.ne.tempr .or. tempt.ne.tempt .or. &
+            abs(tempr).gt.huge(tempr) .or. &
+            abs(tempt).gt.huge(tempt)) then
+          flag = solver_fail_trial
+          return
+        endif
+        if (radius.le.0.0d0 .or. Tp.le.0.0d0 .or. &
             rhoval.le.0.0d0 .or. taup_scale.le.0.0d0 .or. &
             tval.le.0.0d0 .or. prsval.le.0.0d0 .or. qval.lt.0.0d0 .or. &
             viscosity.le.0.0 .or. sc_num.le.0.0 .or. pr_num.le.0.0 .or. &
             m_s.lt.0.0d0 .or. kappa_p.lt.0.0d0 .or. &
             diffnorm.lt.0.0d0 .or. dt_nondim.lt.0.0d0 .or. &
-            tempr.ne.tempr .or. tempt.ne.tempt .or. radius.ne.radius .or. &
-            Tp.ne.Tp .or. rhoval.ne.rhoval .or. &
+            radius.ne.radius .or. Tp.ne.Tp .or. rhoval.ne.rhoval .or. &
             taup_scale.ne.taup_scale .or. tval.ne.tval .or. &
             prsval.ne.prsval .or. qval.ne.qval .or. &
             viscosity.ne.viscosity .or. sc_num.ne.sc_num .or. &
             pr_num.ne.pr_num .or. m_s.ne.m_s .or. kappa_p.ne.kappa_p .or. &
             diffnorm.ne.diffnorm .or. dt_nondim.ne.dt_nondim .or. &
-            abs(tempr).gt.huge(tempr) .or. &
-            abs(tempt).gt.huge(tempt) .or. &
             abs(radius).gt.huge(radius) .or. abs(Tp).gt.huge(Tp) .or. &
             abs(rhoval).gt.huge(rhoval) .or. &
             abs(taup_scale).gt.huge(taup_scale) .or. &
@@ -5965,7 +6140,7 @@
             abs(m_s).gt.huge(m_s) .or. abs(kappa_p).gt.huge(kappa_p) .or. &
             abs(diffnorm).gt.huge(diffnorm) .or. &
             abs(dt_nondim).gt.huge(dt_nondim)) then
-          flag = 1
+          flag = solver_fail_initial
           return
         endif
 
@@ -5979,7 +6154,7 @@
             abs(rnext).gt.huge(rnext) .or. &
             abs(Tnext).gt.huge(Tnext) .or. &
             abs(dnext).gt.huge(dnext)) then
-          flag = 1
+          flag = solver_fail_trial
           return
         endif
 
@@ -5988,14 +6163,14 @@
         if (VolP.le.0.0d0 .or. VolP.ne.VolP .or. &
             abs(VolP).gt.huge(VolP) .or. esa.le.0.0d0 .or. &
             esa.ne.esa .or. abs(esa).gt.huge(esa)) then
-          flag = 1
+          flag = solver_fail_thermo
           return
         endif
         rhop = (m_s + VolP*rhow_dp)/VolP
 
         if (rhop.le.0.0d0 .or. rhop.ne.rhop .or. &
             abs(rhop).gt.huge(rhop)) then
-          flag = 1
+          flag = solver_fail_thermo
           return
         endif
 
@@ -6003,7 +6178,7 @@
         taup = (rhop*dnext**2)/(18.0d0*rhoval*dble(viscosity))
         if (taup.le.0.0d0 .or. taup.ne.taup .or. &
             abs(taup).gt.huge(taup)) then
-          flag = 1
+          flag = solver_fail_thermo
           return
         endif
         Nup = 2.0d0 + 0.6d0*dsqrt(Rep)*dble(pr_num)**(1.0d0/3.0d0)
@@ -6022,19 +6197,19 @@
               ((2.0d0*mw*surften)/(ru*rhow_dp*rnext*Tnext)) - &
               ((kappa_p*m_s)/(rho_solute*VolP))
         if (tmp.ne.tmp .or. abs(tmp).gt.huge(tmp)) then
-          flag = 1
+          flag = solver_fail_thermo
           return
         endif
         if( tmp.gt.600.0 )then
           qstr = qval
-          flag = 1
+          flag = solver_fail_thermo
         else
           qstr = (mw/(ru*Tnext*rhoval))*esa*dexp( tmp )
           qstr_test = drslf(dble(prsval),dble(tval))*dexp( tmp )
         endif
         if (qstr.lt.0.0d0 .or. qstr.ne.qstr .or. &
             abs(qstr).gt.huge(qstr)) then
-          flag = 1
+          flag = solver_fail_thermo
           rT_output(1) = 0.0d0
           rT_output(2) = 0.0d0
           return
@@ -6057,7 +6232,7 @@
             rT_output(2).ne.rT_output(2) .or. &
             abs(rT_output(1)).gt.huge(rT_output(1)) .or. &
             abs(rT_output(2)).gt.huge(rT_output(2))) then
-          flag = 1
+          flag = solver_fail_nonfinite
           rT_output(1) = 0.0d0
           rT_output(2) = 0.0d0
           return
@@ -7436,6 +7611,7 @@
     hist_fallrad = 0.0
     hist_injected = 0.0
     hist_dry_injected = 0.0
+    hist_solver_failure_dry_radius = 0.0d0
     ssgf_injected = 0.0
     dN_dlogr_injected = 0.0
     ssgf_dry_injected = 0.0
@@ -7467,7 +7643,8 @@
     coal_palpha_max = 0.0d0
     coal_gamtil_max = 0.0d0
 
-    !$acc update device(hist_restime,hist_fallrad,hist_injected,hist_dry_injected,restime_min, &
+    !$acc update device(hist_restime,hist_fallrad,hist_injected,hist_dry_injected, &
+    !$acc               hist_solver_failure_dry_radius,restime_min, &
     !$acc               restime_max,restime_min10,restime_max10, &
     !$acc               dhres,dhrad,rmin,rmax,rmin10,rmax10, &
     !$acc               num_destroyed,mass_destroyed,mass_evap,mass_dpten,num_injected,mass_injected, &
@@ -7488,7 +7665,8 @@
                                   usgsmean,vsgsmean,wsgsmean,sigm_smean,fsmean,&
                                   vp1msqr,vp2msqr,vp3msqr,m1src,m2src,m3src,Tpsrc,qvsrc,rhovsrc,Tf,qf,Tpmean,Tpmsqr,&
                                   radmean,radmsqr,qfsat,qstarmean,kmoist,mse,wk,multnumrz,vp3meanrz,tnumpart_r, &
-                                  dN_dr,dN_dlogr,dN_dr_dry,dN_dlogr_dry)
+                                  dN_dr,dN_dlogr,dN_dr_dry,dN_dlogr_dry, &
+                                  hist_solver_failure_dry_radius_out)
       use input
       use constants
       use netcdf
@@ -7502,7 +7680,8 @@
       real,    intent(in)    :: multnumrz(nk,nbins),vp3meanrz(nk,nbins)
       real,    intent(in)    :: tnumpart_r(nbins)
       double precision, intent(in) :: dN_dr(nbins),dN_dlogr(nbins), &
-                                      dN_dr_dry(nbins),dN_dlogr_dry(nbins)
+                                      dN_dr_dry(nbins),dN_dlogr_dry(nbins), &
+                                      hist_solver_failure_dry_radius_out(nbins)
       integer, intent(in)    :: nbins
       real, intent(in) :: tnumpart
 
@@ -7917,6 +8096,12 @@
     call disp_err( nf90_put_att(ncid,varid,"long_name","total count for each dry-radius bin from solute mass") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
 
+    call disp_err( nf90_def_var(ncid,"hist_solver_failure_dry_radius", &
+         nf90_double,(/binsid,timeid/),varid) , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "failed superdroplet solves by dry-radius bin since the previous dropdiag record") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"units","# of superdroplets") , .true. )
+
     call disp_err( nf90_def_var(ncid,"dN_dr",nf90_double,(/binsid,timeid/),varid) , .true. )
     call disp_err( nf90_put_att(ncid,varid,"long_name", &
          "droplet number concentration per wet-radius interval") , .true. )
@@ -8257,6 +8442,10 @@
 
     call disp_err( nf90_inq_varid(ncid,"hist_dry_radius",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,hist_dry_radius,(/1,time_index/)) , .true. )
+
+    call disp_err( nf90_inq_varid(ncid,"hist_solver_failure_dry_radius",varid) , .true. )
+    call disp_err( nf90_put_var(ncid,varid,hist_solver_failure_dry_radius_out, &
+                                (/1,time_index/)) , .true. )
 
     call disp_err( nf90_inq_varid(ncid,"dN_dr",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,dN_dr,(/1,time_index/)) , .true. )
