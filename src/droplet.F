@@ -18,6 +18,7 @@
   real :: num100,num1000
   integer :: drop_solver_fallback_substep = 0
   integer :: drop_solver_failure_substep = 0
+  integer :: drop_dry_floor_hits_substep = 0
   integer, parameter :: nbins = 130  !Bins for the droplet histograms
   integer, parameter :: n_solver_fail_reasons = 6
   integer, parameter :: solver_fail_initial = 1
@@ -149,7 +150,8 @@
   !$acc                 coal_pair_attempts,coal_pair_successes,coal_collision_mult, &
   !$acc                 coal_palpha_sum,coal_palpha_mean,coal_palpha_max,coal_gamtil_max, &
   !$acc                 num100,num1000,ngidx,drop_solver_fallback_substep, &
-  !$acc                 drop_solver_failure_substep,drop_solver_fallback_reason, &
+  !$acc                 drop_solver_failure_substep,drop_dry_floor_hits_substep, &
+  !$acc                 drop_solver_fallback_reason, &
   !$acc                 drop_solver_failure_reason,hist_solver_failure_dry_radius, &
   !$acc                 drop_solver_iteration_sums)
   !$acc declare copyin(hall_r0,hall_rat,hall_ecoll)
@@ -345,8 +347,9 @@
          drop_solver_fallback_reason = 0
          drop_solver_failure_reason = 0
          drop_solver_iteration_sums = 0.0d0
+         drop_dry_floor_hits_substep = 0
          !$acc update device(drop_solver_fallback_reason,drop_solver_failure_reason, &
-         !$acc               drop_solver_iteration_sums)
+         !$acc               drop_solver_iteration_sums,drop_dry_floor_hits_substep)
       endif
       numDepartN  = 0
       numDepartS  = 0
@@ -1409,7 +1412,7 @@
     endif
     if (drop_stability_diag.ge.3) then
        !$acc update self(drop_solver_fallback_reason,drop_solver_failure_reason, &
-       !$acc             drop_solver_iteration_sums)
+       !$acc             drop_solver_iteration_sums,drop_dry_floor_hits_substep)
     endif
 
    end subroutine droplet_driver
@@ -1427,8 +1430,8 @@
       integer, intent(in) :: nstep,isub,nsub
       integer :: fallback_reason_global(n_solver_fail_reasons)
       integer :: failure_reason_global(n_solver_fail_reasons)
-      integer :: integer_diag_local(2*n_solver_fail_reasons)
-      integer :: integer_diag_global(2*n_solver_fail_reasons)
+      integer :: integer_diag_local(2*n_solver_fail_reasons+1)
+      integer :: integer_diag_global(2*n_solver_fail_reasons+1)
       double precision :: iteration_sums_global(3)
       integer :: fallback_total,failure_total
       double precision :: gn_iter_mean,lv_iter_mean,failed_lv_iter_mean
@@ -1440,8 +1443,10 @@
          drop_solver_fallback_reason
       integer_diag_local(n_solver_fail_reasons+1:2*n_solver_fail_reasons) = &
          drop_solver_failure_reason
+      integer_diag_local(2*n_solver_fail_reasons+1) = &
+         drop_dry_floor_hits_substep
       call MPI_ALLREDUCE(integer_diag_local,integer_diag_global, &
-                         2*n_solver_fail_reasons,MPI_INTEGER,MPI_SUM, &
+                         2*n_solver_fail_reasons+1,MPI_INTEGER,MPI_SUM, &
                          MPI_COMM_WORLD,ierr)
       fallback_reason_global = integer_diag_global(1:n_solver_fail_reasons)
       failure_reason_global = &
@@ -1452,6 +1457,8 @@
       fallback_reason_global = drop_solver_fallback_reason
       failure_reason_global = drop_solver_failure_reason
       iteration_sums_global = drop_solver_iteration_sums
+      integer_diag_global(2*n_solver_fail_reasons+1) = &
+         drop_dry_floor_hits_substep
 #endif
 
       fallback_total = sum(fallback_reason_global)
@@ -1460,7 +1467,8 @@
       lv_iter_mean = iteration_sums_global(2)/dble(max(1,fallback_total))
       failed_lv_iter_mean = iteration_sums_global(3)/dble(max(1,failure_total))
 
-      if (myid.eq.0 .and. fallback_total.gt.0) then
+      if (myid.eq.0 .and. (fallback_total.gt.0 .or. &
+          integer_diag_global(2*n_solver_fail_reasons+1).gt.0)) then
          write(*,*) 'DROP_SOLVER_REASONS step=',nstep,' sub=',isub,'/',nsub, &
                     ' fallback_initial=',fallback_reason_global(solver_fail_initial), &
                     ' fallback_trial=',fallback_reason_global(solver_fail_trial), &
@@ -1480,7 +1488,8 @@
                     ' fallback_lm_total=',iteration_sums_global(2), &
                     ' fallback_lm_mean=',lv_iter_mean, &
                     ' failed_lm_total=',iteration_sums_global(3), &
-                    ' failed_lm_mean=',failed_lv_iter_mean
+                    ' failed_lm_mean=',failed_lv_iter_mean, &
+                    ' dry_floor_hits=',integer_diag_global(2*n_solver_fail_reasons+1)
       endif
 
    end subroutine report_droplet_solver_diagnostics
@@ -2926,6 +2935,7 @@
       double precision :: taup_scale,dt_nondim
       double precision :: guess
       double precision :: rt_zeros(2),rt_start(2)
+      double precision :: dry_radius,dry_ratio
       double precision :: dry_radius_fail,dry_rad10_fail
       logical :: is_local
       integer :: mflag,flag,gn_reason,gn_iterations,lv_iterations
@@ -3024,12 +3034,20 @@
                        pdata(np,prtp),pdata(np,prms),pdata(np,prkap), &
                        pdata(np,prrp),np)
 
+      if (pdata(np,prms).gt.0.0) then
+         dry_radius = (3.0d0*dble(pdata(np,prms))/ &
+              (4.0d0*pi_dp*rho_solute))**(1.0d0/3.0d0)
+      else
+         dry_radius = 0.0d0
+      endif
+      dry_ratio = dry_radius/dble(pdata(np,prrp))
+
       !Nondimensionalize the guesses
       if (mflag.eq.0) then
-         rt_start(1) = guess/dble(pdata(np,prrp))
+         rt_start(1) = max(guess/dble(pdata(np,prrp)),dry_ratio)
          rt_start(2) = dble(tval)/dble(pdata(np,prtp))
       else
-         rt_start(1) = 1.0
+         rt_start(1) = max(1.0d0,dry_ratio)
          rt_start(2) = 1.0
       end if
 
@@ -3038,7 +3056,8 @@
                            rt_start,rt_zeros,flag,dble(prsval), &
                            dble(rhoval),dble(tval),dble(qval), &
                            dble(pdata(np,prtp)),dble(pdata(np,prms)), &
-                           dble(pdata(np,prkap)),dble(pdata(np,prrp)),np, &
+                           dble(pdata(np,prkap)),dble(pdata(np,prrp)), &
+                           dry_ratio,np, &
                            gn_iterations)
 
       !If Gauss-Newton failed, flag identifies the reason; try Levenberg-Marquardt.
@@ -3061,7 +3080,7 @@
                         rt_zeros,flag,dble(prsval),dble(rhoval), &
                         dble(tval),dble(qval),dble(pdata(np,prtp)), &
                         dble(pdata(np,prms)),dble(pdata(np,prkap)), &
-                        dble(pdata(np,prrp)),np,lv_iterations)
+                        dble(pdata(np,prrp)),dry_ratio,np,lv_iterations)
          if (drop_stability_diag.ge.3) then
             !$acc atomic update
             drop_solver_iteration_sums(2) = &
@@ -3110,6 +3129,15 @@
        rt_zeros(2) = tval/pdata(np,prtp)
 
       end if
+
+      !The implicit radius equation enforces this bound.  Retain a final
+      !roundoff guard before converting the normalized solution back to meters.
+      rt_zeros(1) = max(rt_zeros(1),dry_ratio)
+      if (drop_stability_diag.ge.3 .and. dry_radius.gt.0.0d0 .and. &
+          rt_zeros(1).le.dry_ratio*(1.0d0+1.0d-10)) then
+         !$acc atomic update
+         drop_dry_floor_hits_substep = drop_dry_floor_hits_substep + 1
+      endif
 
       !Now redimsionalize
       pdata(np,prrp) = rt_zeros(1)*pdata(np,prrp)
@@ -5715,13 +5743,14 @@
 
       subroutine gauss_newton_2d(diffnorm,dt_nondim,taup_scale,rt_start, &
                                  rt_zeros,flag,prsval,rhoval,tval,qval, &
-                                 Tp,m_s,kappa_p,radius,np,iterations_out)
+                                 Tp,m_s,kappa_p,radius,dry_ratio,np, &
+                                 iterations_out)
         !$acc routine seq
 
         implicit none
 
         double precision, intent(in) :: diffnorm,dt_nondim,taup_scale,rt_start(2)
-        double precision, intent(in) :: prsval,rhoval,tval,qval,Tp,m_s,kappa_p,radius
+        double precision, intent(in) :: prsval,rhoval,tval,qval,Tp,m_s,kappa_p,radius,dry_ratio
         double precision, intent(out) :: rt_zeros(2)
         integer, intent(out) :: flag
         integer, intent(out) :: iterations_out
@@ -5766,11 +5795,11 @@
                 !Compute the RHS of the droplet temp and radius equations
                 call ie_vrt_nd(diffnorm,v1(1),v1(2),fv1,dt_nondim, &
                                taup_scale,prsval,rhoval,tval,qval, &
-                               Tp,m_s,kappa_p,radius,np,flag)
+                               Tp,m_s,kappa_p,radius,dry_ratio,np,flag)
                 !Approximate the Jacobian
                 call jacob_approx_2d(diffnorm,v1(1),v1(2),dt_nondim,J, &
                                      taup_scale,prsval,rhoval,tval,qval, &
-                                     Tp,m_s,kappa_p,radius,np,flag)
+                                     Tp,m_s,kappa_p,radius,dry_ratio,np,flag)
 
               if( abs(J(1,1)).gt.1.0d76 ) flag = solver_fail_nonfinite
               if( abs(J(1,2)).gt.1.0d76 ) flag = solver_fail_nonfinite
@@ -5813,7 +5842,10 @@
                 relax = 1.0d0
                 counts = 0
                 !If either the temperature or radius goes negative, take a series of smaller adjustment steps
-                do while ((rt_zeros(1)<0.0d0) .OR. (rt_zeros(2)<0.0d0) .OR. (rt_zeros(1) .ne. rt_zeros(1)))
+                do while ((rt_zeros(1).le.0.0d0) .OR. &
+                          (rt_zeros(2).le.0.0d0) .OR. &
+                          (rt_zeros(1).ne.rt_zeros(1)) .OR. &
+                          (rt_zeros(2).ne.rt_zeros(2)))
 
                    counts = counts + 1
                    coeff = 0.5d0
@@ -5824,8 +5856,9 @@
                    if (counts>10) EXIT
                 end do
 
-                !Failure to converge if these drop too low -- send to LV solver
-                if (rt_zeros(1)<0.01d0 .OR. rt_zeros(2)<0.01d0) then
+                !Only nonpositive states are unsafe.  The radius residual
+                !itself now enforces the particle-specific dry-radius bound.
+                if (rt_zeros(1).le.0.0d0 .OR. rt_zeros(2).le.0.0d0) then
                    flag = solver_fail_trial
                    EXIT
                 end if
@@ -5843,20 +5876,20 @@
       if (iterations == iteration_max .and. flag.eq.0) &
          flag = solver_fail_iterations
       if (flag.eq.0 .and. ((rt_zeros(1) .ne. rt_zeros(1)) .OR. &
-          rt_zeros(1)<0.0d0 .OR. (rt_zeros(2) .ne. rt_zeros(2)) .OR. &
-          rt_zeros(2)<0.0d0)) flag = solver_fail_trial
+          rt_zeros(1).le.0.0d0 .OR. (rt_zeros(2) .ne. rt_zeros(2)) .OR. &
+          rt_zeros(2).le.0.0d0)) flag = solver_fail_trial
       iterations_out = iterations
 
       end subroutine gauss_newton_2d
 
       subroutine LV_solver(diffnorm,dt_nondim,taup_scale,rt_start, &
                            rt_zeros,flag,prsval,rhoval,tval,qval, &
-                           Tp,m_s,kappa_p,radius,np,iterations_out)
+                           Tp,m_s,kappa_p,radius,dry_ratio,np,iterations_out)
         !$acc routine seq
         implicit none
 
         double precision, intent(in) :: diffnorm,dt_nondim,taup_scale,rt_start(2)
-        double precision, intent(in) :: prsval,rhoval,tval,qval,Tp,m_s,kappa_p,radius
+        double precision, intent(in) :: prsval,rhoval,tval,qval,Tp,m_s,kappa_p,radius,dry_ratio
         double precision, intent(out) :: rt_zeros(2)
         integer, intent(out) :: flag
         integer, intent(out) :: iterations_out
@@ -5889,7 +5922,7 @@
         fv2(1) = 1.0d0
         fv2(2) = 1.0d0
 
-        if (v1(1).lt.0.01d0 .or. v1(2).lt.0.01d0 .or. &
+        if (v1(1).le.0.0d0 .or. v1(2).le.0.0d0 .or. &
             v1(1).ne.v1(1) .or. v1(2).ne.v1(2) .or. &
             abs(v1(1)).gt.huge(v1(1)) .or. &
             abs(v1(2)).gt.huge(v1(2))) then
@@ -5907,7 +5940,7 @@
         iterations = iterations + 1
 
         !Do not evaluate the residual at a singular or nonfinite trial state.
-        if (v1(1).lt.0.01d0 .or. v1(2).lt.0.01d0 .or. &
+        if (v1(1).le.0.0d0 .or. v1(2).le.0.0d0 .or. &
             v1(1).ne.v1(1) .or. v1(2).ne.v1(2) .or. &
             abs(v1(1)).gt.huge(v1(1)) .or. &
             abs(v1(2)).gt.huge(v1(2))) then
@@ -5918,11 +5951,11 @@
         !Approximate the Jacobian of the system
         call jacob_approx_2d(diffnorm,v1(1),v1(2),dt_nondim,J, &
                              taup_scale,prsval,rhoval,tval,qval, &
-                             Tp,m_s,kappa_p,radius,np,flag)
+                             Tp,m_s,kappa_p,radius,dry_ratio,np,flag)
         !Compute the RHS of the temperature and radius equations
         call ie_vrt_nd(diffnorm,v1(1),v1(2),fv1,dt_nondim,taup_scale, &
                        prsval,rhoval,tval,qval,Tp,m_s,kappa_p, &
-                       radius,np,flag)
+                       radius,dry_ratio,np,flag)
 
       if( abs(J(1,1)).gt.1.0d76 ) flag = solver_fail_nonfinite
       if( abs(J(1,2)).gt.1.0d76 ) flag = solver_fail_nonfinite
@@ -5962,7 +5995,7 @@
         rt_zeros(2) = v1(2) - correct(2)
 
         !Reject a singular or nonfinite trial before evaluating the residual.
-        if (rt_zeros(1).lt.0.01d0 .or. rt_zeros(2).lt.0.01d0 .or. &
+        if (rt_zeros(1).le.0.0d0 .or. rt_zeros(2).le.0.0d0 .or. &
             rt_zeros(1).ne.rt_zeros(1) .or. &
             rt_zeros(2).ne.rt_zeros(2) .or. &
             abs(rt_zeros(1)).gt.huge(rt_zeros(1)) .or. &
@@ -5979,7 +6012,7 @@
         !Use the RHS to update the lambda parameter
         call ie_vrt_nd(diffnorm,rt_zeros(1),rt_zeros(2),fv2,dt_nondim, &
                        taup_scale,prsval,rhoval,tval,qval,Tp,m_s, &
-                       kappa_p,radius,np,flag)
+                       kappa_p,radius,dry_ratio,np,flag)
 
       if( abs(fv1(1)).gt.1.0d76 ) flag = solver_fail_nonfinite
       if( abs(fv1(2)).gt.1.0d76 ) flag = solver_fail_nonfinite
@@ -6008,9 +6041,9 @@
            flag = solver_fail_iterations
         end if
 
-        !Failed if it returns an unsafe radius or temperature ratio.
-        if (flag.eq.0 .and. (rt_zeros(1).lt.0.01d0 .or. &
-            rt_zeros(2).lt.0.01d0 .or. &
+        !Failed if it returns a nonpositive or nonfinite state.
+        if (flag.eq.0 .and. (rt_zeros(1).le.0.0d0 .or. &
+            rt_zeros(2).le.0.0d0 .or. &
             rt_zeros(1).ne.rt_zeros(1) .or. &
             rt_zeros(2).ne.rt_zeros(2) .or. &
             abs(rt_zeros(1)).gt.huge(rt_zeros(1)) .or. &
@@ -6035,12 +6068,14 @@
 
       subroutine jacob_approx_2d(diffnorm,rnext,tnext,dt_nondim,J, &
                                  taup_scale,prsval,rhoval,tval,qval, &
-                                 Tp,m_s,kappa_p,radius,np,flag)
+                                 Tp,m_s,kappa_p,radius,dry_ratio,np,flag)
         !$acc routine seq
         implicit none
         integer :: n
 
-        double precision, intent(in) :: diffnorm,rnext,tnext,dt_nondim,taup_scale,prsval,rhoval,tval,qval,Tp,m_s,kappa_p,radius
+        double precision, intent(in) :: diffnorm,rnext,tnext,dt_nondim, &
+                                        taup_scale,prsval,rhoval,tval, &
+                                        qval,Tp,m_s,kappa_p,radius,dry_ratio
         double precision, intent(out), dimension(1:2, 1:2) :: J
         double precision :: diff,v_output(3),rt_output(2),xper(2),fxper(2),ynext(2),xper2(2),fxper2(2)
         integer, intent(in) :: np
@@ -6056,7 +6091,7 @@
         !Evaluate RHS 
         call ie_vrt_nd(diffnorm,rnext,tnext,rt_output,dt_nondim, &
                        taup_scale,prsval,rhoval,tval,qval,Tp,m_s, &
-                       kappa_p,radius,np,flag)
+                       kappa_p,radius,dry_ratio,np,flag)
         if (flag.ne.0) return
 
         xper(1) = ynext(1)
@@ -6071,11 +6106,11 @@
 
            call ie_vrt_nd(diffnorm,xper(1),xper(2),fxper,dt_nondim, &
                           taup_scale,prsval,rhoval,tval,qval,Tp,m_s, &
-                          kappa_p,radius,np,flag)
+                          kappa_p,radius,dry_ratio,np,flag)
            if (flag.ne.0) return
            call ie_vrt_nd(diffnorm,xper2(1),xper2(2),fxper2,dt_nondim, &
                           taup_scale,prsval,rhoval,tval,qval,Tp,m_s, &
-                          kappa_p,radius,np,flag)
+                          kappa_p,radius,dry_ratio,np,flag)
            if (flag.ne.0) return
 
            !Use these differences to compute the Jacobian
@@ -6089,7 +6124,7 @@
 
       subroutine ie_vrt_nd(diffnorm,tempr,tempt,rt_output,dt_nondim, &
                            taup_scale,prsval,rhoval,tval,qval,Tp,m_s, &
-                           kappa_p,radius,np,flag)
+                           kappa_p,radius,dry_ratio,np,flag)
       !$acc routine seq
       use constants, only : rhow_dp,mw,ru,surften,rho_solute, &
                             cp_dp,cpl_dp,lv1_dp,lv2_dp
@@ -6097,14 +6132,17 @@
       use cm1libs , only : drslf,deslf
       implicit none
 
-      double precision, intent(in) :: diffnorm,tempr,tempt,taup_scale,dt_nondim,prsval,rhoval,tval,qval,Tp,m_s,kappa_p,radius
+      double precision, intent(in) :: diffnorm,tempr,tempt,taup_scale, &
+                                      dt_nondim,prsval,rhoval,tval,qval, &
+                                      Tp,m_s,kappa_p,radius,dry_ratio
       double precision, intent(out) :: rT_output(2)
       integer, intent(in) :: np
       integer, intent(inout) :: flag
 
-      double precision :: esa,dnext,rhop,Rep,taup,rprime,Tprime,qstr,Shp,Nup,VolP,lhv,qstr_test
+      double precision :: esa,dnext,rhop,Rep,taup,rprime,rprime_effective
+      double precision :: Tprime,qstr,Shp,Nup,VolP,lhv,qstr_test
       double precision :: Tnext,rnext
-      double precision :: tmp
+      double precision :: tmp,radius_target_ratio
 
         !A nonlinear solver can propose an unphysical trial state.  Reject it
         !before evaluating any of the singular radius/temperature expressions.
@@ -6123,12 +6161,14 @@
             tval.le.0.0d0 .or. prsval.le.0.0d0 .or. qval.lt.0.0d0 .or. &
             viscosity.le.0.0 .or. sc_num.le.0.0 .or. pr_num.le.0.0 .or. &
             m_s.lt.0.0d0 .or. kappa_p.lt.0.0d0 .or. &
+            dry_ratio.lt.0.0d0 .or. &
             diffnorm.lt.0.0d0 .or. dt_nondim.lt.0.0d0 .or. &
             radius.ne.radius .or. Tp.ne.Tp .or. rhoval.ne.rhoval .or. &
             taup_scale.ne.taup_scale .or. tval.ne.tval .or. &
             prsval.ne.prsval .or. qval.ne.qval .or. &
             viscosity.ne.viscosity .or. sc_num.ne.sc_num .or. &
             pr_num.ne.pr_num .or. m_s.ne.m_s .or. kappa_p.ne.kappa_p .or. &
+            dry_ratio.ne.dry_ratio .or. &
             diffnorm.ne.diffnorm .or. dt_nondim.ne.dt_nondim .or. &
             abs(radius).gt.huge(radius) .or. abs(Tp).gt.huge(Tp) .or. &
             abs(rhoval).gt.huge(rhoval) .or. &
@@ -6138,14 +6178,17 @@
             abs(viscosity).gt.huge(viscosity) .or. &
             abs(sc_num).gt.huge(sc_num) .or. abs(pr_num).gt.huge(pr_num) .or. &
             abs(m_s).gt.huge(m_s) .or. abs(kappa_p).gt.huge(kappa_p) .or. &
+            abs(dry_ratio).gt.huge(dry_ratio) .or. &
             abs(diffnorm).gt.huge(diffnorm) .or. &
             abs(dt_nondim).gt.huge(dt_nondim)) then
           flag = solver_fail_initial
           return
         endif
 
-        ! quantities come in already non-dimensionalized, so must be converted back;
-        rnext = tempr*radius
+        ! Quantities arrive nondimensionalized.  A solver trial can lie below
+        ! the dry-radius bound, so use the bounded radius in all physical
+        ! expressions while retaining tempr itself in the radius residual.
+        rnext = max(tempr,dry_ratio)*radius
         Tnext = tempt*Tp
         dnext = rnext*2.0d0
 
@@ -6221,11 +6264,22 @@
         rprime = (1.0d0/9.0d0)*(Shp/dble(sc_num))*(rhop/rhow_dp)*(rnext/taup)*(qval - qstr)
         rprime = rprime*(taup_scale/radius)
 
+        !Constrain the implicit Euler update to the particle's dry radius.
+        !The corresponding effective rate is used in the latent-heating term
+        !so vapor mass and particle temperature see the same bounded change.
+        radius_target_ratio = max(dry_ratio,1.0d0+dt_nondim*rprime)
+        if (dt_nondim.gt.0.0d0) then
+          rprime_effective = (radius_target_ratio-1.0d0)/dt_nondim
+        else
+          rprime_effective = 0.0d0
+        endif
+
         !!! Temperature !!!
-        Tprime = -(1.0d0/3.0d0)*(Nup/dble(pr_num))*(cp_dp/cpl_dp)*(rhop/rhow_dp)/taup*(Tnext-tval) + 3.0d0*lhv/(rnext*cpl_dp)*rprime*(radius/taup_scale)
+        Tprime = -(1.0d0/3.0d0)*(Nup/dble(pr_num))*(cp_dp/cpl_dp)*(rhop/rhow_dp)/taup*(Tnext-tval) + &
+                 3.0d0*lhv/(rnext*cpl_dp)*rprime_effective*(radius/taup_scale)
         Tprime = Tprime*(taup_scale/Tp)
 
-        rT_output(1) = rnext/radius - 1.0d0  - dt_nondim*rprime
+        rT_output(1) = tempr - radius_target_ratio
         rT_output(2) = Tnext/Tp - 1.0d0  - dt_nondim*Tprime
 
         if (rT_output(1).ne.rT_output(1) .or. &
