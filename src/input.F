@@ -166,6 +166,9 @@
       integer(i8) :: nparcelsInit,nparcelsMax,nparcelsRest,nparcelsLocal, &
                      nparcelsLocalActive
       integer :: drop_sgs_opt = 0
+      ! 0: sample sizes from the PSD with uniform superdroplet multiplicity
+      ! 1: sample uniformly in log10 size with PSD-weighted multiplicity
+      integer :: psd_sampling_opt = 0
       ! 0: off; 1: substep diagnostics; 2: coupling diagnostics;
       ! 3: nonlinear-solver reasons, iterations, dry-radius floor hits,
       !    and failure-size histogram.
@@ -358,7 +361,7 @@
 	      drop_inject_elapse,drop_inject_time,drop_traj_elapse,           &
               tauc_mult_factor,                                           &
 	      two_way_coupling,drop_evap,drop_traj,drop_sgs_opt,              &
-	      drop_stability_diag,                                            &
+	      drop_stability_diag,psd_sampling_opt,                           &
 	      coal_enabled,coal_kernel,                                       &
               coal_Ndx,coal_Ndy,coal_Ndz
       namelist /param14/                                                      &

@@ -176,11 +176,6 @@
       real :: salinity
       integer :: values(8)
 
-      ! Temporary testcase-3 selector for the BOMEX aerosol initialization.
-      !   0: sample the PSD with uniform superdroplet multiplicity
-      !   1: sample uniformly in log10(Ddry) with PSD-weighted multiplicity
-      integer, parameter :: bomex_size_sampling = 1
-
       ! Note:  By default, CM1 uses the same set of psuedorandom numbers 
       !        every time it is called.  To use truly random perturbations 
       !        (ie, different sets of random perturbations every time CM1 
@@ -508,17 +503,17 @@
                 pdata(i,prrp0) = pdata(i,prrp)
              else if (testcase.eq.3) then
                 pdata(i,prkap) = 0.6
-                if (bomex_size_sampling.eq.0) then
+                if (psd_sampling_opt.eq.0) then
                    call bomex_lognormal_droplet(pdata(i,prrp), &
                         pdata(i,prms),pdata(i,prkap),randomNumbers)
                    pdata(i,prrp0) = pdata(i,prrp)
-                else if (bomex_size_sampling.eq.1) then
+                else if (psd_sampling_opt.eq.1) then
                    call bomex_logspaced_droplet(global_particle_index, &
                         nparcelsInit,drop_mult,pdata(i,prrp), &
                         pdata(i,prms),pdata(i,prkap),pdata(i,prmult))
                    pdata(i,prrp0) = pdata(i,prrp)
                 else
-                   stop 'Invalid bomex_size_sampling value'
+                   stop 'Invalid psd_sampling_opt value'
                 end if
              else
                 !Droplet size (radius)
@@ -542,7 +537,7 @@
              pdata(i,prtp) = 290.0
      
              !Droplet multiplicity
-             if (testcase.ne.3 .or. bomex_size_sampling.eq.0) &
+             if (testcase.ne.3 .or. psd_sampling_opt.eq.0) &
                 pdata(i,prmult) = drop_mult
         
              !Is droplet alive?
