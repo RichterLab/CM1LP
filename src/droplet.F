@@ -4566,7 +4566,7 @@
       double precision :: dN_dr(nbins),dN_dlogr(nbins), &
                           dN_dr_dry(nbins),dN_dlogr_dry(nbins)
 
-      integer, parameter :: num0 = 39, num1 = 34   !Number of 0th and 1st order statistics in droplet_diag
+      integer, parameter :: num0 = 41, num1 = 34   !Number of 0th and 1st order statistics in droplet_diag
       real :: rad10_tmp,dry_rad10_tmp
       double precision :: hist_injected_area,hist_injected_xlen,hist_injected_ylen, &
                           hist_injected_bin_width,hist_injected_log_bin_width
@@ -4623,6 +4623,8 @@
       !$acc          reduction(max:radmax,Tpmax) &
       !$acc          reduction(min:radmin,Tpmin)
       do np=1,nparcelsLocalActive
+         ! Population totals and moments use the number of real droplets
+         ! represented by each superdroplet.  Extrema remain unweighted.
          tnummult = tnummult + pdata(np,prmult)
          tmasspart = tmasspart + (rhow*4.0/3.0*pi*pdata(np,prrp)**3)*pdata(np,prmult)
          if (pdata(np,prrp) .lt. crit_radius(pdata(np,prms),pdata(np,prkap),pdata(np,prt))) then
@@ -4630,14 +4632,14 @@
          else
              tnumdrop = tnumdrop + pdata(np,prmult)
          end if
-         radavg = radavg + pdata(np,prrp)
-         radsqr = radsqr + pdata(np,prrp)**2
-         Tpavg = Tpavg + pdata(np,prtp)
-         Tpsqr = Tpsqr + pdata(np,prtp)**2 
-         Tfavg = Tfavg + pdata(np,prt)
-         qfavg = qfavg + pdata(np,prqv)
-         prsavg = prsavg + pdata(np,prprs)
-         rhoavg = rhoavg + pdata(np,prrho)
+         radavg = radavg + pdata(np,prrp)*pdata(np,prmult)
+         radsqr = radsqr + pdata(np,prrp)**2*pdata(np,prmult)
+         Tpavg = Tpavg + pdata(np,prtp)*pdata(np,prmult)
+         Tpsqr = Tpsqr + pdata(np,prtp)**2*pdata(np,prmult)
+         Tfavg = Tfavg + pdata(np,prt)*pdata(np,prmult)
+         qfavg = qfavg + pdata(np,prqv)*pdata(np,prmult)
+         prsavg = prsavg + pdata(np,prprs)*pdata(np,prmult)
+         rhoavg = rhoavg + pdata(np,prrho)*pdata(np,prmult)
 
          radmin = min(radmin, pdata(np,prrp))
          radmax = max(radmax, pdata(np,prrp))
@@ -4683,12 +4685,14 @@
       droplet_diag0(31) = coal_pair_successes
       droplet_diag0(32) = coal_collision_mult
       droplet_diag0(33) = coal_palpha_sum
-      droplet_diag0(34) = radmin
-      droplet_diag0(35) = Tpmin
-      droplet_diag0(36) = radmax
-      droplet_diag0(37) = Tpmax
-      droplet_diag0(38) = coal_palpha_max
-      droplet_diag0(39) = coal_gamtil_max
+      droplet_diag0(34) = radsqr
+      droplet_diag0(35) = Tpsqr
+      droplet_diag0(36) = radmin
+      droplet_diag0(37) = Tpmin
+      droplet_diag0(38) = radmax
+      droplet_diag0(39) = Tpmax
+      droplet_diag0(40) = coal_palpha_max
+      droplet_diag0(41) = coal_gamtil_max
 
       ! The root rank will collect the diagnostic from different MPI ranks
       if ( myid == 0 ) then
@@ -4746,22 +4750,24 @@
          coal_pair_successes = droplet_diag0(31)
          coal_collision_mult = droplet_diag0(32)
          coal_palpha_sum = droplet_diag0(33)
-         radmin = droplet_diag0(34)
-         Tpmin = droplet_diag0(35)
-         radmax = droplet_diag0(36)
-         Tpmax = droplet_diag0(37)
-         coal_palpha_max = droplet_diag0(38)
-         coal_gamtil_max = droplet_diag0(39)
+         radsqr = droplet_diag0(34)
+         Tpsqr = droplet_diag0(35)
+         radmin = droplet_diag0(36)
+         Tpmin = droplet_diag0(37)
+         radmax = droplet_diag0(38)
+         Tpmax = droplet_diag0(39)
+         coal_palpha_max = droplet_diag0(40)
+         coal_gamtil_max = droplet_diag0(41)
 #endif
-         if (tnumpart .gt. 0.0) then
-            radavg = radavg/dble(tnumpart)
-            radsqr = radsqr/dble(tnumpart)
-            Tpavg = Tpavg/dble(tnumpart)
-            Tpsqr = Tpsqr/dble(tnumpart)
-            Tfavg = Tfavg/dble(tnumpart)
-            qfavg = qfavg/dble(tnumpart)
-            prsavg = prsavg/dble(tnumpart)
-            rhoavg = rhoavg/dble(tnumpart)
+         if (tnummult .gt. 0.0) then
+            radavg = radavg/dble(tnummult)
+            radsqr = radsqr/dble(tnummult)
+            Tpavg = Tpavg/dble(tnummult)
+            Tpsqr = Tpsqr/dble(tnummult)
+            Tfavg = Tfavg/dble(tnummult)
+            qfavg = qfavg/dble(tnummult)
+            prsavg = prsavg/dble(tnummult)
+            rhoavg = rhoavg/dble(tnummult)
          else 
             radavg = 0
             radsqr = 0
@@ -4873,44 +4879,46 @@
          multnum(k) = multnum(k) + pdata(np,prmult)
          !$acc atomic update
          partmass(k) = partmass(k) + (pdata(np,prms)+rhow*4.0/3.0*pi*pdata(np,prrp)**3)*pdata(np,prmult)
+         ! These are physical-population moments, not superdroplet means.
          !$acc atomic update
-         vp1mean(k) = vp1mean(k) + pdata(np,prvpx)
+         vp1mean(k) = vp1mean(k) + pdata(np,prvpx)*pdata(np,prmult)
          !$acc atomic update
-         vp2mean(k) = vp2mean(k) + pdata(np,prvpy)
+         vp2mean(k) = vp2mean(k) + pdata(np,prvpy)*pdata(np,prmult)
          !$acc atomic update
-         vp3mean(k) = vp3mean(k) + pdata(np,prvpz)
+         vp3mean(k) = vp3mean(k) + pdata(np,prvpz)*pdata(np,prmult)
          !$acc atomic update
-         vp1msqr(k) = vp1msqr(k) + pdata(np,prvpx)**2
+         vp1msqr(k) = vp1msqr(k) + pdata(np,prvpx)**2*pdata(np,prmult)
          !$acc atomic update
-         vp2msqr(k) = vp2msqr(k) + pdata(np,prvpy)**2
+         vp2msqr(k) = vp2msqr(k) + pdata(np,prvpy)**2*pdata(np,prmult)
          !$acc atomic update
-         vp3msqr(k) = vp3msqr(k) + pdata(np,prvpz)**2
+         vp3msqr(k) = vp3msqr(k) + pdata(np,prvpz)**2*pdata(np,prmult)
          !$acc atomic update
-         uf1mean(k) = uf1mean(k) + pdata(np,pru)
+         uf1mean(k) = uf1mean(k) + pdata(np,pru)*pdata(np,prmult)
          !$acc atomic update
-         uf2mean(k) = uf2mean(k) + pdata(np,prv)
+         uf2mean(k) = uf2mean(k) + pdata(np,prv)*pdata(np,prmult)
          !$acc atomic update
-         uf3mean(k) = uf3mean(k) + pdata(np,prw)
+         uf3mean(k) = uf3mean(k) + pdata(np,prw)*pdata(np,prmult)
          !$acc atomic update
-         usgsmean(k) = usgsmean(k) + pdata(np,prusgs)
+         usgsmean(k) = usgsmean(k) + pdata(np,prusgs)*pdata(np,prmult)
          !$acc atomic update
-         vsgsmean(k) = vsgsmean(k) + pdata(np,prvsgs)
+         vsgsmean(k) = vsgsmean(k) + pdata(np,prvsgs)*pdata(np,prmult)
          !$acc atomic update
-         wsgsmean(k) = wsgsmean(k) + pdata(np,prwsgs)
+         wsgsmean(k) = wsgsmean(k) + pdata(np,prwsgs)*pdata(np,prmult)
          !$acc atomic update
-         sigm_smean(k) = sigm_smean(k) + pdata(np,prsigsgs)
+         sigm_smean(k) = sigm_smean(k) + pdata(np,prsigsgs)*pdata(np,prmult)
          !$acc atomic update
-         Tf(k) = Tf(k) + pdata(np,prt)
+         Tf(k) = Tf(k) + pdata(np,prt)*pdata(np,prmult)
          !$acc atomic update
-         qf(k) = qf(k) + pdata(np,prqv)
+         qf(k) = qf(k) + pdata(np,prqv)*pdata(np,prmult)
          !$acc atomic update
-         Tpmean(k) = Tpmean(k) + pdata(np,prtp)
+         Tpmean(k) = Tpmean(k) + pdata(np,prtp)*pdata(np,prmult)
          !$acc atomic update
-         Tpmsqr(k) = Tpmsqr(k) + pdata(np,prtp)**2
+         Tpmsqr(k) = Tpmsqr(k) + pdata(np,prtp)**2*pdata(np,prmult)
          !$acc atomic update
-         radmean(k) = radmean(k) + pdata(np,prrp)
+         radmean(k) = radmean(k) + pdata(np,prrp)*pdata(np,prmult)
          !$acc atomic update
-         radmsqrdp(k) = radmsqrdp(k) + dble(pdata(np,prrp))**2
+         radmsqrdp(k) = radmsqrdp(k) + dble(pdata(np,prrp))**2* &
+                        dble(pdata(np,prmult))
 
          if (pdata(np,prt) .gt. 200.0) then    ! Avoid this breaking if the temperature is unrealistic 
                                                ! (like at initialization; other times this is a problem, but let it break elsewhere)
@@ -4918,9 +4926,11 @@
                             pdata(np,prt),pdata(np,prqv),pdata(np,prtp), &
                             pdata(np,prms),pdata(np,prkap),pdata(np,prrp))
             !$acc atomic update
-            qstardp(k) = qstardp(k) + qstar_tmp
+            qstardp(k) = qstardp(k) + qstar_tmp*dble(pdata(np,prmult))
             !$acc atomic update
-            qfsat(k) = qfsat(k) + eslf(pdata(np,prprs),pdata(np,prt))*(mw/(ru*pdata(np,prt)*pdata(np,prrho)))
+            qfsat(k) = qfsat(k) + eslf(pdata(np,prprs),pdata(np,prt))* &
+                       (mw/(ru*pdata(np,prt)*pdata(np,prrho)))* &
+                       pdata(np,prmult)
          else
             !$acc atomic write 
             qfsat(k) = 0.0
@@ -5094,29 +5104,31 @@
             sd_numconc(iz) = partnum(iz)/dzf/xl/yl
             massconc(iz) = partmass(iz)/dzf/xl/yl
             wk(iz) = wk(iz) - kmoist(iz)*wtmp(iz)  !So that it's fluctuations <w'k'>
-            if (abs(partnum(iz)) .gt. 1.0e-10) then
-               vp1mean(iz) = vp1mean(iz)/partnum(iz)
-               vp2mean(iz) = vp2mean(iz)/partnum(iz)
-               vp3mean(iz) = vp3mean(iz)/partnum(iz)
-               vp1msqr(iz) = vp1msqr(iz)/partnum(iz)
-               vp2msqr(iz) = vp2msqr(iz)/partnum(iz)
-               vp3msqr(iz) = vp3msqr(iz)/partnum(iz)
-               uf1mean(iz) = uf1mean(iz)/partnum(iz)
-               uf2mean(iz) = uf2mean(iz)/partnum(iz)
-               uf3mean(iz) = uf3mean(iz)/partnum(iz)
-               usgsmean(iz) = usgsmean(iz)/partnum(iz)
-               vsgsmean(iz) = vsgsmean(iz)/partnum(iz)
-               wsgsmean(iz) = wsgsmean(iz)/partnum(iz)
-               sigm_smean(iz) = sigm_smean(iz)/partnum(iz)
-               Tf(iz) = Tf(iz)/partnum(iz)
-               qf(iz) = qf(iz)/partnum(iz)
-               Tpmean(iz) = Tpmean(iz)/partnum(iz)
-               Tpmsqr(iz) = Tpmsqr(iz)/partnum(iz)
-               radmean(iz) = radmean(iz)/partnum(iz)
-               radmsqr(iz) = sngl( min( 1.0d30 , radmsqrdp(iz)/dble(partnum(iz)) ) )
-               qfsat(iz) = qfsat(iz)/partnum(iz)
+            if (abs(multnum(iz)) .gt. 1.0e-10) then
+               vp1mean(iz) = vp1mean(iz)/multnum(iz)
+               vp2mean(iz) = vp2mean(iz)/multnum(iz)
+               vp3mean(iz) = vp3mean(iz)/multnum(iz)
+               vp1msqr(iz) = vp1msqr(iz)/multnum(iz)
+               vp2msqr(iz) = vp2msqr(iz)/multnum(iz)
+               vp3msqr(iz) = vp3msqr(iz)/multnum(iz)
+               uf1mean(iz) = uf1mean(iz)/multnum(iz)
+               uf2mean(iz) = uf2mean(iz)/multnum(iz)
+               uf3mean(iz) = uf3mean(iz)/multnum(iz)
+               usgsmean(iz) = usgsmean(iz)/multnum(iz)
+               vsgsmean(iz) = vsgsmean(iz)/multnum(iz)
+               wsgsmean(iz) = wsgsmean(iz)/multnum(iz)
+               sigm_smean(iz) = sigm_smean(iz)/multnum(iz)
+               Tf(iz) = Tf(iz)/multnum(iz)
+               qf(iz) = qf(iz)/multnum(iz)
+               Tpmean(iz) = Tpmean(iz)/multnum(iz)
+               Tpmsqr(iz) = Tpmsqr(iz)/multnum(iz)
+               radmean(iz) = radmean(iz)/multnum(iz)
+               radmsqr(iz) = sngl( min( 1.0d30 , &
+                    radmsqrdp(iz)/dble(multnum(iz)) ) )
+               qfsat(iz) = qfsat(iz)/multnum(iz)
                ! GHB: i keep getting overflow errors here; so, just limit to a big number
-               qstarmean(iz) = sngl( min( 1.0d30 , qstardp(iz)/dble(partnum(iz)) ) )
+               qstarmean(iz) = sngl( min( 1.0d30 , &
+                    qstardp(iz)/dble(multnum(iz)) ) )
             else
                vp1mean(iz) = 0.0
                vp2mean(iz) = 0.0
@@ -5194,7 +5206,8 @@
          multnumrz(k,ibin) = multnumrz(k,ibin) + pdata(np,prmult)
 
          !$acc atomic update
-         vp3meanrz(k,ibin) = vp3meanrz(k,ibin) + pdata(np,prvpz)
+         vp3meanrz(k,ibin) = vp3meanrz(k,ibin) + &
+                             pdata(np,prvpz)*pdata(np,prmult)
 
       end do
 
@@ -5226,12 +5239,12 @@
          do iz=1,nk
          do ir=1,nbins
             dzf = dumzf(iz+1)-dumzf(iz)
-            multnumrz(iz,ir) = multnumrz(iz,ir)/dzf/xl/yl
-            if (abs(partnumrz(iz,ir)) .gt. 1.0e-10) then
-               vp3meanrz(iz,ir) = vp3meanrz(iz,ir)/partnumrz(iz,ir)
+            if (abs(multnumrz(iz,ir)) .gt. 1.0e-10) then
+               vp3meanrz(iz,ir) = vp3meanrz(iz,ir)/multnumrz(iz,ir)
             else
                vp3meanrz(iz,ir) = 0.0
             end if
+            multnumrz(iz,ir) = multnumrz(iz,ir)/dzf/xl/yl
          end do
          end do
 #ifdef MPI
@@ -7825,11 +7838,11 @@
     call disp_err( nf90_put_att(ncid,varid,"units","kg") , .true. )
 
     call disp_err( nf90_def_var(ncid,"radavg",nf90_float,timeid,varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Average droplet radius for all droplet") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted average droplet radius") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m") , .true. )
 
     call disp_err( nf90_def_var(ncid,"radsqr",nf90_float,timeid,varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Average square droplet radius for all droplets") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted average squared droplet radius") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m^2") , .true. )
 
     call disp_err( nf90_def_var(ncid,"radmin",nf90_float,timeid,varid) , .true. )
@@ -7841,11 +7854,11 @@
     call disp_err( nf90_put_att(ncid,varid,"units","m") , .true. )
 
     call disp_err( nf90_def_var(ncid,"Tpavg",nf90_float,timeid,varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Average droplet temperature for all droplets") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted average droplet temperature") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","K") , .true. )
 
     call disp_err( nf90_def_var(ncid,"Tpsqr",nf90_float,timeid,varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Average square droplet temperature for all droplets") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted average squared droplet temperature") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","K^2") , .true. )
 
     call disp_err( nf90_def_var(ncid,"Tpmin",nf90_float,timeid,varid) , .true. )
@@ -7857,27 +7870,30 @@
     call disp_err( nf90_put_att(ncid,varid,"units","K") , .true. )
 
     call disp_err( nf90_def_var(ncid,"Tfavg",nf90_float,timeid,varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Average air temperature seen by droplet for all droplets") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted average air temperature seen by droplets") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","K") , .true. )
 
     call disp_err( nf90_def_var(ncid,"qfavg",nf90_float,timeid,varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Average water vapor mixing ratio qv seen by droplet for all droplets") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "Multiplicity-weighted average water vapor mixing ratio seen by droplets") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","kg/kg") , .true. )
 
     call disp_err( nf90_def_var(ncid,"prsavg",nf90_float,timeid,varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Average air pressure seen by droplet for all droplets") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted average air pressure seen by droplets") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","Pa") , .true. )
 
     call disp_err( nf90_def_var(ncid,"rhoavg",nf90_float,timeid,varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Average air density seen by droplet for all droplets") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted average air density seen by droplets") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","kg/m^3") , .true. )
 
     call disp_err( nf90_def_var(ncid,"num100",nf90_float,timeid,varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Number of droplets which failed the 1st round Newton iteration since last droplet_diag") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "Number of superdroplets which required solver fallback since last dropdiag") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","No units") , .true. )
 
     call disp_err( nf90_def_var(ncid,"num1000",nf90_float,timeid,varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Number of droplets which failed the 2st round Levenberg-Marquardt iteration since last droplet_diag") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "Number of superdroplets with failed fallback solves since last dropdiag") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","No units") , .true. )
 
     call disp_err( nf90_def_var(ncid,"u10_ssgf",nf90_double,timeid,varid) , .true. )
@@ -7989,43 +8005,43 @@
     call disp_err( nf90_put_att(ncid,varid,"units","#/m^3") , .true. )
 
     call disp_err( nf90_def_var(ncid,"vp1mean",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet u-velocity") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted droplet u-velocity") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m/s") , .true. )
     
     call disp_err( nf90_def_var(ncid,"vp2mean",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet v-velocity") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted droplet v-velocity") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m/s") , .true. )
     
     call disp_err( nf90_def_var(ncid,"vp3mean",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet w-velocity") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted droplet w-velocity") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m/s") , .true. )
     
     call disp_err( nf90_def_var(ncid,"uf1mean",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet u-velocity seen by particle") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted air u-velocity seen by droplets") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m/s") , .true. )
     
     call disp_err( nf90_def_var(ncid,"uf2mean",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet v-velocity seen by particle") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted air v-velocity seen by droplets") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m/s") , .true. )
     
     call disp_err( nf90_def_var(ncid,"uf3mean",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet w-velocity seen by particle") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted air w-velocity seen by droplets") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m/s") , .true. )
 
     call disp_err( nf90_def_var(ncid,"usgsmean",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet SGS u-velocity") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted droplet SGS u-velocity") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m/s") , .true. )
 
     call disp_err( nf90_def_var(ncid,"vsgsmean",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet SGS v-velocity") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted droplet SGS v-velocity") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m/s") , .true. )
 
     call disp_err( nf90_def_var(ncid,"wsgsmean",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet SGS w-velocity") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted droplet SGS w-velocity") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m/s") , .true. )
 
     call disp_err( nf90_def_var(ncid,"sigm_smean",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet SGS velocity variance sigm_s") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted droplet SGS velocity variance sigm_s") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m^2/s^2") , .true. )
 
     call disp_err( nf90_def_var(ncid,"fsmean",nf90_float,(/zhid,timeid/),varid) , .true. )
@@ -8033,15 +8049,15 @@
     call disp_err( nf90_put_att(ncid,varid,"units","1") , .true. )
     
     call disp_err( nf90_def_var(ncid,"vp1msqr",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Droplet mean squared u-velocity <up^2>") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted squared droplet u-velocity <up^2>") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m^2/s^2") , .true. )
     
     call disp_err( nf90_def_var(ncid,"vp2msqr",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Droplet mean squared v-velocity <vp^2>") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted squared droplet v-velocity <vp^2>") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m^2/s^2") , .true. )
     
     call disp_err( nf90_def_var(ncid,"vp3msqr",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Droplet mean squared w-velocity <wp^2>") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted squared droplet w-velocity <wp^2>") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m^2/s^2") , .true. )
 
     call disp_err( nf90_def_var(ncid,"m1src",nf90_float,(/zhid,timeid/),varid) , .true. )
@@ -8069,35 +8085,38 @@
     call disp_err( nf90_put_att(ncid,varid,"units","(kg/m^3)/s") , .true. )
 
     call disp_err( nf90_def_var(ncid,"Tf",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Average temperature at droplet location") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted air temperature at droplet locations") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","K") , .true. )
 
     call disp_err( nf90_def_var(ncid,"qf",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Average water vapor mixing ratio at droplet location") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "Multiplicity-weighted water vapor mixing ratio at droplet locations") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","kg/kg") , .true. )
 
     call disp_err( nf90_def_var(ncid,"Tpmean",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet temperature") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted droplet temperature") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","K") , .true. )
 
     call disp_err( nf90_def_var(ncid,"Tpmsqr",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Droplet mean squared temperature <Tp^2>") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted squared droplet temperature <Tp^2>") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","K^2") , .true. )
 
     call disp_err( nf90_def_var(ncid,"radmean",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged droplet radius") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted droplet radius") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m") , .true. )
 
     call disp_err( nf90_def_var(ncid,"radmsqr",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Droplet mean squared droplet radius <rp^2>") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name","Multiplicity-weighted squared droplet radius <rp^2>") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m^2") , .true. )
 
     call disp_err( nf90_def_var(ncid,"qfsat",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged ambient saturation water vapor mixing ratio at droplet location") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "Multiplicity-weighted ambient saturation mixing ratio at droplet locations") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","kg/kg") , .true. )
 
     call disp_err( nf90_def_var(ncid,"qstarmean",nf90_float,(/zhid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Horizontally averaged saturation water vapor mixing ratio on droplet surface") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "Multiplicity-weighted saturation mixing ratio on droplet surfaces") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","kg/kg") , .true. )
 
     call disp_err( nf90_def_var(ncid,"kmoist",nf90_float,(/zhid,timeid/),varid) , .true. )
@@ -8120,7 +8139,8 @@
     call disp_err( nf90_put_att(ncid,varid,"units","#/m^3 ") , .true. )
 
     call disp_err( nf90_def_var(ncid,"vp3meanrz",nf90_float,(/zhid,binsid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Size-resolved particle average vertical velocity with height") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "Multiplicity-weighted size-resolved particle vertical velocity with height") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","m/s ") , .true. )
 
 
@@ -8218,7 +8238,8 @@
     call disp_err( nf90_put_att(ncid,varid,"units","m^-2 s^-1") , .true. )
 
     call disp_err( nf90_def_var(ncid,"tnumpart_r",nf90_float,(/binsid,timeid/),varid) , .true. )
-    call disp_err( nf90_put_att(ncid,varid,"long_name","Droplet count as a function of radius, binned by bins_radius") , .true. )
+    call disp_err( nf90_put_att(ncid,varid,"long_name", &
+         "Superdroplet count as a function of radius, binned by bins_radius") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
 
 
