@@ -2856,13 +2856,25 @@
               dum1(i,j,1) = 0.0
             enddo
           enddo
-          if( nqc.ge.1 .and. nqr.ge.1 )then
+          if( nqc.ge.1 )then
             !$acc parallel default(present)
             do k=1,nk
               !$acc loop gang vector collapse(2)
               do j=1,nj
               do i=1,ni
-                dum1(i,j,1) = dum1(i,j,1) + rho(i,j,k)*(qa(i,j,k,nqc)+qa(i,j,k,nqr))*dz*rmh(i,j,k)
+                dum1(i,j,1) = dum1(i,j,1) + rho(i,j,k)*qa(i,j,k,nqc)*dz*rmh(i,j,k)
+              enddo
+              enddo
+            enddo
+            !$acc end parallel
+          endif
+          if( nqr.ge.1 )then
+            !$acc parallel default(present)
+            do k=1,nk
+              !$acc loop gang vector collapse(2)
+              do j=1,nj
+              do i=1,ni
+                dum1(i,j,1) = dum1(i,j,1) + rho(i,j,k)*qa(i,j,k,nqr)*dz*rmh(i,j,k)
               enddo
               enddo
             enddo
