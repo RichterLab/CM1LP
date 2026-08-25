@@ -193,12 +193,11 @@
       ! Locally defined sampling grid for testcase-17 background aerosols.
       ! This grid is independent of the droplet diagnostic histogram.
       integer, parameter :: tc17_bg_nbins = 130
-      double precision, parameter :: tc17_bg_logr_min = -8.0d0
-      double precision, parameter :: tc17_bg_logr_max = -3.0d0
       double precision, parameter :: tc17_bg_lognorm_m = -1.7570d0
       double precision, parameter :: tc17_bg_lognorm_s =  0.3500d0
       double precision, parameter :: tc17_bg_init_rh = 0.80d0
       double precision, parameter :: tc17_bg_init_temp = 290.0d0
+      double precision, parameter :: tc17_bg_min_mult_target = 1.001d0
       double precision :: tc17_bg_dlogr,tc17_bg_total_weight
       double precision :: tc17_bg_logr_center(tc17_bg_nbins)
       double precision :: tc17_bg_bin_weight(tc17_bg_nbins)
@@ -206,7 +205,10 @@
       double precision :: tc17_bg_ln_d_lo,tc17_bg_ln_d_hi
       double precision :: tc17_bg_z_lo,tc17_bg_z_hi
       double precision :: tc17_bg_dry_radius,tc17_bg_wet_radius
-      integer :: tc17_bg_ibin
+      double precision :: tc17_bg_logr_mid,tc17_bg_half_lo,tc17_bg_half_hi
+      double precision :: tc17_bg_half_trial,tc17_bg_trial_min_mult
+      double precision :: tc17_bg_bin_mult,tc17_bg_min_mult,tc17_bg_max_mult
+      integer :: tc17_bg_ibin,tc17_bg_iter
       integer(i8) :: tc17_bg_particles_in_bin
 
 !--------------------------
@@ -483,14 +485,78 @@
               stop 'testcase 17 psd_sampling_opt=1 requires at least 130 initial particles'
            end if
 
-           ! Integrate the existing lognormal dry-diameter distribution over
-           ! a self-contained, log10 dry-radius sampling grid.  Diameters in
-           ! the lognormal expression are in microns.
-           tc17_bg_dlogr = (tc17_bg_logr_max-tc17_bg_logr_min) &
-                           /dble(tc17_bg_nbins)
+           if (dble(drop_mult).le.tc17_bg_min_mult_target) then
+              stop 'testcase 17 option 1 requires drop_mult greater than one'
+           end if
+
+           ! Find the widest symmetric log10 dry-radius range for which every
+           ! initialized superdroplet has multiplicity slightly greater than
+           ! one.  The lognormal is specified using dry diameter in microns.
+           tc17_bg_logr_mid = log10(0.5d0*exp(tc17_bg_lognorm_m)*1.0d-6)
+           tc17_bg_half_lo = 0.0d0
+           tc17_bg_half_hi = 5.0d0
+           do tc17_bg_iter=1,60
+              tc17_bg_half_trial = 0.5d0*(tc17_bg_half_lo+tc17_bg_half_hi)
+              tc17_bg_dlogr = 2.0d0*tc17_bg_half_trial &
+                              /dble(tc17_bg_nbins)
+              tc17_bg_total_weight = 0.0d0
+              do k=1,tc17_bg_nbins
+                 tc17_bg_logr_lo = tc17_bg_logr_mid-tc17_bg_half_trial &
+                                   +tc17_bg_dlogr*dble(k-1)
+                 tc17_bg_logr_hi = tc17_bg_logr_lo+tc17_bg_dlogr
+                 tc17_bg_ln_d_lo = log(2.0d0*(10.0d0**tc17_bg_logr_lo)*1.0d6)
+                 tc17_bg_ln_d_hi = log(2.0d0*(10.0d0**tc17_bg_logr_hi)*1.0d6)
+                 tc17_bg_z_lo = (tc17_bg_ln_d_lo-tc17_bg_lognorm_m) &
+                                 /(tc17_bg_lognorm_s*sqrt(2.0d0))
+                 tc17_bg_z_hi = (tc17_bg_ln_d_hi-tc17_bg_lognorm_m) &
+                                 /(tc17_bg_lognorm_s*sqrt(2.0d0))
+                 if (tc17_bg_z_lo.ge.0.0d0) then
+                    tc17_bg_bin_weight(k) = 0.5d0*(erfc(tc17_bg_z_lo) &
+                                                      -erfc(tc17_bg_z_hi))
+                 else if (tc17_bg_z_hi.le.0.0d0) then
+                    tc17_bg_bin_weight(k) = 0.5d0*(erfc(-tc17_bg_z_hi) &
+                                                      -erfc(-tc17_bg_z_lo))
+                 else
+                    tc17_bg_bin_weight(k) = 0.5d0*(erf(tc17_bg_z_hi) &
+                                                      -erf(tc17_bg_z_lo))
+                 end if
+                 tc17_bg_total_weight = tc17_bg_total_weight &
+                                         +tc17_bg_bin_weight(k)
+              end do
+
+              tc17_bg_trial_min_mult = huge(1.0d0)
+              if (tc17_bg_total_weight.gt.0.0d0) then
+                 do k=1,tc17_bg_nbins
+                    tc17_bg_particles_in_bin = nparcelsInit &
+                                                /int(tc17_bg_nbins,i8)
+                    if (int(k,i8).le.mod(nparcelsInit, &
+                                         int(tc17_bg_nbins,i8))) then
+                       tc17_bg_particles_in_bin = tc17_bg_particles_in_bin+1_i8
+                    end if
+                    tc17_bg_bin_mult = dble(nparcelsInit)*dble(drop_mult) &
+                         *tc17_bg_bin_weight(k) &
+                         /(tc17_bg_total_weight &
+                           *dble(tc17_bg_particles_in_bin))
+                    tc17_bg_trial_min_mult = min(tc17_bg_trial_min_mult, &
+                                                 tc17_bg_bin_mult)
+                 end do
+              else
+                 tc17_bg_trial_min_mult = 0.0d0
+              end if
+
+              if (tc17_bg_trial_min_mult.ge.tc17_bg_min_mult_target) then
+                 tc17_bg_half_lo = tc17_bg_half_trial
+              else
+                 tc17_bg_half_hi = tc17_bg_half_trial
+              end if
+           end do
+
+           ! Rebuild and retain the weights at the accepted (lower) bisection
+           ! bound.  This normalization preserves nparcelsInit*drop_mult.
+           tc17_bg_dlogr = 2.0d0*tc17_bg_half_lo/dble(tc17_bg_nbins)
            tc17_bg_total_weight = 0.0d0
            do k=1,tc17_bg_nbins
-              tc17_bg_logr_lo = tc17_bg_logr_min &
+              tc17_bg_logr_lo = tc17_bg_logr_mid-tc17_bg_half_lo &
                                 +tc17_bg_dlogr*dble(k-1)
               tc17_bg_logr_hi = tc17_bg_logr_lo+tc17_bg_dlogr
               tc17_bg_logr_center(k) = 0.5d0*(tc17_bg_logr_lo &
@@ -502,8 +568,6 @@
               tc17_bg_z_hi = (tc17_bg_ln_d_hi-tc17_bg_lognorm_m) &
                               /(tc17_bg_lognorm_s*sqrt(2.0d0))
               if (tc17_bg_z_lo.ge.0.0d0) then
-                 ! Use erfc in the upper tail to avoid subtracting two
-                 ! values of erf that have both rounded to one.
                  tc17_bg_bin_weight(k) = 0.5d0*(erfc(tc17_bg_z_lo) &
                                                    -erfc(tc17_bg_z_hi))
               else if (tc17_bg_z_hi.le.0.0d0) then
@@ -517,7 +581,33 @@
                                       +tc17_bg_bin_weight(k)
            end do
            if (tc17_bg_total_weight.le.0.0d0) then
-              stop 'testcase 17 background aerosol PSD has zero total weight'
+              stop 'testcase 17 option-1 radius-bound search failed'
+           end if
+
+           tc17_bg_min_mult = huge(1.0d0)
+           tc17_bg_max_mult = 0.0d0
+           do k=1,tc17_bg_nbins
+              tc17_bg_particles_in_bin = nparcelsInit/int(tc17_bg_nbins,i8)
+              if (int(k,i8).le.mod(nparcelsInit,int(tc17_bg_nbins,i8))) &
+                 tc17_bg_particles_in_bin = tc17_bg_particles_in_bin+1_i8
+              tc17_bg_bin_mult = dble(nparcelsInit)*dble(drop_mult) &
+                   *tc17_bg_bin_weight(k) &
+                   /(tc17_bg_total_weight*dble(tc17_bg_particles_in_bin))
+              tc17_bg_min_mult = min(tc17_bg_min_mult,tc17_bg_bin_mult)
+              tc17_bg_max_mult = max(tc17_bg_max_mult,tc17_bg_bin_mult)
+           end do
+           if (tc17_bg_min_mult.lt.1.0d0) then
+              stop 'testcase 17 option-1 radius-bound search failed'
+           end if
+
+           if (dowr) then
+              write(outfile,*) 'testcase 17 option-1 dry-radius bounds (m) = ', &
+                   10.0d0**(tc17_bg_logr_mid-tc17_bg_half_lo), &
+                   10.0d0**(tc17_bg_logr_mid+tc17_bg_half_lo)
+              write(outfile,*) 'testcase 17 option-1 retained PSD fraction = ', &
+                   tc17_bg_total_weight
+              write(outfile,*) 'testcase 17 option-1 multiplicity min/max = ', &
+                   tc17_bg_min_mult,tc17_bg_max_mult
            end if
         end if
 
