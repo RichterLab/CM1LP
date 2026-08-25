@@ -64,6 +64,13 @@
   double precision :: bomex_total_weight = 0.0d0
   logical :: bomex_bins_initialized = .false.
 
+  ! Testcase 17 weighted-background particles must retain their dry mass and
+  ! multiplicity after fallout.  These rank-local buffers bridge the particle
+  ! compaction in droplet_driver and the reinjection at the end of the substeps.
+  real, allocatable :: background_reinject_ms(:)
+  real, allocatable :: background_reinject_mult(:)
+  integer :: background_reinject_count = 0
+
   ! If we already know that a parcel stays on the same process 
   !    in the previous time step and it is still here, we start 
   !    the location search from the previous index and limit 
@@ -153,7 +160,7 @@
   !$acc                 drop_solver_failure_substep,drop_dry_floor_hits_substep, &
   !$acc                 drop_solver_fallback_reason, &
   !$acc                 drop_solver_failure_reason,hist_solver_failure_dry_radius, &
-  !$acc                 drop_solver_iteration_sums)
+  !$acc                 drop_solver_iteration_sums,background_reinject_count)
   !$acc declare copyin(hall_r0,hall_rat,hall_ecoll)
 
   CONTAINS
@@ -182,7 +189,8 @@
           maxy,maxz,ierr,mynw,mysw,myne,myse,mynorth,mysouth,myeast, &
           mywest,myid,nparcelsLocal,nparcelsLocalActive, &
           time_phys_H2D,time_phys_D2H,time_dropC1,time_dropC2,time_dropC3, &
-          time_dropC4,ngxy,dx,dy,dz,testcase,drop_sgs_opt,drop_stability_diag
+          time_dropC4,ngxy,dx,dy,dz,testcase,drop_sgs_opt,drop_stability_diag, &
+          psd_sampling_opt
       use constants
       use comm_module
       use comm_droplet_module
@@ -276,6 +284,7 @@
       type(randomNumberSequence) :: randomNumbers
 
       integer :: num_fallout,num_fallout_reinject,idx   !droplets which fell out of domain
+      integer :: background_reinject_slot
       integer :: dlogsig_valid,dlogsig_count
       integer :: dlogsig_gt05,dlogsig_gt1,dlogsig_gt2,dlogsig_gt5
       integer :: numDepart
@@ -335,6 +344,14 @@
 
       num_fallout = 0  !Reset the number of droplets that have fallen out of physical domain
       num_fallout_reinject = 0
+      if (testcase.eq.17 .and. psd_sampling_opt.eq.1 .and. &
+          .not.allocated(background_reinject_ms)) then
+         allocate(background_reinject_ms(nparcelsLocal))
+         allocate(background_reinject_mult(nparcelsLocal))
+         background_reinject_count = 0
+         !$acc enter data create(background_reinject_ms,background_reinject_mult)
+         !$acc update device(background_reinject_count)
+      end if
       errcode     = 0  ! Number of errors that occurred in the index search 
       solver_fallback_out = 0
       solver_failure_out = 0
@@ -537,7 +554,7 @@
 
     !JMD WARNING: Loop does not yet match CPU version.
     !$acc parallel default(present)
-    !$acc loop gang vector private(dlogsig_abs,dlogsig_valid) &
+    !$acc loop gang vector private(dlogsig_abs,dlogsig_valid,background_reinject_slot) &
     !$acc reduction(+:num_fallout,num_fallout_reinject) reduction(max:errcode) &
     !$acc reduction(+:dlogsig_sum,dlogsig_count,dlogsig_gt05,dlogsig_gt1,dlogsig_gt2,dlogsig_gt5) &
     !$acc reduction(max:dlogsig_max) &
@@ -666,6 +683,18 @@
       if (testcase.eq.17 .and. pdata(np,pract).lt.0.0 .and. &
           abs(pdata(np,prkap)-aerosol_kappa_background).le.aerosol_kappa_tol) then
          num_fallout_reinject = num_fallout_reinject + 1
+         if (psd_sampling_opt.eq.1) then
+            !$acc atomic capture
+            background_reinject_slot = background_reinject_count
+            background_reinject_count = background_reinject_count + 1
+            !$acc end atomic
+            if (background_reinject_slot.lt.nparcelsLocal) then
+               background_reinject_ms(background_reinject_slot+1) = pdata(np,prms)
+               background_reinject_mult(background_reinject_slot+1) = pdata(np,prmult)
+            else
+               errcode = max(errcode,54327)
+            end if
+         end if
       end if
       if (dlogsig_valid.eq.1) then
          dlogsig_sum = dlogsig_sum + dble(dlogsig_abs)
@@ -2507,7 +2536,7 @@
           nparcelsLocalActive,prx,pry,prz,prsig,pru,prv,prw, &
           prusgs,prvsgs,prwsgs, &
           prt,prqv,prprs,prrho,prrp,prtp,drop_inject_elapse,drop_inject_time, &
-          testcase,myid,timestats,time_droplet_inject,mytime,ierr
+          testcase,myid,timestats,time_droplet_inject,mytime,ierr,psd_sampling_opt
       use constants
 #ifdef MPI
       use mpi
@@ -2857,6 +2886,14 @@
                                             ' usgsmin=',usgsmin,' usgsmax=',usgsmax, &
                                             ' vsgsmin=',vsgsmin,' vsgsmax=',vsgsmax, &
                                             ' wsgsmin=',wsgsmin,' wsgsmax=',wsgsmax
+      end if
+
+      ! The holding buffer spans the droplet substeps but never spans a main
+      ! timestep.  After the testcase-17 cutoff, fallout is recorded during
+      ! the substeps and discarded here because reinjection is disabled.
+      if (testcase.eq.17 .and. psd_sampling_opt.eq.1) then
+         background_reinject_count = 0
+         !$acc update device(background_reinject_count)
       end if
 
       if(timestats.ge.1) time_droplet_inject=time_droplet_inject+mytime()
@@ -7496,7 +7533,7 @@
                         prusgs,prvsgs,prwsgs,prsigsgs, &
                         prrp,prrp0,prtp,prms,prkap,pract,prtime, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive, &
-                        drop_mult,pi_sp,maxz
+                        drop_mult,pi_sp,maxz,psd_sampling_opt
       use constants
       use MersenneTwister_mod
 #ifdef MPI
@@ -7519,11 +7556,20 @@
       integer :: ierr
 #endif
       real :: xrange,yrange,zrange
-      real :: rad10_tmp,dry_rad10_tmp
+      real :: rad10_tmp,dry_rad10_tmp,dry_radius
       double precision :: rand
       type(randomNumberSequence) :: randomNumbers
 
-      my_reintro = num_fallout
+      if (psd_sampling_opt.eq.1) then
+         !$acc update self(background_reinject_count)
+         my_reintro = background_reinject_count
+         if (my_reintro.ne.num_fallout) then
+            write(*,'(a,i8,a,i8,a,i8)') 'WARNING DROP REINJECT rank=',myid, &
+                 ' fallout count=',num_fallout,' buffered count=',my_reintro
+         end if
+      else
+         my_reintro = num_fallout
+      end if
 
       xrange = xf(ni+1)-xf(1)
       yrange = yf(nj+1)-yf(1)
@@ -7545,13 +7591,11 @@
       if (my_reintro .le. 0) return
 
       if (nparcelsLocalActive + my_reintro .le. nparcelsLocal) then
-         num_injected = num_injected + real(my_reintro)*drop_mult
-         !$acc update device (num_injected)
-
          !$acc data create(randomNumbers,randomNumbers%state)
          !$acc update device(ngidx)
-         !$acc parallel loop gang vector default(present) reduction(+:mass_injected,eng_injected,m1_injected,m2_injected) &
-         !$acc private(randomNumbers,local_seed,ihist,idryhist,rad10_tmp,dry_rad10_tmp)
+         !$acc parallel loop gang vector default(present) &
+         !$acc reduction(+:num_injected,mass_injected,eng_injected,m1_injected,m2_injected) &
+         !$acc private(randomNumbers,local_seed,ihist,idryhist,rad10_tmp,dry_rad10_tmp,dry_radius)
          do j=1,my_reintro
             np=nparcelsLocalActive+j
 
@@ -7573,11 +7617,21 @@
             pdata(np,prwsgs) = 0.0
             pdata(np,prsigsgs) = 0.0
             pdata(np,prkap) = aerosol_kappa_background
-            call lognormal_droplet(pdata(np,prrp),pdata(np,prms),pdata(np,prkap),randomNumbers)
+            if (psd_sampling_opt.eq.1) then
+               pdata(np,prms) = background_reinject_ms(j)
+               pdata(np,prmult) = background_reinject_mult(j)
+               dry_radius = (3.0*pdata(np,prms)/(4.0*pi*real(rho_solute)))**(1.0/3.0)
+               pdata(np,prrp) = real(kohler_equil_radius(dble(dry_radius), &
+                                      dble(aerosol_kappa_background),290.0d0,0.8d0))
+            else
+               call lognormal_droplet(pdata(np,prrp),pdata(np,prms), &
+                                      pdata(np,prkap),randomNumbers)
+               pdata(np,prmult) = drop_mult
+            end if
             pdata(np,prrp0) = pdata(np,prrp)
             pdata(np,prtp) = 290.0
-            pdata(np,prmult) = drop_mult
             pdata(np,pract) = 1.0
+            num_injected = num_injected + pdata(np,prmult)
             rad10_tmp = log10(pdata(np,prrp))
             if (rad10_tmp .gt. rmax10 + 0.5*dhrad) then
                ihist = nbins
@@ -7633,6 +7687,11 @@
       else
          if (myid == 0) write(*,*) 'WARNING CANNOT REINJECT PARTICLES, WILL EXCEED NPARCELSLOCAL'
          my_reintro = 0
+      end if
+
+      if (psd_sampling_opt.eq.1) then
+         background_reinject_count = 0
+         !$acc update device(background_reinject_count)
       end if
 
     end subroutine droplet_fallout_reinjection
