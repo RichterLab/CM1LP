@@ -85,7 +85,8 @@
       use poiss_module
       use parcel_module , only : getparcelzs
       use droplet_module, only: initialize_droplet_histograms,particle_seed,ngidx, &
-                                lognormal_droplet,bomex_lognormal_droplet, &
+                                kohler_equil_radius,lognormal_droplet, &
+                                bomex_lognormal_droplet, &
                                 bomex_logspaced_droplet, &
                                 aerosol_kappa_background
 #ifdef MPI
@@ -188,6 +189,25 @@
       integer :: iloc, jloc
       integer(i8) :: np_tmp,particles_per_rank,particle_remainder, &
                      global_particle_offset,global_particle_index
+
+      ! Locally defined sampling grid for testcase-17 background aerosols.
+      ! This grid is independent of the droplet diagnostic histogram.
+      integer, parameter :: tc17_bg_nbins = 130
+      double precision, parameter :: tc17_bg_logr_min = -8.0d0
+      double precision, parameter :: tc17_bg_logr_max = -3.0d0
+      double precision, parameter :: tc17_bg_lognorm_m = -1.7570d0
+      double precision, parameter :: tc17_bg_lognorm_s =  0.3500d0
+      double precision, parameter :: tc17_bg_init_rh = 0.80d0
+      double precision, parameter :: tc17_bg_init_temp = 290.0d0
+      double precision :: tc17_bg_dlogr,tc17_bg_total_weight
+      double precision :: tc17_bg_logr_center(tc17_bg_nbins)
+      double precision :: tc17_bg_bin_weight(tc17_bg_nbins)
+      double precision :: tc17_bg_logr_lo,tc17_bg_logr_hi
+      double precision :: tc17_bg_ln_d_lo,tc17_bg_ln_d_hi
+      double precision :: tc17_bg_z_lo,tc17_bg_z_hi
+      double precision :: tc17_bg_dry_radius,tc17_bg_wet_radius
+      integer :: tc17_bg_ibin
+      integer(i8) :: tc17_bg_particles_in_bin
 
 !--------------------------
 
@@ -457,6 +477,50 @@
                                     +int(myid-1,i8)*particles_per_rank
         end if
 
+        if (prcl_droplet.eq.1 .and. testcase.eq.17 .and. &
+            psd_sampling_opt.eq.1) then
+           if (nparcelsInit.lt.int(tc17_bg_nbins,i8)) then
+              stop 'testcase 17 psd_sampling_opt=1 requires at least 130 initial particles'
+           end if
+
+           ! Integrate the existing lognormal dry-diameter distribution over
+           ! a self-contained, log10 dry-radius sampling grid.  Diameters in
+           ! the lognormal expression are in microns.
+           tc17_bg_dlogr = (tc17_bg_logr_max-tc17_bg_logr_min) &
+                           /dble(tc17_bg_nbins)
+           tc17_bg_total_weight = 0.0d0
+           do k=1,tc17_bg_nbins
+              tc17_bg_logr_lo = tc17_bg_logr_min &
+                                +tc17_bg_dlogr*dble(k-1)
+              tc17_bg_logr_hi = tc17_bg_logr_lo+tc17_bg_dlogr
+              tc17_bg_logr_center(k) = 0.5d0*(tc17_bg_logr_lo &
+                                              +tc17_bg_logr_hi)
+              tc17_bg_ln_d_lo = log(2.0d0*(10.0d0**tc17_bg_logr_lo)*1.0d6)
+              tc17_bg_ln_d_hi = log(2.0d0*(10.0d0**tc17_bg_logr_hi)*1.0d6)
+              tc17_bg_z_lo = (tc17_bg_ln_d_lo-tc17_bg_lognorm_m) &
+                              /(tc17_bg_lognorm_s*sqrt(2.0d0))
+              tc17_bg_z_hi = (tc17_bg_ln_d_hi-tc17_bg_lognorm_m) &
+                              /(tc17_bg_lognorm_s*sqrt(2.0d0))
+              if (tc17_bg_z_lo.ge.0.0d0) then
+                 ! Use erfc in the upper tail to avoid subtracting two
+                 ! values of erf that have both rounded to one.
+                 tc17_bg_bin_weight(k) = 0.5d0*(erfc(tc17_bg_z_lo) &
+                                                   -erfc(tc17_bg_z_hi))
+              else if (tc17_bg_z_hi.le.0.0d0) then
+                 tc17_bg_bin_weight(k) = 0.5d0*(erfc(-tc17_bg_z_hi) &
+                                                   -erfc(-tc17_bg_z_lo))
+              else
+                 tc17_bg_bin_weight(k) = 0.5d0*(erf(tc17_bg_z_hi) &
+                                                   -erf(tc17_bg_z_lo))
+              end if
+              tc17_bg_total_weight = tc17_bg_total_weight &
+                                      +tc17_bg_bin_weight(k)
+           end do
+           if (tc17_bg_total_weight.le.0.0d0) then
+              stop 'testcase 17 background aerosol PSD has zero total weight'
+           end if
+        end if
+
         do n = 1, iter
 
           global_particle_index = global_particle_offset+int(n-1,i8)
@@ -499,7 +563,32 @@
                 ! Testcase 17 background aerosols are identified by this kappa.
                 ! They are reinjected after fallout until the reinjection timer ends.
                 pdata(i,prkap) = aerosol_kappa_background
-                call lognormal_droplet(pdata(i,prrp),pdata(i,prms),pdata(i,prkap),randomNumbers)
+                if (psd_sampling_opt.eq.0) then
+                   call lognormal_droplet(pdata(i,prrp),pdata(i,prms), &
+                                          pdata(i,prkap),randomNumbers)
+                else if (psd_sampling_opt.eq.1) then
+                   tc17_bg_ibin = int(mod(global_particle_index, &
+                                          int(tc17_bg_nbins,i8)))+1
+                   tc17_bg_particles_in_bin = nparcelsInit &
+                                               /int(tc17_bg_nbins,i8)
+                   if (int(tc17_bg_ibin,i8).le. &
+                       mod(nparcelsInit,int(tc17_bg_nbins,i8))) then
+                      tc17_bg_particles_in_bin = tc17_bg_particles_in_bin+1_i8
+                   end if
+
+                   tc17_bg_dry_radius = 10.0d0**tc17_bg_logr_center(tc17_bg_ibin)
+                   tc17_bg_wet_radius = kohler_equil_radius(tc17_bg_dry_radius, &
+                        dble(pdata(i,prkap)),tc17_bg_init_temp,tc17_bg_init_rh)
+                   pdata(i,prrp) = real(tc17_bg_wet_radius)
+                   pdata(i,prms) = real(rho_solute*4.0d0/3.0d0*dble(pi) &
+                                        *tc17_bg_dry_radius**3)
+                   pdata(i,prmult) = real(dble(nparcelsInit)*dble(drop_mult) &
+                        *tc17_bg_bin_weight(tc17_bg_ibin) &
+                        /(tc17_bg_total_weight &
+                          *dble(tc17_bg_particles_in_bin)))
+                else
+                   stop 'Invalid psd_sampling_opt value'
+                end if
                 pdata(i,prrp0) = pdata(i,prrp)
              else if (testcase.eq.3) then
                 pdata(i,prkap) = 0.6
@@ -537,7 +626,8 @@
              pdata(i,prtp) = 290.0
      
              !Droplet multiplicity
-             if (testcase.ne.3 .or. psd_sampling_opt.eq.0) &
+             if ((testcase.ne.3 .and. testcase.ne.17) .or. &
+                 psd_sampling_opt.eq.0) &
                 pdata(i,prmult) = drop_mult
         
              !Is droplet alive?
