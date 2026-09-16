@@ -2575,10 +2575,11 @@
       real :: radmin,radmax,Tpmin,Tpmax
       real :: qfmin,qfmax,Tfmin,Tfmax
       real :: prsmin,prsmax,rhomin,rhomax
+      real :: dTmin,dTmax
       real :: smin,smax,RHmin,RHmax
       real :: usgsmin,usgsmax,vsgsmin,vsgsmax,wsgsmin,wsgsmax
-      real :: sval,RHval
-      real :: minvals(11),maxvals(11)
+      real :: sval,RHval,dTval
+      real :: minvals(12),maxvals(12)
       real, parameter :: drop_inject_elapse_tol = 1.0e-6
       double precision :: source_dt,source_time0,source_time1
       double precision :: source_start_time,source_end_time
@@ -2795,6 +2796,8 @@
       qfmax = -huge(1.0)
       Tfmin = huge(1.0)
       Tfmax = -huge(1.0)
+      dTmin = huge(1.0)
+      dTmax = -huge(1.0)
       prsmin = huge(1.0)
       prsmax = -huge(1.0)
       rhomin = huge(1.0)
@@ -2811,13 +2814,14 @@
       wsgsmax = -huge(1.0)
 
       !$acc parallel loop gang vector default(present) &
-      !$acc          private(sval,RHval) &
-      !$acc          reduction(min:radmin,Tpmin,qfmin,Tfmin,prsmin,rhomin,smin,RHmin,usgsmin,vsgsmin,wsgsmin) &
-      !$acc          reduction(max:radmax,Tpmax,qfmax,Tfmax,prsmax,rhomax,smax,RHmax,usgsmax,vsgsmax,wsgsmax)
+      !$acc          private(sval,RHval,dTval) &
+      !$acc          reduction(min:radmin,Tpmin,qfmin,Tfmin,dTmin,prsmin,rhomin,smin,RHmin,usgsmin,vsgsmin,wsgsmin) &
+      !$acc          reduction(max:radmax,Tpmax,qfmax,Tfmax,dTmax,prsmax,rhomax,smax,RHmax,usgsmax,vsgsmax,wsgsmax)
       do np=1,nparcelsLocalActive
          sval = pdata(np,prkap)*pdata(np,prms)*rhow/real(rho_solute)
          RHval = pdata(np,prqv)*pdata(np,prrho)*ru*pdata(np,prt) / &
                  (mw*eslf(pdata(np,prprs),pdata(np,prt)))
+         dTval = pdata(np,prt)-pdata(np,prtp)
          radmin = min(radmin,pdata(np,prrp))
          radmax = max(radmax,pdata(np,prrp))
          Tpmin = min(Tpmin,pdata(np,prtp))
@@ -2826,6 +2830,8 @@
          qfmax = max(qfmax,pdata(np,prqv))
          Tfmin = min(Tfmin,pdata(np,prt))
          Tfmax = max(Tfmax,pdata(np,prt))
+         dTmin = min(dTmin,dTval)
+         dTmax = max(dTmax,dTval)
          prsmin = min(prsmin,pdata(np,prprs))
          prsmax = max(prsmax,pdata(np,prprs))
          rhomin = min(rhomin,pdata(np,prrho))
@@ -2846,32 +2852,36 @@
 
 #ifdef MPI
       call mpi_allreduce(mpi_in_place,np_tmp,1,mpi_integer8,mpi_sum,mpi_comm_world,ierr)
-      minvals = (/ radmin,Tpmin,qfmin,Tfmin,prsmin,rhomin,smin,RHmin,usgsmin,vsgsmin,wsgsmin /)
-      maxvals = (/ radmax,Tpmax,qfmax,Tfmax,prsmax,rhomax,smax,RHmax,usgsmax,vsgsmax,wsgsmax /)
-      call mpi_allreduce(mpi_in_place,minvals,11,mpi_real,mpi_min,mpi_comm_world,ierr)
-      call mpi_allreduce(mpi_in_place,maxvals,11,mpi_real,mpi_max,mpi_comm_world,ierr)
+      minvals = (/ radmin,Tpmin,qfmin,Tfmin,dTmin,prsmin,rhomin,smin,RHmin, &
+                   usgsmin,vsgsmin,wsgsmin /)
+      maxvals = (/ radmax,Tpmax,qfmax,Tfmax,dTmax,prsmax,rhomax,smax,RHmax, &
+                   usgsmax,vsgsmax,wsgsmax /)
+      call mpi_allreduce(mpi_in_place,minvals,12,mpi_real,mpi_min,mpi_comm_world,ierr)
+      call mpi_allreduce(mpi_in_place,maxvals,12,mpi_real,mpi_max,mpi_comm_world,ierr)
       radmin = minvals(1)
       Tpmin = minvals(2)
       qfmin = minvals(3)
       Tfmin = minvals(4)
-      prsmin = minvals(5)
-      rhomin = minvals(6)
-      smin = minvals(7)
-      RHmin = minvals(8)
-      usgsmin = minvals(9)
-      vsgsmin = minvals(10)
-      wsgsmin = minvals(11)
+      dTmin = minvals(5)
+      prsmin = minvals(6)
+      rhomin = minvals(7)
+      smin = minvals(8)
+      RHmin = minvals(9)
+      usgsmin = minvals(10)
+      vsgsmin = minvals(11)
+      wsgsmin = minvals(12)
       radmax = maxvals(1)
       Tpmax = maxvals(2)
       qfmax = maxvals(3)
       Tfmax = maxvals(4)
-      prsmax = maxvals(5)
-      rhomax = maxvals(6)
-      smax = maxvals(7)
-      RHmax = maxvals(8)
-      usgsmax = maxvals(9)
-      vsgsmax = maxvals(10)
-      wsgsmax = maxvals(11)
+      dTmax = maxvals(5)
+      prsmax = maxvals(6)
+      rhomax = maxvals(7)
+      smax = maxvals(8)
+      RHmax = maxvals(9)
+      usgsmax = maxvals(10)
+      vsgsmax = maxvals(11)
+      wsgsmax = maxvals(12)
 #endif
       if (np_tmp.le.0_i8) then
          radmin = 0.0
@@ -2882,6 +2892,8 @@
          qfmax = 0.0
          Tfmin = 0.0
          Tfmax = 0.0
+         dTmin = 0.0
+         dTmax = 0.0
          prsmin = 0.0
          prsmax = 0.0
          rhomin = 0.0
@@ -2900,11 +2912,12 @@
 
       if (myid==0) then
          !write(*,'(a8,3i)')  'DHR1:',myid,np_tmp,nparcelsLocalActive
-         write(*,'(a18,i18,22(a,1pe15.6))') 'Total particles:',np_tmp, &
+         write(*,'(a18,i18,24(a,1pe15.6))') 'Total particles:',np_tmp, &
                                             ' rmin=',radmin,' rmax=',radmax, &
                                             ' Tpmin=',Tpmin,' Tpmax=',Tpmax, &
                                             ' qfmin=',qfmin,' qfmax=',qfmax, &
                                             ' Tfmin=',Tfmin,' Tfmax=',Tfmax, &
+                                            ' dTmin=',dTmin,' dTmax=',dTmax, &
                                             ' prsmin=',prsmin,' prsmax=',prsmax, &
                                             ' rhomin=',rhomin,' rhomax=',rhomax, &
                                             ' smin=',smin,' smax=',smax, &
