@@ -671,7 +671,7 @@
       seed_base = mod(abs(int(pidx,i8))*1000003_i8,2147483647_i8)
       seed_base = mod(seed_base + abs(int(procidx,i8))*9176_i8,2147483647_i8)
 
-      call BE_integration (dt,dbldt,nstep,mtime,np,seed_base,pdata,pdata_locind,xf,yf,zf, &
+      call BE_integration (dt,dbldt,nstep,mtime,np,pidx,procidx,seed_base,pdata,pdata_locind,xf,yf,zf, &
                            iflag,jflag, &
                            x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
                            khhval,khvval,dkhvdzval, &
@@ -2941,7 +2941,7 @@
 
 !----------------------------------------------------------------------
 
-   subroutine BE_integration(dt,dbldt,nstep,mtime,np,seed_base,pdata,pdata_locind,xf,yf,zf, &
+   subroutine BE_integration(dt,dbldt,nstep,mtime,np,pidx,procidx,seed_base,pdata,pdata_locind,xf,yf,zf, &
                              iflag,jflag, &
                              x3d,y3d,z3d,sig3d,uval,vval,wval,qval, &
                              khhval,khvval,dkhvdzval, &
@@ -2973,7 +2973,7 @@
       real, intent(in), dimension(ib:ie+1) :: xf
       real, intent(in), dimension(jb:je+1) :: yf
       real, intent(in), dimension(ib:ie,jb:je,kb:ke+1) :: zf
-      integer, intent(in) :: nstep,np,iflag,jflag
+      integer, intent(in) :: nstep,np,pidx,procidx,iflag,jflag
       integer(i8), intent(in) :: seed_base
       logical, intent(in) :: debug
       real, intent(inout) :: x3d,y3d,z3d,sig3d
@@ -3019,6 +3019,13 @@
 
       dlogsig_abs = 0.0
       dlogsig_valid = 0
+      mflag = 0
+      flag = 0
+      gn_reason = 0
+      gn_iterations = 0
+      lv_iterations = 0
+      dry_radius = 0.0d0
+      dry_ratio = 0.0d0
 
       !Store interpolated quantities for the sake of statistics
       pdata(np,pru) = uval
@@ -3226,6 +3233,23 @@
 
 
       end if !drop_evap
+
+      if (drop_stability_diag.ge.3 .and. &
+          abs(tval-pdata(np,prtp)).gt.10.0) then
+         print *, 'DROP_DT_DETAIL step=',nstep,' mtime=',mtime, &
+                  ' rank=',myid,' np=',np,' procidx=',procidx,' pidx=',pidx, &
+                  ' x=',pdata(np,prx),' y=',pdata(np,pry),' z=',pdata(np,prz), &
+                  ' dT=',tval-pdata(np,prtp),' Tf=',tval, &
+                  ' Tp=',pdata(np,prtp),' Tp_old=',tp0, &
+                  ' r=',pdata(np,prrp),' r_old=',rp0,' r_dry=',dry_radius, &
+                  ' dry_ratio=',dry_ratio,' age=',pdata(np,prtime), &
+                  ' active=',pdata(np,pract), &
+                  ' qv=',qval,' prs=',prsval,' rho=',rhoval, &
+                  ' ms=',pdata(np,prms),' kappa=',pdata(np,prkap), &
+                  ' mult=',pdata(np,prmult),' mflag=',mflag,' solver_flag=',flag, &
+                  ' gn_reason=',gn_reason,' gn_iters=',gn_iterations, &
+                  ' lm_iters=',lv_iterations
+      endif
 
       !Update the droplet timer
       pdata(np,prtime) = pdata(np,prtime) + dt
