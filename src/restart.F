@@ -2256,6 +2256,7 @@
       character(len=6) :: aname
       integer :: i,j,k,n,np,nvar,nread,reqs,orecs,orecu,orecv,orecw,ndum
       integer :: ncid,time_index,old_format
+      integer :: pdata_read_status
       double precision, dimension(nbudget,0:numprocs-1) :: sbudget
       double precision, dimension(numq,0:numprocs-1) :: csq,dsq
       real, dimension(:,:), allocatable :: pfoo
@@ -3715,7 +3716,22 @@
                pdata(:,:) = neg_huge
                if ( restart_format.eq.1 ) then
                   allocate( rbuf(nvar,npvars) )
-                  read(50) rbuf 
+                  read(50,iostat=pdata_read_status) rbuf
+                  if( pdata_read_status.gt.0 .and. prcl_droplet.eq.1 )then
+                     ! Prior layout has exactly two fewer saved columns.
+                     ! No composition can be inferred safely from kappa.
+                     backspace(50)
+                     rbuf = 0.0
+                     read(50,iostat=pdata_read_status) rbuf(:,1:npvars-2)
+                     rbuf(:,prpop) = pop_unset
+                     rbuf(:,prfracb) = 0.0
+                     if( pdata_read_status.eq.0 ) print *, &
+                          'Legacy droplet restart: population is unset'
+                  endif
+                  if( pdata_read_status.ne.0 )then
+                     print *, 'Cannot read particle restart state'
+                     call stopcm1
+                  endif
 #ifdef NETCDF
                else if ( restart_format.eq.2 ) then
                   call disp_err( nf90_inq_varid(ncid,"ploc",varid) , .true. )

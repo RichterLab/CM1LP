@@ -5619,7 +5619,8 @@
       end subroutine droplet_diag
 
       subroutine write_drop_traj(nstep,mtime,pdata)
-      use input, only : myid,nparcelsLocal,npvals,nparcelsLocalActive,prpidx,prprocidx,prx,pry,prz,prvpx,prvpy,prvpz,prrp,prtp,prms,prmult,prt,prqv
+      use input, only : myid,nparcelsLocal,npvals,nparcelsLocalActive,prpidx,prprocidx,prx,pry,prz,prvpx,prvpy,prvpz,prrp,prtp,prms,prmult,prt,prqv, &
+                        prpop,prfracb
       implicit none
 
       integer, intent(in) :: nstep
@@ -5696,7 +5697,8 @@
 
 
       do np=1,pcount
-        write(funit) real(transfer(compacted(np,prpidx),ngidx)),real(transfer(compacted(np,prprocidx),ngidx)),mtime,compacted(np,prx),compacted(np,pry),compacted(np,prz),compacted(np,prvpx),compacted(np,prvpy),compacted(np,prvpz),compacted(np,prrp),compacted(np,prtp),compacted(np,prms),compacted(np,prmult),compacted(np,prt),compacted(np,prqv)
+        write(funit) real(transfer(compacted(np,prpidx),ngidx)),real(transfer(compacted(np,prprocidx),ngidx)),mtime,compacted(np,prx),compacted(np,pry),compacted(np,prz),compacted(np,prvpx),compacted(np,prvpy),compacted(np,prvpz),compacted(np,prrp),compacted(np,prtp),compacted(np,prms),compacted(np,prmult),compacted(np,prt),compacted(np,prqv), &
+                     compacted(np,prpop),compacted(np,prfracb)
       end do
       
       close(funit)

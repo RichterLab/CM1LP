@@ -872,6 +872,12 @@
       ENDIF
       !-----
 #ifdef NETCDF
+      ! NetCDF parcel restart stores positions only, not droplet state.
+      IF( iprcl.eq.1 .and. prcl_droplet.eq.1 .and. restart_format.eq.2 )THEN
+        if(myid.eq.0) print *, 'Droplet restart requires restart_format=1'
+        call stopcm1
+      ENDIF
+
       IF( restart_format.eq.2 .and. restart_filetype.ge.3 )THEN
         if(myid.eq.0)then
         print *,'  -------------------------------- '
@@ -6177,6 +6183,8 @@
       przs = 0
       prsig = 0
       prkap = 0
+      prpop = 0
+      prfracb = 0
       prusgs = 0
       prvsgs = 0
       prwsgs = 0
@@ -6301,6 +6309,17 @@
         npvals = npvals+1
         npvars = npvars+1
         prtime = npvals
+
+        ! Append population state to the restart-persistent prefix.  Keep
+        ! all pre-existing saved columns in place for legacy binary reads.
+        if( prcl_droplet.eq.1 )then
+          npvals = npvals+1
+          npvars = npvars+1
+          prpop = npvals
+          npvals = npvals+1
+          npvars = npvars+1
+          prfracb = npvals
+        endif
 
         if( prcl_th.eq.1 )then
           npvals = npvals+1
@@ -6428,7 +6447,7 @@
       !$acc               prth,prpt1,prpt2,prq1,prq2,prnc1,prnc2,     &
       !$acc               prkm,prkh,prtke,prdbz,prb,prvpg,przv,       &
       !$acc               prqsl,prqsi,prznt,prust,przs,prsig,         &
-      !$acc               prpidx,prprocidx)
+      !$acc               prpidx,prprocidx,prpop,prfracb)
 
       if(dowr) write(outfile,*)
       if(dowr) write(outfile,*) ' nparcelsMax = ',nparcelsMax
@@ -6476,6 +6495,8 @@
       if(dowr) write(outfile,*) '    prrp     = ',prrp
       if(dowr) write(outfile,*) '    prms     = ',prms
       if(dowr) write(outfile,*) '    prkap    = ',prkap
+      if(dowr) write(outfile,*) '    prpop    = ',prpop
+      if(dowr) write(outfile,*) '    prfracb  = ',prfracb
       if(dowr) write(outfile,*) '    prtp     = ',prtp
       if(dowr) write(outfile,*) '    prmult   = ',prmult
       if(dowr) write(outfile,*) '    pract    = ',pract

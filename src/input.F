@@ -166,6 +166,12 @@
       integer(i8) :: nparcelsInit,nparcelsMax,nparcelsRest,nparcelsLocal, &
                      nparcelsLocalActive
       integer :: drop_sgs_opt = 0
+      ! Droplet pdata indices, assigned by param; zero when disabled.
+      ! Do not use as subscripts while zero.
+      ! prpop: real population label (pop_unset/pop_a/pop_b/pop_mixed).
+      ! prfracb: component-B dry mass / total dry solute mass, in [0,1].
+      ! This excludes water mass; pure A is 0 and pure B is 1.
+      integer :: prpop = 0, prfracb = 0
       ! 0: sample sizes from the PSD with uniform superdroplet multiplicity
       ! 1: sample uniformly in log10 size with PSD-weighted multiplicity
       integer :: psd_sampling_opt = 0
@@ -184,6 +190,7 @@
       !$acc                 nqv,nqc,nqr,nqi,nqs,nqg,bbc,tbc,wbc,ebc,sbc,nbc,  &
       !$acc                 imove,prvpx,prvpy,prvpz,prusgs,prvsgs,            &
       !$acc                 prwsgs,prsigsgs,prrp,prrp0,prms,prkap,prtp,       &
+      !$acc                 prpop,prfracb,                                  &
       !$acc                 prx,pry,prz,prsig,ngxy,ngz,ptype,pru,prv,prw,     &
       !$acc                 ibw,ibe,ibs,ibn,ibc,iec,jbc,jec,kbc,kec,          &
       !$acc                 ibt,iet,jbt,jet,kbt,ket,two_way_coupling,         &

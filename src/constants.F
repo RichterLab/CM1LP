@@ -19,6 +19,15 @@
 
       integer,parameter :: i8 = selected_int_kind(12)
 
+      ! Population labels stored as exact real values in pdata: assign/copy,
+      ! never average.  A/B identify testcase-configured dry components.
+      ! Mixed records incorporation of both components, even if a small
+      ! component mass fraction subsequently rounds to zero.
+      real, parameter :: pop_unset = 0.0  ! Uninitialized/invalid
+      real, parameter :: pop_a     = 1.0  ! Pure component A
+      real, parameter :: pop_b     = 2.0  ! Pure component B
+      real, parameter :: pop_mixed = 3.0  ! Components A and B
+
       real, parameter ::  pi     = 3.1415926535897932384626433
       real, parameter ::  th0r   = 300.0
       real, parameter ::  to     = 273.15

@@ -1,7 +1,7 @@
-function trajectories = process_trajectories_CM1LP(input_directory,output_filename)
+function trajectories = process_trajectories_CM1LP(input_directory,output_filename,num_variables)
 %PROCESS_TRAJECTORIES_CM1LP Stitch binary CM1LP particle trajectories.
 %
-% Each MPI rank writes one binary file containing 15 single-precision
+% Each MPI rank writes one binary file containing 17 single-precision
 % values per particle record. Particles can migrate between MPI ranks, so
 % records are stitched together using the pair (procidx, pidx).
 % Each element of trajectories contains named, variable-length vectors for
@@ -14,6 +14,13 @@ function trajectories = process_trajectories_CM1LP(input_directory,output_filena
 %
 % trajectories = process_trajectories_CM1LP(input_directory,output_filename)
 % writes the processed structure array to the specified file.
+%
+% Columns 16 and 17 are pop (0=unset, 1=A, 2=B, 3=mixed) and fracb
+% (component-B fraction of dry solute mass).
+% For legacy 15-column files, pass 15 as the third argument; pop and fracb
+% are returned as NaN. The default is 17. Format is not auto-detected:
+% file sizes alone cannot distinguish the two layouts reliably.
+% Do not mix old and new records in one input directory or rank file.
 %
 % Examples:
 %   trajectories = process_trajectories_CM1LP( ...
@@ -44,7 +51,13 @@ end
 
 machine_format = 'n';  % Native byte order, matching the CM1LP run platform.
 
-num_variables = 15;
+if nargin<3 || isempty(num_variables)
+    num_variables = 17;
+end
+if ~isnumeric(num_variables) || ~isscalar(num_variables) || ...
+        ~ismember(num_variables,[15 17])
+    error('num_variables must be 15 (legacy) or 17 (population fields).');
+end
 bytes_per_value = 4;
 entry_size_in_bytes = bytes_per_value*num_variables;
 
@@ -134,7 +147,9 @@ trajectory_template = struct( ...
     'ms',single([]), ...
     'mult',single([]), ...
     't',single([]), ...
-    'qv',single([]));
+    'qv',single([]), ...
+    'pop',single([]), ...
+    'fracb',single([]));
 trajectories(num_trajectories,1) = trajectory_template;
 
 for trajectory_index = 1:num_trajectories
@@ -155,6 +170,13 @@ for trajectory_index = 1:num_trajectories
     trajectories(trajectory_index).mult = records(rows,13);
     trajectories(trajectory_index).t = records(rows,14);
     trajectories(trajectory_index).qv = records(rows,15);
+    if num_variables==17
+        trajectories(trajectory_index).pop = records(rows,16);
+        trajectories(trajectory_index).fracb = records(rows,17);
+    else
+        trajectories(trajectory_index).pop = nan(numel(rows),1,'single');
+        trajectories(trajectory_index).fracb = nan(numel(rows),1,'single');
+    end
 end
 
 fprintf('Processed %d records into %d trajectories.\n', ...
