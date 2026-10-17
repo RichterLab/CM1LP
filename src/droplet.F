@@ -83,7 +83,6 @@
   logical, parameter :: random_droplets = .true.
   real, parameter :: aerosol_kappa_background = 0.6
   real, parameter :: aerosol_kappa_monahan = 1.2
-  real, parameter :: aerosol_kappa_tol = 1.0e-6
   real, parameter :: monahan_aerosol_mult = 3.0e6
   double precision, parameter :: aerosols_inject_start_time = 1800.0d0
   double precision, parameter :: aerosols_inject_end_time = 12600.0d0
@@ -184,7 +183,7 @@
           terrain_flag,nx,ny,axisymm,nodex,nodey,myi,myj,viscosity, &
           prx,pry,prz,prsig,pract,prvpx,prvpy,prvpz,prtp,prrp,prmult, &
           prms,prkap,przs,pru,prv,prw,prt,prqv,prprs,prrho,prtime, &
-          prpidx,prprocidx, &
+          prpidx,prprocidx,prpop, &
           timestats,time_droplet,mytime,ierr,maxx, &
           maxy,maxz,ierr,mynw,mysw,myne,myse,mynorth,mysouth,myeast, &
           mywest,myid,nparcelsLocal,nparcelsLocalActive, &
@@ -680,8 +679,9 @@
                            rhoval,prsval,tval,Nup,rhop0,taup0,rp0, &
                            part_grav1,part_grav2,part_grav3,debug, &
                            dlogsig_abs,dlogsig_valid,neighbor,num_fallout,errcode)
+      ! FATIMA: B is pure sulfate; mixed salt/sulfate is not reinjected.
       if (testcase.eq.17 .and. pdata(np,pract).lt.0.0 .and. &
-          abs(pdata(np,prkap)-aerosol_kappa_background).le.aerosol_kappa_tol) then
+          pdata(np,prpop).eq.pop_b) then
          num_fallout_reinject = num_fallout_reinject + 1
          if (psd_sampling_opt.eq.1) then
             !$acc atomic capture
@@ -1849,10 +1849,10 @@
 
       use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,npvals,nparcelsLocal, &
           nparcelsLocalActive,nx,ny,axisymm,terrain_flag, &
-          prx,pry,prz,prsig,prrp,prmult,prms,prkap,prvpx,prvpy,prvpz, &
+          prx,pry,prz,prsig,prrp,prmult,prms,prkap,prpop,prfracb,prvpx,prvpy,prvpz, &
           prusgs,prvsgs,prwsgs,coal_enabled,coal_kernel, &
           coal_Ndx,coal_Ndy,coal_Ndz,myid
-      use constants, only : undefined_index,i8,pi
+      use constants, only : undefined_index,i8,pi,pop_a,pop_b,pop_mixed
       implicit none
 
       real, intent(in) :: dt
@@ -1883,6 +1883,8 @@
       integer, dimension(:), allocatable :: cell_cursor,cell_particles
       real, dimension(:), allocatable :: cell_volume
       integer(i8) :: seed
+      real :: pop_j,pop_k,new_pop,fracb_j,fracb_k
+      double precision :: new_fracb,component_b_before,component_b_after,component_b_err
       real :: xi_j,xi_k
       real :: r_j,r_k,ms_j,ms_k,kap_j,kap_k
       real :: x3d,y3d,z3d,sig3d,vol_tmp
@@ -2092,8 +2094,9 @@
       water_before = 0.0d0
       solute_before = 0.0d0
       kappa_before = 0.0d0
+      component_b_before = 0.0d0
       !$acc parallel loop gang vector default(present) &
-      !$acc reduction(+:mult_before,water_before,solute_before,kappa_before)
+      !$acc reduction(+:mult_before,water_before,solute_before,kappa_before,component_b_before)
       do np=1,nactive
         mult_before = mult_before + dble(pdata(np,prmult))
         water_before = water_before + dble(pdata(np,prmult)) &
@@ -2102,6 +2105,8 @@
           *dble(pdata(np,prms))
         kappa_before = kappa_before + dble(pdata(np,prmult)) &
           *dble(pdata(np,prms))*dble(pdata(np,prkap))
+        component_b_before = component_b_before + dble(pdata(np,prmult)) &
+          *dble(pdata(np,prms))*dble(pdata(np,prfracb))
       enddo
       !$acc end parallel
 
@@ -2119,6 +2124,7 @@
       !$acc private(gcd_a,gcd_b,gcd_tmp,seed,j_idx,k_idx,xi_j,xi_k,remaining_j,gam_til,p_alpha) &
       !$acc private(phi,frac_p,gm_real,gamma_cap,veldiff,kernel,cell_dv,pair_factor,pvol_j,pvol_k) &
       !$acc private(effic,rbig_um,rsmall_um) &
+      !$acc private(pop_j,pop_k,new_pop,fracb_j,fracb_k,new_fracb) &
       !$acc private(r_j,r_k,ms_j,ms_k,kap_j,kap_k,new_rad,new_ms,new_kap,new_mult_j,new_mult_k) &
       !$acc reduction(+:bad_pair,bad_kernel) reduction(+:mult_loss) &
       !$acc reduction(+:coal_pair_attempts_step,coal_pair_successes_step,coal_collision_mult_step,coal_palpha_sum_step) &
@@ -2179,12 +2185,22 @@
             ms_k = pdata(k_idx,prms)
             kap_j = pdata(j_idx,prkap)
             kap_k = pdata(k_idx,prkap)
+            pop_j = pdata(j_idx,prpop)
+            pop_k = pdata(k_idx,prpop)
+            fracb_j = pdata(j_idx,prfracb)
+            fracb_k = pdata(k_idx,prfracb)
             coal_pair_attempts_step = coal_pair_attempts_step + 1.0d0
 
             if( xi_j.ne.xi_j .or. xi_k.ne.xi_k .or. &
                 r_j.ne.r_j .or. r_k.ne.r_k .or. &
                 ms_j.ne.ms_j .or. ms_k.ne.ms_k .or. &
                 kap_j.ne.kap_j .or. kap_k.ne.kap_k .or. &
+                fracb_j.ne.fracb_j .or. fracb_k.ne.fracb_k .or. &
+                fracb_j.lt.0.0 .or. fracb_j.gt.1.0 .or. &
+                fracb_k.lt.0.0 .or. fracb_k.gt.1.0 .or. &
+                ms_j.lt.0.0 .or. ms_k.lt.0.0 .or. &
+                (pop_j.ne.pop_a .and. pop_j.ne.pop_b .and. pop_j.ne.pop_mixed) .or. &
+                (pop_k.ne.pop_a .and. pop_k.ne.pop_b .and. pop_k.ne.pop_mixed) .or. &
                 abs(dble(xi_j)).gt.huge(1.0d0) .or. &
                 abs(dble(xi_k)).gt.huge(1.0d0) .or. &
                 abs(dble(r_j)).gt.huge(1.0d0) .or. &
@@ -2272,15 +2288,26 @@
                     coal_gamtil_max_step = max(coal_gamtil_max_step,gam_til)
                     new_rad = (gam_til*dble(r_j)**3 + dble(r_k)**3)**(1.0d0/3.0d0)
                     new_ms = gam_til*dble(ms_j) + dble(ms_k)
+                    ! Class is provenance, not an averaged physical value.
+                    ! Mixed remains mixed even if a trace fraction rounds away.
+                    new_pop = pop_mixed
+                    if( pop_j.eq.pop_k ) new_pop = pop_j
                     if( new_ms.gt.0.0d0 )then
+                      ! Same dry-mass/event-count weighting as kappa below.
+                      new_fracb = (gam_til*dble(ms_j)*dble(fracb_j) &
+                        + dble(ms_k)*dble(fracb_k))/new_ms
                       new_kap = (gam_til*dble(ms_j)*dble(kap_j) &
                         + dble(ms_k)*dble(kap_k))/new_ms
                     else
+                      ! No dry mass: fraction is undefined; use a bounded
+                      ! convention matching the existing kappa fallback.
+                      new_fracb = 0.5d0*(dble(fracb_j) + dble(fracb_k))
                       new_kap = 0.5d0*(dble(kap_j) + dble(kap_k))
                     endif
 
                     if( new_rad.ne.new_rad .or. new_ms.ne.new_ms .or. &
-                        new_kap.ne.new_kap .or. &
+                        new_kap.ne.new_kap .or. new_fracb.ne.new_fracb .or. &
+                        new_fracb.lt.0.0d0 .or. new_fracb.gt.1.0d0 .or. &
                         abs(new_rad).gt.dble(coal_real_huge) .or. &
                         abs(new_ms).gt.dble(coal_real_huge) .or. &
                         abs(new_kap).gt.dble(coal_real_huge) .or. &
@@ -2292,6 +2319,8 @@
                         pdata(k_idx,prrp) = new_rad
                         pdata(k_idx,prms) = new_ms
                         pdata(k_idx,prkap) = new_kap
+                        pdata(k_idx,prpop) = new_pop
+                        pdata(k_idx,prfracb) = new_fracb
                       else
                         new_mult_j = 0.5d0*dble(xi_k)
                         new_mult_k = dble(xi_k) - new_mult_j
@@ -2302,7 +2331,11 @@
                         pdata(j_idx,prms) = new_ms
                         pdata(k_idx,prms) = new_ms
                         pdata(j_idx,prkap) = new_kap
+                        pdata(j_idx,prpop) = new_pop
+                        pdata(j_idx,prfracb) = new_fracb
                         pdata(k_idx,prkap) = new_kap
+                        pdata(k_idx,prpop) = new_pop
+                        pdata(k_idx,prfracb) = new_fracb
                       endif
                     endif
                   endif
@@ -2342,6 +2375,10 @@
             pdata(np,prrp).ne.pdata(np,prrp) .or. &
             pdata(np,prms).ne.pdata(np,prms) .or. &
             pdata(np,prkap).ne.pdata(np,prkap) .or. &
+            pdata(np,prfracb).ne.pdata(np,prfracb) .or. &
+            pdata(np,prfracb).lt.0.0 .or. pdata(np,prfracb).gt.1.0 .or. &
+            (pdata(np,prpop).ne.pop_a .and. pdata(np,prpop).ne.pop_b .and. &
+             pdata(np,prpop).ne.pop_mixed) .or. &
             abs(dble(pdata(np,prmult))).gt.huge(1.0d0) .or. &
             abs(dble(pdata(np,prrp))).gt.huge(1.0d0) .or. &
             abs(dble(pdata(np,prms))).gt.huge(1.0d0) .or. &
@@ -2363,8 +2400,9 @@
       water_after = 0.0d0
       solute_after = 0.0d0
       kappa_after = 0.0d0
+      component_b_after = 0.0d0
       !$acc parallel loop gang vector default(present) &
-      !$acc reduction(+:mult_after,water_after,solute_after,kappa_after)
+      !$acc reduction(+:mult_after,water_after,solute_after,kappa_after,component_b_after)
       do np=1,nactive
         mult_after = mult_after + dble(pdata(np,prmult))
         water_after = water_after + dble(pdata(np,prmult)) &
@@ -2373,6 +2411,8 @@
           *dble(pdata(np,prms))
         kappa_after = kappa_after + dble(pdata(np,prmult)) &
           *dble(pdata(np,prms))*dble(pdata(np,prkap))
+        component_b_after = component_b_after + dble(pdata(np,prmult)) &
+          *dble(pdata(np,prms))*dble(pdata(np,prfracb))
       enddo
       !$acc end parallel
 
@@ -2384,6 +2424,14 @@
         /max(abs(solute_before),coal_conservation_floor)
       kappa_err = abs(kappa_after-kappa_before) &
         /max(abs(kappa_before),coal_conservation_floor)
+
+      component_b_err = abs(component_b_after-component_b_before) &
+        /max(abs(component_b_before),coal_conservation_floor)
+      if( component_b_err.gt.coal_conservation_tol )then
+        print *, 'COALESCENCE COMPONENT B MASS: rank,step,before,after=', &
+                 myid,nstep,component_b_before,component_b_after
+        stop 'DROPLET COALESCENCE COMPONENT B CONSERVATION FAILED'
+      endif
 
       if( mult_err.gt.coal_conservation_tol .or. &
           water_err.gt.coal_conservation_tol .or. &
@@ -2673,7 +2721,7 @@
 
       ! Testcase 17 fallout reinjection is event-driven and independent of
       ! the scheduled source accumulator.  Its fallout count has already been
-      ! filtered to the background aerosol kappa in droplet_driver.
+      ! filtered to pure sulfate (population B) in droplet_driver.
       if (testcase.eq.17 .and. source_time0.lt.aerosols_reinject_end_time) then
          total_fallout = int(num_fallout,i8)
 #ifdef MPI

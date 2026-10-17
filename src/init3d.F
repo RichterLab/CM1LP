@@ -654,8 +654,8 @@
                 ! Initial background aerosols are pure sulfate (B).
                 pdata(i,prpop) = pop_b
                 pdata(i,prfracb) = 1.0
-                ! Testcase 17 background aerosols are identified by this kappa.
-                ! They are reinjected after fallout until the reinjection timer ends.
+                ! Kappa sets hygroscopicity; population B controls eligibility
+                ! for fallout reinjection until the reinjection timer ends.
                 pdata(i,prkap) = aerosol_kappa_background
                 if (psd_sampling_opt.eq.0) then
                    call lognormal_droplet(pdata(i,prrp),pdata(i,prms), &
