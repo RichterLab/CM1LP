@@ -6185,6 +6185,7 @@
       prkap = 0
       prpop = 0
       prfracb = 0
+      prncoll = 0
       prusgs = 0
       prvsgs = 0
       prwsgs = 0
@@ -6311,7 +6312,7 @@
         prtime = npvals
 
         ! Append population state to the restart-persistent prefix.  Keep
-        ! all pre-existing saved columns in place for legacy binary reads.
+        ! all pre-existing saved columns in place.
         if( prcl_droplet.eq.1 )then
           npvals = npvals+1
           npvars = npvars+1
@@ -6319,6 +6320,9 @@
           npvals = npvals+1
           npvars = npvars+1
           prfracb = npvals
+          npvals = npvals+1
+          npvars = npvars+1
+          prncoll = npvals
         endif
 
         if( prcl_th.eq.1 )then
@@ -6447,7 +6451,7 @@
       !$acc               prth,prpt1,prpt2,prq1,prq2,prnc1,prnc2,     &
       !$acc               prkm,prkh,prtke,prdbz,prb,prvpg,przv,       &
       !$acc               prqsl,prqsi,prznt,prust,przs,prsig,         &
-      !$acc               prpidx,prprocidx,prpop,prfracb)
+      !$acc               prpidx,prprocidx,prpop,prfracb,prncoll)
 
       if(dowr) write(outfile,*)
       if(dowr) write(outfile,*) ' nparcelsMax = ',nparcelsMax
@@ -6497,6 +6501,7 @@
       if(dowr) write(outfile,*) '    prkap    = ',prkap
       if(dowr) write(outfile,*) '    prpop    = ',prpop
       if(dowr) write(outfile,*) '    prfracb  = ',prfracb
+      if(dowr) write(outfile,*) '    prncoll  = ',prncoll
       if(dowr) write(outfile,*) '    prtp     = ',prtp
       if(dowr) write(outfile,*) '    prmult   = ',prmult
       if(dowr) write(outfile,*) '    pract    = ',pract

@@ -3717,17 +3717,6 @@
                if ( restart_format.eq.1 ) then
                   allocate( rbuf(nvar,npvars) )
                   read(50,iostat=pdata_read_status) rbuf
-                  if( pdata_read_status.gt.0 .and. prcl_droplet.eq.1 )then
-                     ! Prior layout has exactly two fewer saved columns.
-                     ! No composition can be inferred safely from kappa.
-                     backspace(50)
-                     rbuf = 0.0
-                     read(50,iostat=pdata_read_status) rbuf(:,1:npvars-2)
-                     rbuf(:,prpop) = pop_unset
-                     rbuf(:,prfracb) = 0.0
-                     if( pdata_read_status.eq.0 ) print *, &
-                          'Legacy droplet restart: population is unset'
-                  endif
                   if( pdata_read_status.ne.0 )then
                      print *, 'Cannot read particle restart state'
                      call stopcm1

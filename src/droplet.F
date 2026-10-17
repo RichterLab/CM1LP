@@ -51,6 +51,13 @@
   double precision :: eng_destroyed,eng_injected,m1_destroyed,m2_destroyed,m1_injected,m2_injected   !Same but for droplet internal energy and momentum
   double precision :: mass_reentry,eng_reentry,m1_reentry,m2_reentry
   double precision :: mass_evap,mass_dpten
+  ! Pair rows: AA, AB, BB, A-mixed, B-mixed, mixed-mixed.
+  ! Columns: sampled attempts, successful pairs, represented collisions.
+  double precision :: coal_by_pair(6,3) = 0.0d0
+  character(len=2), parameter :: coal_pair_names(6) = &
+       (/ 'aa', 'ab', 'bb', 'am', 'bm', 'mm' /)
+  character(len=19), parameter :: coal_count_names(3) = &
+       (/ 'coal_pair_attempts ', 'coal_pair_successes', 'coal_collision_mult' /)
   double precision :: coal_pair_attempts,coal_pair_successes,coal_collision_mult
   double precision :: coal_palpha_sum,coal_palpha_mean,coal_palpha_max,coal_gamtil_max
 
@@ -1849,7 +1856,7 @@
 
       use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,npvals,nparcelsLocal, &
           nparcelsLocalActive,nx,ny,axisymm,terrain_flag, &
-          prx,pry,prz,prsig,prrp,prmult,prms,prkap,prpop,prfracb,prvpx,prvpy,prvpz, &
+          prx,pry,prz,prsig,prrp,prmult,prms,prkap,prpop,prfracb,prncoll,prvpx,prvpy,prvpz, &
           prusgs,prvsgs,prwsgs,coal_enabled,coal_kernel, &
           coal_Ndx,coal_Ndy,coal_Ndz,myid
       use constants, only : undefined_index,i8,pi,pop_a,pop_b,pop_mixed
@@ -1873,7 +1880,10 @@
 
       integer :: nactive,nci,ncj,nck,ncoal_cells
       integer :: np,c,iflag,jflag,kflag,ci,cj,ck,cell,slot
-      integer :: first,last,j_idx,k_idx
+      integer :: first,last,j_idx,k_idx,pair_class
+      double precision :: pair_counts_step(6,3),new_ncoll
+      double precision :: ancestors_before,ancestors_after,ancestors_err
+      real :: ncoll_j,ncoll_k
       integer :: ns_cell,npairs,pair,pos1,pos2,perm_a,perm_b
       integer :: ii,jj,kk,ilo,ihi,jlo,jhi,klo,khi
       integer :: gcd_a,gcd_b,gcd_tmp
@@ -2095,8 +2105,9 @@
       solute_before = 0.0d0
       kappa_before = 0.0d0
       component_b_before = 0.0d0
+      ancestors_before = 0.0d0
       !$acc parallel loop gang vector default(present) &
-      !$acc reduction(+:mult_before,water_before,solute_before,kappa_before,component_b_before)
+      !$acc reduction(+:mult_before,water_before,solute_before,kappa_before,component_b_before,ancestors_before)
       do np=1,nactive
         mult_before = mult_before + dble(pdata(np,prmult))
         water_before = water_before + dble(pdata(np,prmult)) &
@@ -2107,9 +2118,13 @@
           *dble(pdata(np,prms))*dble(pdata(np,prkap))
         component_b_before = component_b_before + dble(pdata(np,prmult)) &
           *dble(pdata(np,prms))*dble(pdata(np,prfracb))
+        ! C+1 counts original ancestor droplets and is conserved.
+        ancestors_before = ancestors_before + dble(pdata(np,prmult)) &
+          *(dble(pdata(np,prncoll)) + 1.0d0)
       enddo
       !$acc end parallel
 
+      pair_counts_step = 0.0d0
       bad_pair = 0
       bad_kernel = 0
       mult_loss = 0.0d0
@@ -2119,12 +2134,13 @@
       coal_palpha_sum_step = 0.0d0
       coal_palpha_max_step = 0.0d0
       coal_gamtil_max_step = 0.0d0
-      !$acc parallel loop gang default(present) &
+      !$acc parallel loop gang default(present) copy(pair_counts_step) &
       !$acc private(first,last,ns_cell,npairs,pair,pos1,pos2,perm_a,perm_b) &
       !$acc private(gcd_a,gcd_b,gcd_tmp,seed,j_idx,k_idx,xi_j,xi_k,remaining_j,gam_til,p_alpha) &
       !$acc private(phi,frac_p,gm_real,gamma_cap,veldiff,kernel,cell_dv,pair_factor,pvol_j,pvol_k) &
       !$acc private(effic,rbig_um,rsmall_um) &
       !$acc private(pop_j,pop_k,new_pop,fracb_j,fracb_k,new_fracb) &
+      !$acc private(pair_class,ncoll_j,ncoll_k,new_ncoll) &
       !$acc private(r_j,r_k,ms_j,ms_k,kap_j,kap_k,new_rad,new_ms,new_kap,new_mult_j,new_mult_k) &
       !$acc reduction(+:bad_pair,bad_kernel) reduction(+:mult_loss) &
       !$acc reduction(+:coal_pair_attempts_step,coal_pair_successes_step,coal_collision_mult_step,coal_palpha_sum_step) &
@@ -2189,6 +2205,24 @@
             pop_k = pdata(k_idx,prpop)
             fracb_j = pdata(j_idx,prfracb)
             fracb_k = pdata(k_idx,prfracb)
+            ncoll_j = pdata(j_idx,prncoll)
+            ncoll_k = pdata(k_idx,prncoll)
+            ! Classify the unordered pair before modifying either particle.
+            pair_class = 6
+            if( pop_j.eq.pop_a .and. pop_k.eq.pop_a )then
+              pair_class = 1
+            elseif( (pop_j.eq.pop_a .and. pop_k.eq.pop_b) .or. &
+                    (pop_j.eq.pop_b .and. pop_k.eq.pop_a) )then
+              pair_class = 2
+            elseif( pop_j.eq.pop_b .and. pop_k.eq.pop_b )then
+              pair_class = 3
+            elseif( pop_j.eq.pop_a .or. pop_k.eq.pop_a )then
+              pair_class = 4
+            elseif( pop_j.eq.pop_b .or. pop_k.eq.pop_b )then
+              pair_class = 5
+            endif
+            !$acc atomic update
+            pair_counts_step(pair_class,1) = pair_counts_step(pair_class,1) + 1.0d0
             coal_pair_attempts_step = coal_pair_attempts_step + 1.0d0
 
             if( xi_j.ne.xi_j .or. xi_k.ne.xi_k .or. &
@@ -2196,6 +2230,10 @@
                 ms_j.ne.ms_j .or. ms_k.ne.ms_k .or. &
                 kap_j.ne.kap_j .or. kap_k.ne.kap_k .or. &
                 fracb_j.ne.fracb_j .or. fracb_k.ne.fracb_k .or. &
+                ncoll_j.ne.ncoll_j .or. ncoll_k.ne.ncoll_k .or. &
+                ncoll_j.lt.0.0 .or. ncoll_k.lt.0.0 .or. &
+                abs(dble(ncoll_j)).gt.dble(coal_real_huge) .or. &
+                abs(dble(ncoll_k)).gt.dble(coal_real_huge) .or. &
                 fracb_j.lt.0.0 .or. fracb_j.gt.1.0 .or. &
                 fracb_k.lt.0.0 .or. fracb_k.gt.1.0 .or. &
                 ms_j.lt.0.0 .or. ms_k.lt.0.0 .or. &
@@ -2285,7 +2323,14 @@
                     mult_loss = mult_loss + gam_til*dble(xi_k)
                     coal_pair_successes_step = coal_pair_successes_step + 1.0d0
                     coal_collision_mult_step = coal_collision_mult_step + gam_til*dble(xi_k)
+                    !$acc atomic update
+                    pair_counts_step(pair_class,2) = pair_counts_step(pair_class,2) + 1.0d0
+                    !$acc atomic update
+                    pair_counts_step(pair_class,3) = pair_counts_step(pair_class,3) + gam_til*dble(xi_k)
                     coal_gamtil_max_step = max(coal_gamtil_max_step,gam_til)
+                    ! Includes all parent histories plus gamma new collisions.
+                    ! Stored per physical droplet, not weighted by multiplicity.
+                    new_ncoll = dble(ncoll_k) + gam_til*(dble(ncoll_j) + 1.0d0)
                     new_rad = (gam_til*dble(r_j)**3 + dble(r_k)**3)**(1.0d0/3.0d0)
                     new_ms = gam_til*dble(ms_j) + dble(ms_k)
                     ! Class is provenance, not an averaged physical value.
@@ -2307,6 +2352,7 @@
 
                     if( new_rad.ne.new_rad .or. new_ms.ne.new_ms .or. &
                         new_kap.ne.new_kap .or. new_fracb.ne.new_fracb .or. &
+                        new_ncoll.ne.new_ncoll .or. new_ncoll.gt.dble(coal_real_huge) .or. &
                         new_fracb.lt.0.0d0 .or. new_fracb.gt.1.0d0 .or. &
                         abs(new_rad).gt.dble(coal_real_huge) .or. &
                         abs(new_ms).gt.dble(coal_real_huge) .or. &
@@ -2321,6 +2367,7 @@
                         pdata(k_idx,prkap) = new_kap
                         pdata(k_idx,prpop) = new_pop
                         pdata(k_idx,prfracb) = new_fracb
+                        pdata(k_idx,prncoll) = new_ncoll
                       else
                         new_mult_j = 0.5d0*dble(xi_k)
                         new_mult_k = dble(xi_k) - new_mult_j
@@ -2333,9 +2380,11 @@
                         pdata(j_idx,prkap) = new_kap
                         pdata(j_idx,prpop) = new_pop
                         pdata(j_idx,prfracb) = new_fracb
+                        pdata(j_idx,prncoll) = new_ncoll
                         pdata(k_idx,prkap) = new_kap
                         pdata(k_idx,prpop) = new_pop
                         pdata(k_idx,prfracb) = new_fracb
+                        pdata(k_idx,prncoll) = new_ncoll
                       endif
                     endif
                   endif
@@ -2347,6 +2396,16 @@
       enddo
       !$acc end parallel
 
+      ! Each sampled pair belongs to exactly one category.
+      if( abs(sum(pair_counts_step(:,1))-coal_pair_attempts_step).gt. &
+          1.0d-10*max(1.0d0,coal_pair_attempts_step) .or. &
+          abs(sum(pair_counts_step(:,2))-coal_pair_successes_step).gt. &
+          1.0d-10*max(1.0d0,coal_pair_successes_step) .or. &
+          abs(sum(pair_counts_step(:,3))-coal_collision_mult_step).gt. &
+          1.0d-10*max(1.0d0,coal_collision_mult_step) )then
+        stop 'DROPLET COALESCENCE PAIR CATEGORY TOTAL MISMATCH'
+      endif
+      coal_by_pair = coal_by_pair + pair_counts_step
       coal_pair_attempts = coal_pair_attempts + coal_pair_attempts_step
       coal_pair_successes = coal_pair_successes + coal_pair_successes_step
       coal_collision_mult = coal_collision_mult + coal_collision_mult_step
@@ -2375,6 +2434,9 @@
             pdata(np,prrp).ne.pdata(np,prrp) .or. &
             pdata(np,prms).ne.pdata(np,prms) .or. &
             pdata(np,prkap).ne.pdata(np,prkap) .or. &
+            pdata(np,prncoll).ne.pdata(np,prncoll) .or. &
+            pdata(np,prncoll).lt.0.0 .or. &
+            abs(dble(pdata(np,prncoll))).gt.dble(coal_real_huge) .or. &
             pdata(np,prfracb).ne.pdata(np,prfracb) .or. &
             pdata(np,prfracb).lt.0.0 .or. pdata(np,prfracb).gt.1.0 .or. &
             (pdata(np,prpop).ne.pop_a .and. pdata(np,prpop).ne.pop_b .and. &
@@ -2401,8 +2463,9 @@
       solute_after = 0.0d0
       kappa_after = 0.0d0
       component_b_after = 0.0d0
+      ancestors_after = 0.0d0
       !$acc parallel loop gang vector default(present) &
-      !$acc reduction(+:mult_after,water_after,solute_after,kappa_after,component_b_after)
+      !$acc reduction(+:mult_after,water_after,solute_after,kappa_after,component_b_after,ancestors_after)
       do np=1,nactive
         mult_after = mult_after + dble(pdata(np,prmult))
         water_after = water_after + dble(pdata(np,prmult)) &
@@ -2413,6 +2476,9 @@
           *dble(pdata(np,prms))*dble(pdata(np,prkap))
         component_b_after = component_b_after + dble(pdata(np,prmult)) &
           *dble(pdata(np,prms))*dble(pdata(np,prfracb))
+        ! C+1 counts original ancestor droplets and is conserved.
+        ancestors_after = ancestors_after + dble(pdata(np,prmult)) &
+          *(dble(pdata(np,prncoll)) + 1.0d0)
       enddo
       !$acc end parallel
 
@@ -2425,6 +2491,11 @@
       kappa_err = abs(kappa_after-kappa_before) &
         /max(abs(kappa_before),coal_conservation_floor)
 
+      ancestors_err = abs(ancestors_after-ancestors_before) &
+        /max(abs(ancestors_before),coal_conservation_floor)
+      if( ancestors_err.gt.coal_conservation_tol )then
+        stop 'DROPLET COALESCENCE ANCESTRY CONSERVATION FAILED'
+      endif
       component_b_err = abs(component_b_after-component_b_before) &
         /max(abs(component_b_before),coal_conservation_floor)
       if( component_b_err.gt.coal_conservation_tol )then
@@ -4799,6 +4870,9 @@
 
 #ifdef MPI
       call mpi_allreduce(mpi_in_place,np_tmp_diag,1,mpi_integer8,mpi_sum,mpi_comm_world,ierr)
+      ! Population-pair counts use the same interval and root as totals.
+      call mpi_allreduce(mpi_in_place,coal_by_pair,18,mpi_double_precision, &
+                         mpi_sum,mpi_comm_world,ierr)
 
       droplet_diag0(1) = dble(tnumpart)
       droplet_diag0(2) = tnummult
@@ -5642,6 +5716,7 @@
       m2_injected = 0.0
       num100 = 0.0
       num1000 = 0.0
+      coal_by_pair = 0.0d0
       coal_pair_attempts = 0.0d0
       coal_pair_successes = 0.0d0
       coal_collision_mult = 0.0d0
@@ -5668,7 +5743,7 @@
 
       subroutine write_drop_traj(nstep,mtime,pdata)
       use input, only : myid,nparcelsLocal,npvals,nparcelsLocalActive,prpidx,prprocidx,prx,pry,prz,prvpx,prvpy,prvpz,prrp,prtp,prms,prmult,prt,prqv, &
-                        prpop,prfracb
+                        prpop,prfracb,prncoll
       implicit none
 
       integer, intent(in) :: nstep
@@ -5746,7 +5821,7 @@
 
       do np=1,pcount
         write(funit) real(transfer(compacted(np,prpidx),ngidx)),real(transfer(compacted(np,prprocidx),ngidx)),mtime,compacted(np,prx),compacted(np,pry),compacted(np,prz),compacted(np,prvpx),compacted(np,prvpy),compacted(np,prvpz),compacted(np,prrp),compacted(np,prtp),compacted(np,prms),compacted(np,prmult),compacted(np,prt),compacted(np,prqv), &
-                     compacted(np,prpop),compacted(np,prfracb)
+                     compacted(np,prpop),compacted(np,prfracb),compacted(np,prncoll)
       end do
       
       close(funit)
@@ -7036,7 +7111,7 @@
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
                         prusgs,prvsgs,prwsgs,prsigsgs, &
                         prrp,prrp0,prtp,prms,prkap,pract,prtime, &
-                        prpop,prfracb, &
+                        prpop,prfracb,prncoll, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive,numprocs,nparcelsMax, &
                         time_phys_H2D,time_phys_D2H,time_droplet,timestats,mytime, &
                         drop_mult,tsk0,pi_sp,myid,nx,ny,dx,dy
@@ -7169,6 +7244,7 @@
             salinity = 0.034
             pdata(np,prms) = salinity*rhow*4.0/3.0*pi*pdata(np,prrp)**3
             ! Testcase 15: A = sea salt, B unused. Fresh spray is pure A.
+            pdata(np,prncoll) = 0.0  ! Fresh source particle: no ancestral collisions
             pdata(np,prpop) = pop_a
             pdata(np,prfracb) = 0.0
             pdata(np,prkap) = kappa_s
@@ -7248,7 +7324,7 @@
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
                         prusgs,prvsgs,prwsgs,prsigsgs, &
                         prrp,prrp0,prtp,prms,prkap,pract,prtime, &
-                        prpop,prfracb, &
+                        prpop,prfracb,prncoll, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive, &
                         numprocs,nparcelsMax,tsk0,pi_sp
       use constants
@@ -7364,6 +7440,7 @@
             pdata(np,prrp0) = rad_init
             pdata(np,prms) = rho_solute*4.0d0/3.0d0*dble(pi)*dry_rad_init**3
             ! FATIMA (17): A = sea salt, B = sulfate. Monahan source is A.
+            pdata(np,prncoll) = 0.0  ! Fresh source particle: no ancestral collisions
             pdata(np,prpop) = pop_a
             pdata(np,prfracb) = 0.0
             pdata(np,prkap) = aerosol_kappa_monahan
@@ -7468,7 +7545,7 @@
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
                         prusgs,prvsgs,prwsgs,prsigsgs, &
                         prrp,prrp0,prtp,prms,prkap,pract,prtime, &
-                        prpop,prfracb, &
+                        prpop,prfracb,prncoll, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive,numprocs,nparcelsMax, &
                         time_phys_H2D,time_phys_D2H,time_droplet,timestats,mytime, &
                         drop_mult,tsk0,pi_sp,myid,nx,ny,nz,dx,dy,dz
@@ -7581,6 +7658,7 @@
             salinity = 0.066
             pdata(np,prms) = salinity*rhow*4.0/3.0*pi*pdata(np,prrp)**3
             ! Testcase 16: A = salt, B unused. PI chamber source is pure A.
+            pdata(np,prncoll) = 0.0  ! Fresh source particle: no ancestral collisions
             pdata(np,prpop) = pop_a
             pdata(np,prfracb) = 0.0
             pdata(np,prkap) = kappa_s
@@ -7657,7 +7735,7 @@
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
                         prusgs,prvsgs,prwsgs,prsigsgs, &
                         prrp,prrp0,prtp,prms,prkap,pract,prtime, &
-                        prpop,prfracb, &
+                        prpop,prfracb,prncoll, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive, &
                         drop_mult,pi_sp,maxz,psd_sampling_opt
       use constants
@@ -7746,6 +7824,7 @@
             ! Existing source policy: redraw sulfate sizes for option 0;
             ! preserve buffered dry mass/multiplicity for option 1.
             ! This creates a background replacement, not a mixed survivor.
+            pdata(np,prncoll) = 0.0  ! Fresh source particle: no ancestral collisions
             pdata(np,prpop) = pop_b
             pdata(np,prfracb) = 1.0
             pdata(np,prkap) = aerosol_kappa_background
@@ -7893,6 +7972,7 @@
     m2_injected = 0.0
     num100 = 0.0
     num1000 = 0.0
+    coal_by_pair = 0.0d0
     coal_pair_attempts = 0.0d0
     coal_pair_successes = 0.0d0
     coal_collision_mult = 0.0d0
@@ -7944,6 +8024,7 @@
       real, intent(in) :: tnumpart
 
       integer :: i,ncid,status,dimid,varid,time_index,timeid,tfile,zhid,binsid,bins_edge_id
+      integer :: pair_type,count_type
       logical :: allinfo
 
       if( myid.eq.0 ) print *,'  Entering writedropdiag_nc '
@@ -8154,6 +8235,19 @@
     call disp_err( nf90_def_var(ncid,"m2_injected",nf90_float,timeid,varid) , .true. )
     call disp_err( nf90_put_att(ncid,varid,"long_name","Total y-momentum of droplets injected since last entry") , .true. )
     call disp_err( nf90_put_att(ncid,varid,"units","kg-m/s") , .true. )
+
+    do count_type=1,3
+      do pair_type=1,6
+        call disp_err( nf90_def_var(ncid,trim(coal_count_names(count_type))//'_'// &
+             coal_pair_names(pair_type),nf90_double,timeid,varid), .true. )
+        call disp_err( nf90_put_att(ncid,varid,'pair_class',coal_pair_names(pair_type)), .true. )
+        call disp_err( nf90_put_att(ncid,varid,'long_name', &
+             trim(coal_count_names(count_type))//' by pre-collision population pair since last entry'), .true. )
+        call disp_err( nf90_put_att(ncid,varid,'units','#'), .true. )
+      enddo
+    enddo
+    call disp_err( nf90_put_att(ncid,nf90_global,'coalescence_pair_classes', &
+         'aa=A-A; ab=A-B; bb=B-B; am=A-mixed; bm=B-mixed; mm=mixed-mixed'), .true. )
 
     call disp_err( nf90_def_var(ncid,"coal_pair_attempts",nf90_double,timeid,varid) , .true. )
     call disp_err( nf90_put_att(ncid,varid,"long_name","Number of sampled coalescence candidate pairs since last entry") , .true. )
@@ -8560,6 +8654,14 @@
 
     call disp_err( nf90_inq_varid(ncid,"m2_injected",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,m2_injected,(/time_index/)) , .true. )
+
+    do count_type=1,3
+      do pair_type=1,6
+        call disp_err( nf90_inq_varid(ncid,trim(coal_count_names(count_type))//'_'// &
+             coal_pair_names(pair_type),varid), .true. )
+        call disp_err( nf90_put_var(ncid,varid,coal_by_pair(pair_type,count_type),(/time_index/)), .true. )
+      enddo
+    enddo
 
     call disp_err( nf90_inq_varid(ncid,"coal_pair_attempts",varid) , .true. )
     call disp_err( nf90_put_var(ncid,varid,coal_pair_attempts,(/time_index/)) , .true. )
