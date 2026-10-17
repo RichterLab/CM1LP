@@ -650,6 +650,10 @@
              pdata(i,prsigsgs) = 0.0
      
              if (testcase.eq.17) then
+                ! FATIMA (testcase 17): A = sea salt, B = sulfate.
+                ! Initial background aerosols are pure sulfate (B).
+                pdata(i,prpop) = pop_b
+                pdata(i,prfracb) = 1.0
                 ! Testcase 17 background aerosols are identified by this kappa.
                 ! They are reinjected after fallout until the reinjection timer ends.
                 pdata(i,prkap) = aerosol_kappa_background
@@ -681,6 +685,10 @@
                 end if
                 pdata(i,prrp0) = pdata(i,prrp)
              else if (testcase.eq.3) then
+                ! BOMEX: A = marine/salt aerosol, B = dust (reserved).
+                ! Keep the existing homogeneous PSD/kappa: no dust yet.
+                pdata(i,prpop) = pop_a
+                pdata(i,prfracb) = 0.0
                 pdata(i,prkap) = 0.6
                 if (psd_sampling_opt.eq.0) then
                    call bomex_lognormal_droplet(pdata(i,prrp), &
@@ -695,6 +703,10 @@
                    stop 'Invalid psd_sampling_opt value'
                 end if
              else
+                ! Testcase 15 (spray) and 16 (PI chamber): A = salt;
+                ! B is unused. Other cases retain this salt-only default.
+                pdata(i,prpop) = pop_a
+                pdata(i,prfracb) = 0.0
                 !Droplet size (radius)
                 pdata(i,prrp) = 2.0e-6
                 pdata(i,prrp0) = 2.0e-6

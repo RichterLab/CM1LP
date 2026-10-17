@@ -6988,6 +6988,7 @@
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
                         prusgs,prvsgs,prwsgs,prsigsgs, &
                         prrp,prrp0,prtp,prms,prkap,pract,prtime, &
+                        prpop,prfracb, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive,numprocs,nparcelsMax, &
                         time_phys_H2D,time_phys_D2H,time_droplet,timestats,mytime, &
                         drop_mult,tsk0,pi_sp,myid,nx,ny,dx,dy
@@ -7119,6 +7120,9 @@
             pdata(np,prrp0) = rad_init
             salinity = 0.034
             pdata(np,prms) = salinity*rhow*4.0/3.0*pi*pdata(np,prrp)**3
+            ! Testcase 15: A = sea salt, B unused. Fresh spray is pure A.
+            pdata(np,prpop) = pop_a
+            pdata(np,prfracb) = 0.0
             pdata(np,prkap) = kappa_s
             pdata(np,prtp) = tsk0   !Set to the SST
             pdata(np,prmult) = drop_mult
@@ -7196,6 +7200,7 @@
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
                         prusgs,prvsgs,prwsgs,prsigsgs, &
                         prrp,prrp0,prtp,prms,prkap,pract,prtime, &
+                        prpop,prfracb, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive, &
                         numprocs,nparcelsMax,tsk0,pi_sp
       use constants
@@ -7310,6 +7315,9 @@
             pdata(np,prrp) = rad_init
             pdata(np,prrp0) = rad_init
             pdata(np,prms) = rho_solute*4.0d0/3.0d0*dble(pi)*dry_rad_init**3
+            ! FATIMA (17): A = sea salt, B = sulfate. Monahan source is A.
+            pdata(np,prpop) = pop_a
+            pdata(np,prfracb) = 0.0
             pdata(np,prkap) = aerosol_kappa_monahan
             pdata(np,prtp) = tsk0
             pdata(np,prmult) = monahan_aerosol_mult
@@ -7412,6 +7420,7 @@
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
                         prusgs,prvsgs,prwsgs,prsigsgs, &
                         prrp,prrp0,prtp,prms,prkap,pract,prtime, &
+                        prpop,prfracb, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive,numprocs,nparcelsMax, &
                         time_phys_H2D,time_phys_D2H,time_droplet,timestats,mytime, &
                         drop_mult,tsk0,pi_sp,myid,nx,ny,nz,dx,dy,dz
@@ -7523,6 +7532,9 @@
             pdata(np,prrp0) = rad_init
             salinity = 0.066
             pdata(np,prms) = salinity*rhow*4.0/3.0*pi*pdata(np,prrp)**3
+            ! Testcase 16: A = salt, B unused. PI chamber source is pure A.
+            pdata(np,prpop) = pop_a
+            pdata(np,prfracb) = 0.0
             pdata(np,prkap) = kappa_s
             pdata(np,prtp) = 290.0  
             pdata(np,prmult) = drop_mult
@@ -7597,6 +7609,7 @@
                         prx,pry,prz,pru,prv,prw,prvpx,prvpy,prvpz, &
                         prusgs,prvsgs,prwsgs,prsigsgs, &
                         prrp,prrp0,prtp,prms,prkap,pract,prtime, &
+                        prpop,prfracb, &
                         prmult,prt,prrho,prprs,prqv,prpidx,prprocidx,nparcelsLocalActive, &
                         drop_mult,pi_sp,maxz,psd_sampling_opt
       use constants
@@ -7681,6 +7694,12 @@
             pdata(np,prvsgs) = 0.0
             pdata(np,prwsgs) = 0.0
             pdata(np,prsigsgs) = 0.0
+            ! FATIMA (17): A = sea salt, B = sulfate. Replacement is pure B.
+            ! Existing source policy: redraw sulfate sizes for option 0;
+            ! preserve buffered dry mass/multiplicity for option 1.
+            ! This creates a background replacement, not a mixed survivor.
+            pdata(np,prpop) = pop_b
+            pdata(np,prfracb) = 1.0
             pdata(np,prkap) = aerosol_kappa_background
             if (psd_sampling_opt.eq.1) then
                pdata(np,prms) = background_reinject_ms(j)
