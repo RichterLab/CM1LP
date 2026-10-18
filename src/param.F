@@ -305,6 +305,8 @@
       call bcast_real(tauc_mult_factor)
       call bcast_int(drop_sgs_opt) ! DEVICE
       call bcast_int(drop_stability_diag)
+      call bcast_int(drop_pop_diag)
+      !$acc update device(drop_pop_diag) if_present
       call bcast_int(psd_sampling_opt)
       call bcast_log(coal_enabled) ! DEVICE
       call bcast_int(coal_kernel) ! DEVICE
@@ -2447,6 +2449,16 @@
       nparcelsInit = max(1_i8,nparcelsInit)
       drop_stability_diag = max(0,min(3,drop_stability_diag))
       !$acc update device(drop_stability_diag) if_present
+      IF( drop_pop_diag.lt.0 .or. drop_pop_diag.gt.1 )THEN
+        if(myid.eq.0)then
+          print *,'  drop_pop_diag = ',drop_pop_diag
+          print *,'  drop_pop_diag must be 0 or 1 '
+        endif
+#ifdef MPI
+        call MPI_BARRIER (MPI_COMM_WORLD,ierr)
+#endif
+        call stopcm1
+      ENDIF
       IF( psd_sampling_opt.lt.0 .or. psd_sampling_opt.gt.1 )THEN
         if(myid.eq.0)then
         print *
@@ -2780,6 +2792,7 @@
       if(dowr) write(outfile,*) 'tauc_mult_factor=',tauc_mult_factor
       if(dowr) write(outfile,*) 'drop_sgs_opt=',drop_sgs_opt
       if(dowr) write(outfile,*) 'drop_stability_diag=',drop_stability_diag
+      if(dowr) write(outfile,*) 'drop_pop_diag=',drop_pop_diag
       if(dowr) write(outfile,*) 'psd_sampling_opt=',psd_sampling_opt
       if(dowr) write(outfile,*) 'coal_enabled=',coal_enabled
       if(dowr) write(outfile,*) 'coal_kernel=',coal_kernel

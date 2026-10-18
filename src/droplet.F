@@ -61,6 +61,288 @@
   double precision :: coal_pair_attempts,coal_pair_successes,coal_collision_mult
   double precision :: coal_palpha_sum,coal_palpha_mean,coal_palpha_max,coal_gamtil_max
 
+  ! Optional instantaneous diagnostics, total/A/B/mixed; host output buffers.
+  double precision, parameter :: pop_diag_missing = 9.969209968386869d36
+  double precision :: pop_diag_domain(4,7)
+  double precision, allocatable :: pop_diag_profile(:,:,:)
+  character(len=6), parameter :: pop_diag_suffix(4) = &
+       (/ '_total', '_a    ', '_b    ', '_mixed' /)
+  character(len=24), parameter :: pop_diag_names(7) = [character(len=24) :: &
+       'dry_mass','component_a_mass','component_b_mass','ncoll_mean', &
+       'ncoll_max','collided_fraction','fracb_drymass_mean']
+  character(len=100), parameter :: pop_diag_descriptions(7) = [character(len=100) :: &
+       'Dry solute mass including multiplicity', &
+       'Component A dry mass including material in mixed droplets', &
+       'Component B dry mass including material in mixed droplets', &
+       'Multiplicity-weighted mean ancestral collisions per physical droplet', &
+       'Maximum ancestral collisions per physical droplet', &
+       'Fraction of physical droplets with ancestral collisions greater than zero', &
+       'Component B dry mass divided by total dry mass']
+
+  ! Full optional A/B/mixed diagnostic families. Interval accumulators
+  ! stay rank-local until output; snapshots and reductions live on the host.
+  double precision :: pop_events(3,18),pop_hist_events(nbins,3,4)
+  double precision :: pop_restime(nbins,nbins,3)
+  double precision :: pop_snapshot_domain(3,17),pop_hist_output(nbins,3,16)
+  double precision, allocatable :: pop_snapshot_profile(:,:,:)
+  double precision, allocatable :: pop_feedback(:,:,:,:,:)
+  !$acc declare create(pop_events,pop_hist_events,pop_restime,pop_feedback)
+  character(len=32), parameter :: pop_domain_names(17) = [character(len=32) :: &
+       'tnumpart', &
+       'tnummult', &
+       'tnumaerosol', &
+       'tnumdrop', &
+       'tmasspart', &
+       'radavg', &
+       'radsqr', &
+       'Tpavg', &
+       'Tpsqr', &
+       'Tfavg', &
+       'qfavg', &
+       'prsavg', &
+       'rhoavg', &
+       'radmin', &
+       'radmax', &
+       'Tpmin', &
+       'Tpmax']
+  character(len=24), parameter :: pop_domain_units(17) = [character(len=24) :: &
+       'No units', &
+       'No units', &
+       'No units', &
+       'No units', &
+       'kg', &
+       'm', &
+       'm^2', &
+       'K', &
+       'K^2', &
+       'K', &
+       'kg/kg', &
+       'Pa', &
+       'kg/m^3', &
+       'm', &
+       'm', &
+       'K', &
+       'K']
+  character(len=160), parameter :: pop_domain_desc(17) = [character(len=160) :: &
+       'Total number of computational droplets in domain', &
+       'Total number of droplets in domain (including multiplicity)', &
+       'Total number of unactivated aerosols in domain (including multiplicity)', &
+       'Total number of activated droplets in domain (including multiplicity)', &
+       'Total mass of liquid water in droplets (including multiplicity)', &
+       'Multiplicity-weighted average droplet radius', &
+       'Multiplicity-weighted average squared droplet radius', &
+       'Multiplicity-weighted average droplet temperature', &
+       'Multiplicity-weighted average squared droplet temperature', &
+       'Multiplicity-weighted average air temperature seen by droplets', &
+       'Multiplicity-weighted average water vapor mixing ratio seen by droplets', &
+       'Multiplicity-weighted average air pressure seen by droplets', &
+       'Multiplicity-weighted average air density seen by droplets', &
+       'Minimum droplet radius for all droplets', &
+       'Maximum droplet radius for all droplets', &
+       'Minimum droplet temperature for all droplets', &
+       'Maximum droplet temperature for all droplets']
+  character(len=32), parameter :: pop_profile_names(30) = [character(len=32) :: &
+       'numconc', &
+       'sd_numconc', &
+       'massconc', &
+       'vp1mean', &
+       'vp2mean', &
+       'vp3mean', &
+       'uf1mean', &
+       'uf2mean', &
+       'uf3mean', &
+       'usgsmean', &
+       'vsgsmean', &
+       'wsgsmean', &
+       'sigm_smean', &
+       'vp1msqr', &
+       'vp2msqr', &
+       'vp3msqr', &
+       'Tf', &
+       'qf', &
+       'Tpmean', &
+       'Tpmsqr', &
+       'radmean', &
+       'radmsqr', &
+       'qfsat', &
+       'qstarmean', &
+       'm1src', &
+       'm2src', &
+       'm3src', &
+       'Tpsrc', &
+       'qvsrc', &
+       'rhovsrc']
+  character(len=24), parameter :: pop_profile_units(30) = [character(len=24) :: &
+       '#/m^3', &
+       '#/m^3', &
+       'kg m-3', &
+       'm/s', &
+       'm/s', &
+       'm/s', &
+       'm/s', &
+       'm/s', &
+       'm/s', &
+       'm/s', &
+       'm/s', &
+       'm/s', &
+       'm^2/s^2', &
+       'm^2/s^2', &
+       'm^2/s^2', &
+       'm^2/s^2', &
+       'K', &
+       'kg/kg', &
+       'K', &
+       'K^2', &
+       'm', &
+       'm^2', &
+       'kg/kg', &
+       'kg/kg', &
+       'm/s^2', &
+       'm/s^2', &
+       'm/s^2', &
+       'K/s', &
+       '(kg/kg)/s', &
+       '(kg/m^3)/s']
+  character(len=160), parameter :: pop_profile_desc(30) = [character(len=160) :: &
+       'Horizontally averaged number concentration of droplets (including multiplicity)', &
+       'Horizontally averaged number concentration of superdroplets', &
+       'Horizontally averaged mass concentration of droplets (including multiplicity)', &
+       'Multiplicity-weighted droplet u-velocity', &
+       'Multiplicity-weighted droplet v-velocity', &
+       'Multiplicity-weighted droplet w-velocity', &
+       'Multiplicity-weighted air u-velocity seen by droplets', &
+       'Multiplicity-weighted air v-velocity seen by droplets', &
+       'Multiplicity-weighted air w-velocity seen by droplets', &
+       'Multiplicity-weighted droplet SGS u-velocity', &
+       'Multiplicity-weighted droplet SGS v-velocity', &
+       'Multiplicity-weighted droplet SGS w-velocity', &
+       'Multiplicity-weighted droplet SGS velocity variance sigm_s', &
+       'Multiplicity-weighted squared droplet u-velocity <up^2>', &
+       'Multiplicity-weighted squared droplet v-velocity <vp^2>', &
+       'Multiplicity-weighted squared droplet w-velocity <wp^2>', &
+       'Multiplicity-weighted air temperature at droplet locations', &
+       'Multiplicity-weighted water vapor mixing ratio at droplet locations', &
+       'Multiplicity-weighted droplet temperature', &
+       'Multiplicity-weighted squared droplet temperature <Tp^2>', &
+       'Multiplicity-weighted droplet radius', &
+       'Multiplicity-weighted squared droplet radius <rp^2>', &
+       'Multiplicity-weighted ambient saturation mixing ratio at droplet locations', &
+       'Multiplicity-weighted saturation mixing ratio on droplet surfaces', &
+       'Droplet-induced tendency term for the u-velocity', &
+       'Droplet-induced tendency term for the v-velocity', &
+       'Droplet-induced tendency term for the w-velocity', &
+       'Droplet-induced tendency term for the potential temperature', &
+       'Droplet-induced tendency term for the water vapor mixing ratio', &
+       'Droplet-induced tendency term for the water vapor density']
+  character(len=32), parameter :: pop_event_names(18) = [character(len=32) :: &
+       'num_destroyed', &
+       'mass_destroyed', &
+       'eng_destroyed', &
+       'm1_destroyed', &
+       'm2_destroyed', &
+       'mass_reentry', &
+       'eng_reentry', &
+       'm1_reentry', &
+       'm2_reentry', &
+       'mass_evap', &
+       'num100', &
+       'num1000', &
+       'num_injected', &
+       'mass_injected', &
+       'eng_injected', &
+       'm1_injected', &
+       'm2_injected', &
+       'mass_dpten']
+  character(len=24), parameter :: pop_event_units(18) = [character(len=24) :: &
+       '#', &
+       'kg', &
+       'J', &
+       'kg-m/s', &
+       'kg-m/s', &
+       'kg', &
+       'J', &
+       'kg m s-1', &
+       'kg m s-1', &
+       'kg', &
+       'No units', &
+       'No units', &
+       '#', &
+       'kg', &
+       'J', &
+       'kg-m/s', &
+       'kg-m/s', &
+       'kg']
+  character(len=160), parameter :: pop_event_desc(18) = [character(len=160) :: &
+       'Number of droplets that fell out since last entry', &
+       'Mass droplets that fell out since last entry', &
+       'Total internal energy in droplets that fell out since last entry', &
+       'Total x-momentum in droplets that fell out since last entry', &
+       'Total y-momentum in droplets that fell out since last entry', &
+       'Net change in re-entrant droplet mass since last entry', &
+       'Net change in re-entrant droplet energy since last entry', &
+       'Net change in re-entrant droplet x-momentum since last entry', &
+       'Net change in re-entrant droplet y-momentum since last entry', &
+       'Total change in mass due to evaporation since last entry', &
+       'Number of superdroplets which required solver fallback since last dropdiag', &
+       'Number of superdroplets with failed fallback solves since last dropdiag', &
+       'Number of droplets injected since last entry', &
+       'Total mass of droplets injected since last entry', &
+       'Total internal energy of droplets injected since last entry', &
+       'Total x-momentum of droplets injected since last entry', &
+       'Total y-momentum of droplets injected since last entry', &
+       'Total change in vapor source due to evaporation since last entry']
+  character(len=32), parameter :: pop_hist_names(16) = [character(len=32) :: &
+       'hist_radius', &
+       'hist_dry_radius', &
+       'hist_radius10', &
+       'tnumpart_r', &
+       'dN_dr', &
+       'dN_dlogr', &
+       'dN_dr_dry', &
+       'dN_dlogr_dry', &
+       'hist_fallrad', &
+       'hist_injected', &
+       'hist_dry_injected', &
+       'hist_solver_failure_dry_radius', &
+       'SSGF_injected', &
+       'SSGF_dry_injected', &
+       'dN_dlogr_injected', &
+       'dN_dlogr_dry_injected']
+  character(len=24), parameter :: pop_hist_units(16) = [character(len=24) :: &
+       '#', &
+       '#', &
+       '#', &
+       '#', &
+       'cm^-3 um^-1', &
+       'cm^-3', &
+       'cm^-3 um^-1', &
+       'cm^-3', &
+       '#', &
+       '#', &
+       '#', &
+       '# of superdroplets', &
+       'm^-2 s^-1 um^-1', &
+       'm^-2 s^-1 um^-1', &
+       'm^-2 s^-1', &
+       'm^-2 s^-1']
+  character(len=160), parameter :: pop_hist_desc(16) = [character(len=160) :: &
+       'total count for each bin', &
+       'total count for each dry-radius bin from solute mass', &
+       'total count for each bin only for those under 10m', &
+       'Superdroplet count as a function of radius, binned by bins_radius', &
+       'droplet number concentration per wet-radius interval', &
+       'droplet number concentration per log10 wet-radius interval', &
+       'aerosol number concentration per dry-radius interval', &
+       'aerosol number concentration per log10 dry-radius interval', &
+       'total radius count of droplet which fell out over the past statfrq time', &
+       'radius histogram of droplets injected over the past statfrq time', &
+       'dry-radius histogram of droplets injected over the past statfrq time', &
+       'failed superdroplet solves by dry-radius bin since the previous dropdiag record', &
+       'injected droplet size distribution normalized by area, time, and radius-bin width', &
+       'injected dry-radius distribution normalized by area, time, and radius-bin width', &
+       'injected droplet size distribution normalized by area, time, and log10 radius-bin width', &
+       'injected dry-radius distribution normalized by area, time, and log10 radius-bin width']
+
   real, allocatable, dimension(:) :: sfs_fs_profile
 
   integer :: particle_seed
@@ -169,6 +451,8 @@
   !$acc                 drop_solver_iteration_sums,background_reinject_count)
   !$acc declare copyin(hall_r0,hall_rat,hall_ecoll)
 
+  public :: finish_population_feedback
+
   CONTAINS
 
       subroutine droplet_driver (dt,dbldt,mtime,xh,uh,ruh,xf,yh,vh, &
@@ -196,7 +480,7 @@
           mywest,myid,nparcelsLocal,nparcelsLocalActive, &
           time_phys_H2D,time_phys_D2H,time_dropC1,time_dropC2,time_dropC3, &
           time_dropC4,ngxy,dx,dy,dz,testcase,drop_sgs_opt,drop_stability_diag, &
-          psd_sampling_opt
+          psd_sampling_opt,drop_pop_diag
       use constants
       use comm_module
       use comm_droplet_module
@@ -290,6 +574,7 @@
       type(randomNumberSequence) :: randomNumbers
 
       integer :: num_fallout,num_fallout_reinject,idx   !droplets which fell out of domain
+      integer :: population_slot
       integer :: background_reinject_slot
       integer :: dlogsig_valid,dlogsig_count
       integer :: dlogsig_gt05,dlogsig_gt1,dlogsig_gt2,dlogsig_gt5
@@ -348,6 +633,7 @@
       particle_seed = int(mtime) * 1000 + myid
       call new_RandomNumberSequence(randomNumbers, particle_seed)
 
+      if( drop_pop_diag.eq.1 ) call prepare_population_feedback()
       num_fallout = 0  !Reset the number of droplets that have fallen out of physical domain
       num_fallout_reinject = 0
       if (testcase.eq.17 .and. psd_sampling_opt.eq.1 .and. &
@@ -560,7 +846,7 @@
 
     !JMD WARNING: Loop does not yet match CPU version.
     !$acc parallel default(present)
-    !$acc loop gang vector private(dlogsig_abs,dlogsig_valid,background_reinject_slot) &
+    !$acc loop gang vector private(dlogsig_abs,dlogsig_valid,background_reinject_slot,population_slot) &
     !$acc reduction(+:num_fallout,num_fallout_reinject) reduction(max:errcode) &
     !$acc reduction(+:dlogsig_sum,dlogsig_count,dlogsig_gt05,dlogsig_gt1,dlogsig_gt2,dlogsig_gt5) &
     !$acc reduction(max:dlogsig_max) &
@@ -755,6 +1041,8 @@
       dmpdt  = (rhow*4.0/3.0*pi*pdata(np,prrp)**3-dmpdt)/dt
 
       mass_evap = mass_evap + dmpdt*dt*pdata(np,prmult)
+            call population_event(pdata(np,prpop),10, &
+                 dble(dmpdt*dt*pdata(np,prmult)))
 
 
       !Project the feedback onto the grid, using ORIGINAL location
@@ -763,6 +1051,17 @@
                             xh,xf,yh,yf,zh,zf,sigma,sigmaf, &
                             sigdot,dvpdt1,dvpdt2,dvpdt3,drpdt,dtpdt,dmpdt, &
                             rhoval,part_grav1,part_grav2,part_grav3,pdata,np)
+      if( drop_pop_diag.eq.1 )then
+        population_slot = population_index(pdata(np,prpop))
+        if( population_slot.ge.1 )then
+      call project_feedback(iflag,jflag,kflag,x3d0,y3d0,z3d0,sig3d0, &
+                            rhop0,taup0,rp0,tval,pop_feedback(:,:,:,:,population_slot), &
+                            xh,xf,yh,yf,zh,zf,sigma,sigmaf, &
+                            sigdot,dvpdt1,dvpdt2,dvpdt3,drpdt,dtpdt,dmpdt, &
+                            rhoval,part_grav1,part_grav2,part_grav3,pdata,np)
+        endif
+      endif
+
 
     END DO nploop
     !$acc end parallel
@@ -788,6 +1087,8 @@
     end if
 
 
+    if( drop_pop_diag.eq.1 ) call population_feedback_mass(dt,rho,ruh,rvh,rmh)
+
     !$acc parallel default(present) private(i,j,k) reduction(+:foot,mass_dpten)
     !$acc loop gang reduction(+:mass_dpten)
     do k=1,nk
@@ -804,11 +1105,17 @@
 
 
     !$acc parallel default(present)
-    !$acc loop gang vector collapse(3)
+    !$acc loop gang vector collapse(3) private(population_slot)
     do k=kb,ke
        do j=jb,je
           do i=ib,ie
              dpten(i,j,k,1) = dpten(i,j,k,1)*pi0(i,j,k)
+             if( drop_pop_diag.eq.1 )then
+               !$acc loop seq
+               do population_slot=1,3
+                 pop_feedback(i,j,k,1,population_slot) = pop_feedback(i,j,k,1,population_slot)*pi0(i,j,k)
+               enddo
+             endif
           end do
        end do
     end do
@@ -3075,7 +3382,7 @@
       use input, only : ib,ie,jb,je,kb,ke,numq,npvals,nx,ny,viscosity, &
           pr_num,sc_num,axisymm,terrain_flag,maxz,minx,maxx,miny,maxy, &
           prvpx,prvpy,prvpz,prusgs,prvsgs,prwsgs,prsigsgs, &
-          prrp,prrp0,prms,prkap,prtp,prx,pry,prsig, &
+          prrp,prrp0,prms,prkap,prtp,prpop,prx,pry,prsig, &
           prz,pru,prv, &
           prw,prt,prqv,prprs,prrho,pract,prtime,prmult,ni,nj,mywest, &
           mysw,mynw,myeast,myse,myne,mysouth,mynorth,nparcelsLocal, &
@@ -3266,6 +3573,8 @@
       if (flag.ne.0) then
          gn_reason = flag
          num100 = num100+1.0
+            call population_event(pdata(np,prpop),11, &
+                 dble(1.0))
          if (drop_stability_diag.ge.2) then
             !$acc atomic update
             drop_solver_fallback_substep = drop_solver_fallback_substep + 1
@@ -3294,6 +3603,8 @@
       if (flag.ne.0)  then
 
        num1000 = num1000+1.0
+            call population_event(pdata(np,prpop),12, &
+                 dble(1.0))
        if (drop_stability_diag.ge.2) then
           !$acc atomic update
           drop_solver_failure_substep = drop_solver_failure_substep + 1
@@ -3324,6 +3635,7 @@
           !$acc atomic update
           hist_solver_failure_dry_radius(fail_dry_bin) = &
              hist_solver_failure_dry_radius(fail_dry_bin) + 1.0d0
+            call population_hist_event(pdata(np,prpop),4,fail_dry_bin,dble(1.0d0))
        endif
 
        !If this happens keep radius unchanged and temp equal to surrounding
@@ -3446,23 +3758,41 @@
             !Collect some statistics on those falling out:
 
             num_destroyed = num_destroyed + pdata(np,prmult)
+            call population_event(pdata(np,prpop),1, &
+                 dble(pdata(np,prmult)))
 
             mass_destroyed = mass_destroyed + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)
+            call population_event(pdata(np,prpop),2, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)))
 
             eng_destroyed = eng_destroyed + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp)
+            call population_event(pdata(np,prpop),3, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp)))
 
             m1_destroyed = m1_destroyed + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpx)
+            call population_event(pdata(np,prpop),4, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpx)))
  
             m2_destroyed = m2_destroyed + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy)
+            call population_event(pdata(np,prpop),5, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy)))
  
             !Reentry is initial minus final
             mass_reentry = mass_reentry + ( (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp0)**3)*pdata(np,prmult) - (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult) )
+            call population_event(pdata(np,prpop),6, &
+                 dble(( (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp0)**3)*pdata(np,prmult) - (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult) )))
 
             eng_reentry = eng_reentry + ( (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp0)**3)*pdata(np,prmult)*cpl*tsk0 -(pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp) ) 
+            call population_event(pdata(np,prpop),7, &
+                 dble(( (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp0)**3)*pdata(np,prmult)*cpl*tsk0 -(pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp) )))
 
             m1_reentry = m1_reentry + ( 0 - (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpx) )
+            call population_event(pdata(np,prpop),8, &
+                 dble(( 0 - (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpx) )))
  
             m2_reentry = m2_reentry + ( 0 - (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy) )
+            call population_event(pdata(np,prpop),9, &
+                 dble(( 0 - (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy) )))
  
             !Log this dead particle into the relevant histograms
             !First residence time
@@ -3489,9 +3819,11 @@
 
             !$acc atomic update
             hist_restime(ibin_res,ibin) = hist_restime(ibin_res,ibin) + pdata(np,prmult)
+            call population_residence_event(pdata(np,prpop),ibin_res,ibin,dble(pdata(np,prmult)))
 
             !$acc atomic update
             hist_fallrad(ibin) = hist_fallrad(ibin) + pdata(np,prmult)
+            call population_hist_event(pdata(np,prpop),1,ibin,dble(pdata(np,prmult)))
 
 
             !If it was killed, set parameters to undefined so it gets removed from list later
@@ -4742,6 +5074,589 @@
 
       end subroutine project_feedback
 
+      integer function population_index(pop) result(p)
+      !$acc routine seq
+      use constants, only : pop_a,pop_b,pop_mixed
+      implicit none
+      real, intent(in) :: pop
+      p = 0
+      if( pop.eq.pop_a ) p = 1
+      if( pop.eq.pop_b ) p = 2
+      if( pop.eq.pop_mixed ) p = 3
+      end function population_index
+
+      subroutine population_event(pop,event,value)
+      !$acc routine seq
+      use input, only : drop_pop_diag
+      implicit none
+      real, intent(in) :: pop
+      integer, intent(in) :: event
+      double precision, intent(in) :: value
+      integer :: p
+      if( drop_pop_diag.ne.1 ) return
+      p = population_index(pop)
+      if( p.eq.0 ) return
+      !$acc atomic update
+      pop_events(p,event) = pop_events(p,event)+value
+      end subroutine population_event
+
+      subroutine population_hist_event(pop,event,bin,value)
+      !$acc routine seq
+      use input, only : drop_pop_diag
+      implicit none
+      real, intent(in) :: pop
+      integer, intent(in) :: event,bin
+      double precision, intent(in) :: value
+      integer :: p
+      if( drop_pop_diag.ne.1 ) return
+      p = population_index(pop)
+      if( p.eq.0 ) return
+      !$acc atomic update
+      pop_hist_events(bin,p,event) = pop_hist_events(bin,p,event)+value
+      end subroutine population_hist_event
+
+      subroutine population_residence_event(pop,agebin,rbin,value)
+      !$acc routine seq
+      use input, only : drop_pop_diag
+      implicit none
+      real, intent(in) :: pop
+      integer, intent(in) :: agebin,rbin
+      double precision, intent(in) :: value
+      integer :: p
+      if( drop_pop_diag.ne.1 ) return
+      p = population_index(pop)
+      if( p.eq.0 ) return
+      !$acc atomic update
+      pop_restime(agebin,rbin,p) = pop_restime(agebin,rbin,p)+value
+      end subroutine population_residence_event
+
+      subroutine reset_population_events()
+      use input, only : drop_pop_diag
+      implicit none
+      if( drop_pop_diag.ne.1 ) return
+      pop_events = 0.0d0
+      pop_hist_events = 0.0d0
+      pop_restime = 0.0d0
+      !$acc update device(pop_events,pop_hist_events,pop_restime)
+      end subroutine reset_population_events
+
+      subroutine reduce_population_events()
+      use input, only : myid
+#ifdef MPI
+      use mpi
+#endif
+      implicit none
+      integer :: ierr,p,b
+      double precision :: area,dr,dlogr
+      !$acc update host(pop_events,pop_hist_events,pop_restime)
+#ifdef MPI
+      call MPI_ALLREDUCE(MPI_IN_PLACE,pop_events,size(pop_events),MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,pop_hist_events,size(pop_hist_events),MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,pop_restime,size(pop_restime),MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
+#endif
+      if( myid.ne.0 ) return
+      area = population_domain_area()
+      pop_hist_output(:,:,9:12) = pop_hist_events
+      pop_hist_output(:,:,13:16) = 0.0d0
+      if( area.gt.0.0d0 .and. hist_injected_elapsed.gt.0.0d0 )then
+        do p=1,3
+        do b=1,nbins
+          dlogr = dble(bins_radius_edge(b+1)-bins_radius_edge(b))
+          dr = 10.0d0**dble(bins_radius(b))* &
+               (10.0d0**(0.5d0*dlogr)-10.0d0**(-0.5d0*dlogr))*1.0d6
+          if( dr.gt.0.0d0 .and. dlogr.gt.0.0d0 )then
+            pop_hist_output(b,p,13:14) = pop_hist_events(b,p,2:3)/(area*hist_injected_elapsed*dr)
+            pop_hist_output(b,p,15:16) = pop_hist_events(b,p,2:3)/(area*hist_injected_elapsed*dlogr)
+          endif
+        enddo
+        enddo
+      endif
+      end subroutine reduce_population_events
+
+      double precision function population_domain_area() result(area)
+      use input, only : dx,dy,nx,ny,stretch_x,stretch_y,tot_x_len,tot_y_len
+      implicit none
+      double precision :: xlen,ylen
+      xlen = dble(dx)*dble(nx)
+      ylen = dble(dy)*dble(ny)
+      if( stretch_x.ne.0 ) xlen = dble(tot_x_len)
+      if( stretch_y.ne.0 ) ylen = dble(tot_y_len)
+      area = xlen*ylen
+      end function population_domain_area
+
+      subroutine prepare_population_feedback()
+      use input, only : ib,ie,jb,je,kb,ke
+      implicit none
+      integer :: i,j,k,c,p
+      if( .not.allocated(pop_feedback) )then
+        ! Module DECLARE CREATE allocates and attaches device storage here.
+        allocate(pop_feedback(ib:ie,jb:je,kb:ke,5,3))
+      endif
+      !$acc parallel loop gang vector collapse(5) default(present)
+      do p=1,3
+      do c=1,5
+      do k=kb,ke
+      do j=jb,je
+      do i=ib,ie
+        pop_feedback(i,j,k,c,p) = 0.0d0
+      enddo
+      enddo
+      enddo
+      enddo
+      enddo
+      !$acc end parallel
+      end subroutine prepare_population_feedback
+
+      subroutine finish_population_feedback()
+      use input, only : ib,jb,kb
+      use comm_module
+      use bc_module, only : bcs_tend_halo
+      implicit none
+      integer :: p
+      if( .not.allocated(pop_feedback) ) return
+      do p=1,3
+#ifdef MPI
+        call comm_1s_tend_halo(pop_feedback(ib,jb,kb,1,p))
+        call comm_1s_tend_halo(pop_feedback(ib,jb,kb,2,p))
+        call comm_1u_tend_halo(pop_feedback(ib,jb,kb,3,p))
+        call comm_1v_tend_halo(pop_feedback(ib,jb,kb,4,p))
+        call comm_1s_tend_halo(pop_feedback(ib,jb,kb,5,p))
+#else
+        call bcs_tend_halo(pop_feedback(ib,jb,kb,1,p))
+        call bcs_tend_halo(pop_feedback(ib,jb,kb,2,p))
+#endif
+      enddo
+      end subroutine finish_population_feedback
+
+      subroutine population_feedback_mass(dt,rho,ruh,rvh,rmh)
+      ! Mirrors mass_dpten before tendency halo exchange, including its
+      ! metric weights and substep interval. Does not modify model tendencies.
+      use input, only : ib,ie,jb,je,kb,ke,ni,nj,nk,dx,dy,dz
+      implicit none
+      real, intent(in) :: dt,rho(ib:ie,jb:je,kb:ke),ruh(ib:ie),rvh(jb:je),rmh(ib:ie,jb:je,kb:ke)
+      integer :: i,j,k,p
+      double precision :: value
+      !$acc parallel loop gang vector collapse(4) default(present) private(value)
+      do p=1,3
+      do k=1,nk
+      do j=1,nj
+      do i=1,ni
+        value = rho(i,j,k)*pop_feedback(i,j,k,2,p)*ruh(i)*rvh(j)*rmh(i,j,k)*dt*(dx*dy*dz)
+        !$acc atomic update
+        pop_events(p,18) = pop_events(p,18)+value
+      enddo
+      enddo
+      enddo
+      enddo
+      !$acc end parallel
+      end subroutine population_feedback_mass
+
+#ifdef NETCDF
+      subroutine define_population_extra_nc(ncid,timeid,zhid,binsid)
+      use netcdf
+      use writeout_nc_module, only : disp_err
+      implicit none
+      integer, intent(in) :: ncid,timeid,zhid,binsid
+      integer :: p,m
+      do p=1,3
+        do m=1,17
+          call define_population_variable(ncid,trim(pop_domain_names(m))//trim(pop_diag_suffix(p+1)), &
+               pop_domain_units(m),pop_domain_desc(m),[timeid],p,'instantaneous')
+        enddo
+        do m=1,30
+          call define_population_variable(ncid,trim(pop_profile_names(m))//trim(pop_diag_suffix(p+1)), &
+               pop_profile_units(m),pop_profile_desc(m),[zhid,timeid],p,'instantaneous')
+        enddo
+        do m=1,18
+          call define_population_variable(ncid,trim(pop_event_names(m))//trim(pop_diag_suffix(p+1)), &
+               pop_event_units(m),pop_event_desc(m),[timeid],p,'since previous diagnostic record')
+        enddo
+        do m=1,16
+          call define_population_variable(ncid,trim(pop_hist_names(m))//trim(pop_diag_suffix(p+1)), &
+               pop_hist_units(m),pop_hist_desc(m),[binsid,timeid],p, &
+               merge('instantaneous                   ','since previous diagnostic record',m.le.8))
+        enddo
+        call define_population_variable(ncid,'hist_restime'//trim(pop_diag_suffix(p+1)), &
+             '#','Residence-time and radius histogram of fallout',[binsid,binsid,timeid],p, &
+             'since previous diagnostic record')
+      enddo
+      end subroutine define_population_extra_nc
+
+      subroutine define_population_variable(ncid,name,units,description,dims,p,temporal)
+      use netcdf
+      use writeout_nc_module, only : disp_err
+      implicit none
+      integer, intent(in) :: ncid,dims(:),p
+      character(len=*), intent(in) :: name,units,description,temporal
+      integer :: varid
+      call disp_err(nf90_def_var(ncid,trim(name),nf90_double,dims,varid),.true.)
+      call disp_err(nf90_put_att(ncid,varid,'_FillValue',pop_diag_missing),.true.)
+      call disp_err(nf90_put_att(ncid,varid,'long_name',trim(description)),.true.)
+      call disp_err(nf90_put_att(ncid,varid,'units',trim(units)),.true.)
+      call disp_err(nf90_put_att(ncid,varid,'population',trim(pop_diag_suffix(p+1))),.true.)
+      call disp_err(nf90_put_att(ncid,varid,'time_meaning',trim(temporal)),.true.)
+      end subroutine define_population_variable
+
+      subroutine write_population_extra_nc(ncid,time_index)
+      use netcdf
+      use writeout_nc_module, only : disp_err
+      implicit none
+      integer, intent(in) :: ncid,time_index
+      integer :: p,m,varid
+      do p=1,3
+        do m=1,17
+          call disp_err(nf90_inq_varid(ncid,trim(pop_domain_names(m))//trim(pop_diag_suffix(p+1)),varid),.true.)
+          call disp_err(nf90_put_var(ncid,varid,pop_snapshot_domain(p,m),[time_index]),.true.)
+        enddo
+        do m=1,30
+          call disp_err(nf90_inq_varid(ncid,trim(pop_profile_names(m))//trim(pop_diag_suffix(p+1)),varid),.true.)
+          call disp_err(nf90_put_var(ncid,varid,pop_snapshot_profile(:,p,m),[1,time_index]),.true.)
+        enddo
+        do m=1,18
+          call disp_err(nf90_inq_varid(ncid,trim(pop_event_names(m))//trim(pop_diag_suffix(p+1)),varid),.true.)
+          call disp_err(nf90_put_var(ncid,varid,pop_events(p,m),[time_index]),.true.)
+        enddo
+        do m=1,16
+          call disp_err(nf90_inq_varid(ncid,trim(pop_hist_names(m))//trim(pop_diag_suffix(p+1)),varid),.true.)
+          call disp_err(nf90_put_var(ncid,varid,pop_hist_output(:,p,m),[1,time_index]),.true.)
+        enddo
+        call disp_err(nf90_inq_varid(ncid,'hist_restime'//trim(pop_diag_suffix(p+1)),varid),.true.)
+        call disp_err(nf90_put_var(ncid,varid,pop_restime(:,:,p),[1,1,time_index]),.true.)
+      enddo
+      end subroutine write_population_extra_nc
+#endif
+
+      subroutine population_snapshot(pdata,zfaces,rho)
+      ! Mirrors existing snapshot diagnostics. No height-radius arrays.
+      use input
+      use constants
+      use cm1libs, only : eslf
+#ifdef MPI
+      use mpi
+#endif
+      implicit none
+      real, intent(in) :: pdata(nparcelsLocal,npvals),zfaces(kb:ke+1)
+      real, intent(in) :: rho(ib:ie,jb:je,kb:ke)
+      double precision, allocatable :: moments(:,:,:)
+      double precision :: domains(3,13),low(3,2),high(3,2),histograms(nbins,3,4)
+      double precision :: dv(13),pv(24),weight,radius,mass,qstar_tmp
+      double precision :: area,volume,domain_volume,dlogr,dr
+      real :: lograd,logdry
+      integer :: np,k,p,j,i,m,kflag,bin,drybin,mpierr
+      allocate(moments(nk,3,30))
+      domains=0.0d0
+      moments=0.0d0
+      histograms=0.0d0
+      low=huge(1.0d0)
+      high=-huge(1.0d0)
+      !$acc parallel loop gang vector default(present) &
+      !$acc copy(domains,moments,histograms,low,high) copyin(zfaces) &
+      !$acc private(k,p,m,kflag,bin,drybin,dv,pv,weight,radius,mass,qstar_tmp,lograd,logdry)
+      do np=1,nparcelsLocalActive
+        p=population_index(pdata(np,prpop))
+        if( p.eq.0 .or. pdata(np,pract).le.0.0 ) cycle
+        if( pdata(np,prz).le.zfaces(kb) )then
+          k=1
+        elseif( pdata(np,prz).ge.zfaces(ke+1) )then
+          k=nk
+        else
+          kflag=1
+          k=undefined_index
+          call find_vertical_location_index(k,pdata(np,prz),kb,ke+1,zfaces,kflag,.FALSE.)
+          k=max(1,min(nk,k))
+        endif
+        weight=dble(pdata(np,prmult))
+        radius=dble(pdata(np,prrp))
+        mass=dble(rhow*4.0/3.0*pi*pdata(np,prrp)**3)
+        dv(1)=1.0d0
+        dv(2)=weight
+        dv(3)=0.0d0
+        dv(4)=0.0d0
+        if( pdata(np,prrp).lt.crit_radius(pdata(np,prms),pdata(np,prkap),pdata(np,prt)) )then
+          dv(3)=weight
+        else
+          dv(4)=weight
+        endif
+        dv(5)=mass*weight
+        dv(6)=dble(pdata(np,prrp))*weight
+        dv(7)=dble(pdata(np,prrp))**2*weight
+        dv(8)=dble(pdata(np,prtp))*weight
+        dv(9)=dble(pdata(np,prtp))**2*weight
+        dv(10)=dble(pdata(np,prt))*weight
+        dv(11)=dble(pdata(np,prqv))*weight
+        dv(12)=dble(pdata(np,prprs))*weight
+        dv(13)=dble(pdata(np,prrho))*weight
+        pv(1)=weight
+        pv(2)=1.0d0
+        ! Existing profile mass includes dry solute as well as liquid.
+        pv(3)=(mass+dble(pdata(np,prms)))*weight
+        pv(4)=dble(pdata(np,prvpx))*weight
+        pv(5)=dble(pdata(np,prvpy))*weight
+        pv(6)=dble(pdata(np,prvpz))*weight
+        pv(7)=dble(pdata(np,pru))*weight
+        pv(8)=dble(pdata(np,prv))*weight
+        pv(9)=dble(pdata(np,prw))*weight
+        pv(10)=dble(pdata(np,prusgs))*weight
+        pv(11)=dble(pdata(np,prvsgs))*weight
+        pv(12)=dble(pdata(np,prwsgs))*weight
+        pv(13)=dble(pdata(np,prsigsgs))*weight
+        pv(14)=dble(pdata(np,prvpx))**2*weight
+        pv(15)=dble(pdata(np,prvpy))**2*weight
+        pv(16)=dble(pdata(np,prvpz))**2*weight
+        pv(17)=dble(pdata(np,prt))*weight
+        pv(18)=dble(pdata(np,prqv))*weight
+        pv(19)=dble(pdata(np,prtp))*weight
+        pv(20)=dble(pdata(np,prtp))**2*weight
+        pv(21)=dble(pdata(np,prrp))*weight
+        pv(22)=dble(pdata(np,prrp))**2*weight
+        pv(23:24)=0.0d0
+        if( pdata(np,prt).gt.200.0 )then
+          call calc_qstar(qstar_tmp,pdata(np,prprs),pdata(np,prrho),pdata(np,prt), &
+               pdata(np,prqv),pdata(np,prtp),pdata(np,prms),pdata(np,prkap),pdata(np,prrp))
+          pv(23)=eslf(pdata(np,prprs),pdata(np,prt))* &
+               (mw/(ru*pdata(np,prt)*pdata(np,prrho)))*weight
+          pv(24)=qstar_tmp*weight
+        endif
+        !$acc loop seq
+        do m=1,13
+          !$acc atomic update
+          domains(p,m)=domains(p,m)+dv(m)
+        enddo
+        !$acc loop seq
+        do m=1,24
+          !$acc atomic update
+          moments(k,p,m)=moments(k,p,m)+pv(m)
+        enddo
+        !$acc atomic update
+        low(p,1)=min(low(p,1),radius)
+        !$acc atomic update
+        high(p,1)=max(high(p,1),radius)
+        !$acc atomic update
+        low(p,2)=min(low(p,2),dble(pdata(np,prtp)))
+        !$acc atomic update
+        high(p,2)=max(high(p,2),dble(pdata(np,prtp)))
+        ! Use the same single-precision binning arithmetic as existing histograms.
+        lograd=log10(pdata(np,prrp))
+        bin=max(1,min(nbins,floor((lograd-(rmin10-0.5*dhrad))/dhrad)+1))
+        if( pdata(np,prms).gt.0.0 )then
+          logdry=log10((3.0*pdata(np,prms)/(4.0*pi*real(rho_solute)))**(1.0/3.0))
+        else
+          logdry=rmin10-0.5*dhrad
+        endif
+        drybin=max(1,min(nbins,floor((logdry-(rmin10-0.5*dhrad))/dhrad)+1))
+        !$acc atomic update
+        histograms(bin,p,1)=histograms(bin,p,1)+weight
+        !$acc atomic update
+        histograms(drybin,p,2)=histograms(drybin,p,2)+weight
+        if( pdata(np,prz).lt.10.0 )then
+          !$acc atomic update
+          histograms(bin,p,3)=histograms(bin,p,3)+weight
+        endif
+        !$acc atomic update
+        histograms(bin,p,4)=histograms(bin,p,4)+1.0d0
+      enddo
+      !$acc end parallel
+
+      ! Match the final substep's communicated grid tendencies, as the
+      ! existing m?src/Tpsrc/qvsrc/rhovsrc profiles do.
+      if( allocated(pop_feedback) )then
+        !$acc parallel loop gang vector collapse(4) default(present) copy(moments)
+        do p=1,3
+        do k=1,nk
+        do j=1,nj
+        do i=1,ni
+          !$acc atomic update
+          moments(k,p,25)=moments(k,p,25)+pop_feedback(i,j,k,3,p)
+          !$acc atomic update
+          moments(k,p,26)=moments(k,p,26)+pop_feedback(i,j,k,4,p)
+          !$acc atomic update
+          moments(k,p,27)=moments(k,p,27)+pop_feedback(i,j,k,5,p)
+          !$acc atomic update
+          moments(k,p,28)=moments(k,p,28)+pop_feedback(i,j,k,1,p)
+          !$acc atomic update
+          moments(k,p,29)=moments(k,p,29)+pop_feedback(i,j,k,2,p)
+          !$acc atomic update
+          moments(k,p,30)=moments(k,p,30)+pop_feedback(i,j,k,2,p)*rho(i,j,k)
+        enddo
+        enddo
+        enddo
+        enddo
+        !$acc end parallel
+      endif
+#ifdef MPI
+      call MPI_ALLREDUCE(MPI_IN_PLACE,domains,size(domains),MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,mpierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,moments,size(moments),MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,mpierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,histograms,size(histograms),MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,mpierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,low,size(low),MPI_DOUBLE_PRECISION,MPI_MIN,MPI_COMM_WORLD,mpierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,high,size(high),MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,mpierr)
+#endif
+      if( myid.eq.0 )then
+        if( .not.allocated(pop_snapshot_profile) ) allocate(pop_snapshot_profile(nk,3,30))
+        pop_snapshot_domain=pop_diag_missing
+        pop_snapshot_profile=pop_diag_missing
+        pop_hist_output=0.0d0
+        pop_hist_output(:,:,1:4)=histograms
+        area=population_domain_area()
+        domain_volume=area*dble(zfaces(ke+1)-zfaces(kb))
+        do p=1,3
+          pop_snapshot_domain(p,1:5)=domains(p,1:5)
+          if( domains(p,2).gt.0.0d0 )then
+            pop_snapshot_domain(p,6:13)=domains(p,6:13)/domains(p,2)
+            pop_snapshot_domain(p,14)=low(p,1)
+            pop_snapshot_domain(p,15)=high(p,1)
+            pop_snapshot_domain(p,16)=low(p,2)
+            pop_snapshot_domain(p,17)=high(p,2)
+          endif
+          do k=1,nk
+            volume=area*dble(zfaces(k+1)-zfaces(k))
+            pop_snapshot_profile(k,p,1:3)=moments(k,p,1:3)/volume
+            if( moments(k,p,1).gt.0.0d0 )then
+              pop_snapshot_profile(k,p,4:24)=moments(k,p,4:24)/moments(k,p,1)
+              pop_snapshot_profile(k,p,22)=min(1.0d30,pop_snapshot_profile(k,p,22))
+              pop_snapshot_profile(k,p,24)=min(1.0d30,pop_snapshot_profile(k,p,24))
+            endif
+            pop_snapshot_profile(k,p,25:30)=moments(k,p,25:30)/dble(nx*ny)
+          enddo
+          do bin=1,nbins
+            dlogr=dble(bins_radius_edge(bin+1)-bins_radius_edge(bin))
+            dr=(10.0d0**dble(bins_radius_edge(bin+1))-10.0d0**dble(bins_radius_edge(bin)))*1.0d6
+            if( domain_volume.gt.0.0d0 .and. dr.gt.0.0d0 .and. dlogr.gt.0.0d0 )then
+              pop_hist_output(bin,p,5)=histograms(bin,p,1)/(domain_volume*1.0d6*dr)
+              pop_hist_output(bin,p,6)=histograms(bin,p,1)/(domain_volume*1.0d6*dlogr)
+              pop_hist_output(bin,p,7)=histograms(bin,p,2)/(domain_volume*1.0d6*dr)
+              pop_hist_output(bin,p,8)=histograms(bin,p,2)/(domain_volume*1.0d6*dlogr)
+            endif
+          enddo
+        enddo
+      endif
+      deallocate(moments)
+      end subroutine population_snapshot
+
+      subroutine population_diagnostics(pdata,zfaces)
+      ! Instantaneous dry-material and ancestry diagnostics.  Population
+      ! slots are total/A/B/mixed.  Only small reductions leave the GPU.
+      use input, only : nk,kb,ke,npvals,nparcelsLocal,nparcelsLocalActive, &
+           prpop,prfracb,prncoll,prms,prmult,prz,pract, &
+           dx,dy,nx,ny,stretch_x,stretch_y,tot_x_len,tot_y_len,myid
+      use constants, only : pop_a,pop_b,pop_mixed,undefined_index
+#ifdef MPI
+      use mpi
+#endif
+      implicit none
+      real, intent(in) :: pdata(nparcelsLocal,npvals),zfaces(kb:ke+1)
+      ! Sums: physical count, dry mass, A mass, B mass, ancestry,
+      ! physical count with ancestry.  Maxima are reduced separately.
+      double precision, allocatable :: sums(:,:,:),maxima(:,:)
+      double precision :: totals(4,6),allmax(4),xlen,ylen,volume
+      double precision :: weight,drymass,fraction,ancestry,part_a,part_b
+      integer :: np,k,p,kflag,bad_state,mpierr
+
+      allocate(sums(nk,4,6),maxima(nk,4))
+      sums = 0.0d0
+      maxima = 0.0d0
+      bad_state = 0
+      !$acc parallel loop gang vector default(present) &
+      !$acc copy(sums,maxima) copyin(zfaces) reduction(+:bad_state) &
+      !$acc private(k,p,kflag,weight,drymass,fraction,ancestry,part_a,part_b)
+      do np=1,nparcelsLocalActive
+        if( pdata(np,pract).le.0.0 ) cycle
+        p = 0
+        if( pdata(np,prpop).eq.pop_a ) p = 2
+        if( pdata(np,prpop).eq.pop_b ) p = 3
+        if( pdata(np,prpop).eq.pop_mixed ) p = 4
+        weight = dble(pdata(np,prmult))
+        drymass = dble(pdata(np,prms))
+        fraction = dble(pdata(np,prfracb))
+        ancestry = dble(pdata(np,prncoll))
+        if( p.eq.0 .or. .not.(weight.gt.0.0d0 .and. weight.le.huge(1.0)) .or. &
+            .not.(drymass.ge.0.0d0 .and. drymass.le.huge(1.0)) .or. &
+            .not.(fraction.ge.0.0d0 .and. fraction.le.1.0d0) .or. &
+            .not.(ancestry.ge.0.0d0 .and. ancestry.le.huge(1.0)) )then
+          bad_state = bad_state+1
+          cycle
+        endif
+        if( pdata(np,prz).le.zfaces(kb) )then
+          k = 1
+        elseif( pdata(np,prz).ge.zfaces(ke+1) )then
+          k = nk
+        else
+          kflag = 1
+          k = undefined_index
+          call find_vertical_location_index(k,pdata(np,prz),kb,ke+1,zfaces,kflag,.FALSE.)
+          k = max(1,min(nk,k))
+        endif
+        drymass = weight*drymass
+        part_b = drymass*fraction
+        part_a = drymass*(1.0d0-fraction)
+        !$acc atomic update
+        sums(k,p,1) = sums(k,p,1)+weight
+        !$acc atomic update
+        sums(k,p,2) = sums(k,p,2)+drymass
+        !$acc atomic update
+        sums(k,p,3) = sums(k,p,3)+part_a
+        !$acc atomic update
+        sums(k,p,4) = sums(k,p,4)+part_b
+        !$acc atomic update
+        sums(k,p,5) = sums(k,p,5)+weight*ancestry
+        if( ancestry.gt.0.0d0 )then
+          !$acc atomic update
+          sums(k,p,6) = sums(k,p,6)+weight
+        endif
+        !$acc atomic update
+        maxima(k,p) = max(maxima(k,p),ancestry)
+      enddo
+      !$acc end parallel
+#ifdef MPI
+      call MPI_ALLREDUCE(MPI_IN_PLACE,bad_state,1,MPI_INTEGER,MPI_SUM,MPI_COMM_WORLD,mpierr)
+#endif
+      if( bad_state.gt.0 ) stop 'INVALID PARTICLE STATE IN POPULATION DIAGNOSTICS'
+#ifdef MPI
+      call MPI_ALLREDUCE(MPI_IN_PLACE,sums,size(sums),MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,mpierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,maxima,size(maxima),MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,mpierr)
+#endif
+      if( myid.eq.0 )then
+        ! Form totals from raw sums, never by averaging population means.
+        sums(:,1,:) = sums(:,2,:)+sums(:,3,:)+sums(:,4,:)
+        maxima(:,1) = max(maxima(:,2),maxima(:,3),maxima(:,4))
+        totals = sum(sums,dim=1)
+        allmax = maxval(maxima,dim=1)
+        if( allocated(pop_diag_profile) )then
+          if( size(pop_diag_profile,1).ne.nk ) deallocate(pop_diag_profile)
+        endif
+        if( .not.allocated(pop_diag_profile) ) allocate(pop_diag_profile(nk,4,7))
+        pop_diag_profile = pop_diag_missing
+        pop_diag_domain = pop_diag_missing
+        xlen = dble(dx)*dble(nx)
+        ylen = dble(dy)*dble(ny)
+        if( stretch_x.ne.0 ) xlen = dble(tot_x_len)
+        if( stretch_y.ne.0 ) ylen = dble(tot_y_len)
+        do p=1,4
+          ! Domain masses are kg; profile masses are kg/m^3.
+          pop_diag_domain(p,1:3) = totals(p,2:4)
+          if( totals(p,1).gt.0.0d0 )then
+            pop_diag_domain(p,4) = totals(p,5)/totals(p,1)
+            pop_diag_domain(p,5) = allmax(p)
+            pop_diag_domain(p,6) = totals(p,6)/totals(p,1)
+          endif
+          if( totals(p,2).gt.0.0d0 ) pop_diag_domain(p,7) = totals(p,4)/totals(p,2)
+          do k=1,nk
+            ! Same slab geometry as existing dropdiag concentration profiles.
+            volume = xlen*ylen*dble(zfaces(k+1)-zfaces(k))
+            if( volume.le.0.0d0 ) stop 'INVALID POPULATION DIAGNOSTIC SLAB VOLUME'
+            pop_diag_profile(k,p,1:3) = sums(k,p,2:4)/volume
+            if( sums(k,p,1).gt.0.0d0 )then
+              pop_diag_profile(k,p,4) = sums(k,p,5)/sums(k,p,1)
+              pop_diag_profile(k,p,5) = maxima(k,p)
+              pop_diag_profile(k,p,6) = sums(k,p,6)/sums(k,p,1)
+            endif
+            if( sums(k,p,2).gt.0.0d0 ) &
+              pop_diag_profile(k,p,7) = sums(k,p,4)/sums(k,p,2)
+          enddo
+        enddo
+      endif
+      deallocate(sums,maxima)
+      end subroutine population_diagnostics
+
       subroutine droplet_diag(rtime,nrec,zh,zf,pdata,pdata_locind,dpten,wa,qa,th_in,th0,pi0,ppa,rho)
 
       use input
@@ -5215,7 +6130,7 @@
          xl = tot_x_len
       endif
       if (stretch_y .eq. 0) then
-         yl = dy*nx
+         yl = dy*ny
       else
          yl = tot_y_len
       endif
@@ -5666,6 +6581,13 @@
          end do
       end if
 
+      ! Entire additional particle pass and communication are skipped when off.
+      if( drop_pop_diag.eq.1 )then
+        call population_diagnostics(pdata,dumzf)
+        call population_snapshot(pdata,dumzf,rho)
+        call reduce_population_events()
+      endif
+
       fsmean = 0.0
       if (allocated(sfs_fs_profile)) then
          do iz=1,nk
@@ -5691,6 +6613,7 @@
       end if
 #endif
 #endif
+      call reset_population_events()
       !Now that it's done, remember to zero out the cumulative stats:
       hist_restime = 0.0
       hist_fallrad = 0.0
@@ -7261,6 +8184,7 @@
             end if
             !$acc atomic update
             hist_injected(ihist) = hist_injected(ihist) + pdata(np,prmult)
+            call population_hist_event(pdata(np,prpop),2,ihist,dble(pdata(np,prmult)))
             if (pdata(np,prms) .gt. 0.0) then
                dry_rad10_tmp = log10((3.0*pdata(np,prms)/(4.0*pi*real(rho_solute)))**(1.0/3.0))
             else
@@ -7275,6 +8199,7 @@
             end if
             !$acc atomic update
             hist_dry_injected(idryhist) = hist_dry_injected(idryhist) + pdata(np,prmult)
+            call population_hist_event(pdata(np,prpop),3,idryhist,dble(pdata(np,prmult)))
             !Set to something realistic so it doesn't break the stats at initiation
             pdata(np,pru) = 0.0
             pdata(np,prv) = 0.0
@@ -7296,9 +8221,18 @@
 
             !Update mass_injected for statistics purposes
             mass_injected = mass_injected + (pdata(np,prms)+rhow*4.0/3.0*pi*pdata(np,prrp)**3)*pdata(np,prmult)
+            call population_event(pdata(np,prpop),14, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi*pdata(np,prrp)**3)*pdata(np,prmult)))
+            call population_event(pdata(np,prpop),13,dble(pdata(np,prmult)))
             eng_injected = eng_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp)
+            call population_event(pdata(np,prpop),15, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp)))
             m1_injected = m1_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpx)
+            call population_event(pdata(np,prpop),16, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpx)))
             m2_injected = m2_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy)
+            call population_event(pdata(np,prpop),17, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy)))
 
             call finalize_randomNumberSequence(randomNumbers)
 
@@ -7458,6 +8392,7 @@
             end if
             !$acc atomic update
             hist_injected(ihist) = hist_injected(ihist) + pdata(np,prmult)
+            call population_hist_event(pdata(np,prpop),2,ihist,dble(pdata(np,prmult)))
 
             if (pdata(np,prms) .gt. 0.0) then
                dry_rad10_tmp = log10((3.0*pdata(np,prms)/(4.0*pi*real(rho_solute)))**(1.0/3.0))
@@ -7473,6 +8408,7 @@
             end if
             !$acc atomic update
             hist_dry_injected(idryhist) = hist_dry_injected(idryhist) + pdata(np,prmult)
+            call population_hist_event(pdata(np,prpop),3,idryhist,dble(pdata(np,prmult)))
 
             pdata(np,pru) = 0.0
             pdata(np,prv) = 0.0
@@ -7492,9 +8428,18 @@
             pdata(np,prprocidx) = transfer(myid,0.0)
 
             mass_injected = mass_injected + (pdata(np,prms)+rhow*4.0/3.0*pi*pdata(np,prrp)**3)*pdata(np,prmult)
+            call population_event(pdata(np,prpop),14, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi*pdata(np,prrp)**3)*pdata(np,prmult)))
+            call population_event(pdata(np,prpop),13,dble(pdata(np,prmult)))
             eng_injected = eng_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp)
+            call population_event(pdata(np,prpop),15, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp)))
             m1_injected = m1_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpx)
+            call population_event(pdata(np,prpop),16, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpx)))
             m2_injected = m2_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy)
+            call population_event(pdata(np,prpop),17, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy)))
 
             call finalize_randomNumberSequence(randomNumbers)
          end do
@@ -7675,6 +8620,7 @@
             end if
             !$acc atomic update
             hist_injected(ihist) = hist_injected(ihist) + pdata(np,prmult)
+            call population_hist_event(pdata(np,prpop),2,ihist,dble(pdata(np,prmult)))
             if (pdata(np,prms) .gt. 0.0) then
                dry_rad10_tmp = log10((3.0*pdata(np,prms)/(4.0*pi*real(rho_solute)))**(1.0/3.0))
             else
@@ -7689,6 +8635,7 @@
             end if
             !$acc atomic update
             hist_dry_injected(idryhist) = hist_dry_injected(idryhist) + pdata(np,prmult)
+            call population_hist_event(pdata(np,prpop),3,idryhist,dble(pdata(np,prmult)))
             !Set to something realistic so it doesn't break the stats at initiation
             pdata(np,pru) = 0.0
             pdata(np,prv) = 0.0
@@ -7710,9 +8657,18 @@
 
             !Update mass_injected for statistics purposes
             mass_injected = mass_injected + (pdata(np,prms)+rhow*4.0/3.0*pi*pdata(np,prrp)**3)*pdata(np,prmult)
+            call population_event(pdata(np,prpop),14, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi*pdata(np,prrp)**3)*pdata(np,prmult)))
+            call population_event(pdata(np,prpop),13,dble(pdata(np,prmult)))
             eng_injected = eng_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp)
+            call population_event(pdata(np,prpop),15, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp)))
             m1_injected = m1_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpx)
+            call population_event(pdata(np,prpop),16, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpx)))
             m2_injected = m2_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy)
+            call population_event(pdata(np,prpop),17, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy)))
 
             call finalize_randomNumberSequence(randomNumbers)
 
@@ -7853,6 +8809,7 @@
             end if
             !$acc atomic update
             hist_injected(ihist) = hist_injected(ihist) + pdata(np,prmult)
+            call population_hist_event(pdata(np,prpop),2,ihist,dble(pdata(np,prmult)))
             if (pdata(np,prms) .gt. 0.0) then
                dry_rad10_tmp = log10((3.0*pdata(np,prms)/(4.0*pi*real(rho_solute)))**(1.0/3.0))
             else
@@ -7867,6 +8824,7 @@
             end if
             !$acc atomic update
             hist_dry_injected(idryhist) = hist_dry_injected(idryhist) + pdata(np,prmult)
+            call population_hist_event(pdata(np,prpop),3,idryhist,dble(pdata(np,prmult)))
             pdata(np,pru) = 0.0
             pdata(np,prv) = 0.0
             pdata(np,prw) = 0.0
@@ -7885,9 +8843,18 @@
             pdata(np,prprocidx) = transfer(myid,0.0)
 
             mass_injected = mass_injected + (pdata(np,prms)+rhow*4.0/3.0*pi*pdata(np,prrp)**3)*pdata(np,prmult)
+            call population_event(pdata(np,prpop),14, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi*pdata(np,prrp)**3)*pdata(np,prmult)))
+            call population_event(pdata(np,prpop),13,dble(pdata(np,prmult)))
             eng_injected = eng_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp)
+            call population_event(pdata(np,prpop),15, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*cpl*pdata(np,prtp)))
             m1_injected = m1_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpx)
+            call population_event(pdata(np,prpop),16, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpx)))
             m2_injected = m2_injected + (pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy)
+            call population_event(pdata(np,prpop),17, &
+                 dble((pdata(np,prms)+rhow*4.0/3.0*pi_sp*pdata(np,prrp)**3)*pdata(np,prmult)*pdata(np,prvpy)))
 
             call finalize_randomNumberSequence(randomNumbers)
          end do
@@ -7942,6 +8909,7 @@
        bins_restime_edge(i+1) = bins_restime_edge(i) + dhres
     end do
 
+    call reset_population_events()
     !Initialize histogram to zero
     !(only those which accumulate between dropdiag I/O)
     hist_restime = 0.0
@@ -8024,7 +8992,8 @@
       real, intent(in) :: tnumpart
 
       integer :: i,ncid,status,dimid,varid,time_index,timeid,tfile,zhid,binsid,bins_edge_id
-      integer :: pair_type,count_type
+      integer :: pair_type,count_type,pop_type,stat_type
+      character(len=64) :: pop_varname
       logical :: allinfo
 
       if( myid.eq.0 ) print *,'  Entering writedropdiag_nc '
@@ -8528,6 +9497,45 @@
     call disp_err( nf90_put_att(ncid,varid,"units","#") , .true. )
 
 
+    if( drop_pop_diag.eq.1 )then
+      do stat_type=1,7
+        do pop_type=1,4
+          pop_varname = trim(pop_diag_names(stat_type))//trim(pop_diag_suffix(pop_type))
+          call disp_err(nf90_def_var(ncid,trim(pop_varname),nf90_double,timeid,varid),.true.)
+          call disp_err(nf90_put_att(ncid,varid,'_FillValue',pop_diag_missing),.true.)
+          call disp_err(nf90_put_att(ncid,varid,'long_name',trim(pop_diag_descriptions(stat_type))),.true.)
+          call disp_err(nf90_put_att(ncid,varid,'population',trim(pop_diag_suffix(pop_type))),.true.)
+          if( stat_type.le.3 )then
+            call disp_err(nf90_put_att(ncid,varid,'units','kg'),.true.)
+          else
+            call disp_err(nf90_put_att(ncid,varid,'units','1'),.true.)
+          endif
+          pop_varname = trim(pop_varname)//'_profile'
+          call disp_err(nf90_def_var(ncid,trim(pop_varname),nf90_double,(/zhid,timeid/),varid),.true.)
+          call disp_err(nf90_put_att(ncid,varid,'_FillValue',pop_diag_missing),.true.)
+          call disp_err(nf90_put_att(ncid,varid,'long_name', &
+               'Vertical profile: '//trim(pop_diag_descriptions(stat_type))),.true.)
+          call disp_err(nf90_put_att(ncid,varid,'population',trim(pop_diag_suffix(pop_type))),.true.)
+          if( stat_type.le.3 )then
+            call disp_err(nf90_put_att(ncid,varid,'units','kg m-3'),.true.)
+          else
+            call disp_err(nf90_put_att(ncid,varid,'units','1'),.true.)
+          endif
+        enddo
+      enddo
+      call disp_err(nf90_put_att(ncid,NF90_GLOBAL,'population_diagnostic_classes', &
+           'total, pure A, pure B, mixed A+B; see variable time_meaning and long_name'),.true.)
+      if( testcase.eq.17 )then
+        call disp_err(nf90_put_att(ncid,NF90_GLOBAL,'population_components','A=sea salt; B=sulfate'),.true.)
+      elseif( testcase.eq.3 )then
+        call disp_err(nf90_put_att(ncid,NF90_GLOBAL,'population_components','A=marine/salt aerosol; B=dust'),.true.)
+      else
+        call disp_err(nf90_put_att(ncid,NF90_GLOBAL,'population_components','A=salt; B=unused'),.true.)
+      endif
+    endif
+
+    if( drop_pop_diag.eq.1 ) call define_population_extra_nc(ncid,timeid,zhid,binsid)
+
     call disp_err( nf90_put_att(ncid,NF90_GLOBAL,'CM1 version',trim(cm1version)) , .true. )
     call disp_err( nf90_enddef(ncid=ncid) , .true. )
 
@@ -8538,6 +9546,7 @@
     ! Write data:
 
     time_index = nrec
+    if( drop_pop_diag.eq.1 ) call write_population_extra_nc(ncid,time_index)
 
     call disp_err( nf90_inq_varid(ncid,'time',timeid) , .true. )
     call disp_err( nf90_put_var(ncid,timeid,rtime,(/time_index/)) , .true. )
@@ -8545,6 +9554,20 @@
     call disp_err( nf90_inq_varid(ncid,'zh',zhid) , .true. )
     call disp_err( nf90_put_var(ncid,zhid,zhvec,(/1/)) , .true. )
 
+
+    if( drop_pop_diag.eq.1 )then
+      do stat_type=1,7
+        do pop_type=1,4
+          pop_varname = trim(pop_diag_names(stat_type))//trim(pop_diag_suffix(pop_type))
+          call disp_err(nf90_inq_varid(ncid,trim(pop_varname),varid),.true.)
+          call disp_err(nf90_put_var(ncid,varid,pop_diag_domain(pop_type,stat_type),(/time_index/)),.true.)
+          pop_varname = trim(pop_varname)//'_profile'
+          call disp_err(nf90_inq_varid(ncid,trim(pop_varname),varid),.true.)
+          call disp_err(nf90_put_var(ncid,varid,pop_diag_profile(:,pop_type,stat_type), &
+               (/1,time_index/)),.true.)
+        enddo
+      enddo
+    endif
 
     !!0th order
     call disp_err( nf90_inq_varid(ncid,"tnumpart",varid) , .true. )

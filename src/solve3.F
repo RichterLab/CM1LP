@@ -162,7 +162,7 @@
           kd_turb,ud_rdamp,vd_rdamp,wd_rdamp,td_rdamp,td_hediff,td_vediff,qd_hediff,qd_vediff, &
           td_diss,td_rad,td_pbl,td_hturb,td_vturb,qd_hturb,qd_vturb,ud_pbl,vd_pbl,qd_pbl, &
           td_nudge,qd_nudge,prcl_droplet,ntwk,pdcomp,nbc,ebc,sbc,wbc,two_way_coupling, &
-          drop_stability_diag, &
+          drop_stability_diag,drop_pop_diag, &
           output_rain,output_sws,output_svs,output_sps,output_srs,output_sgs,output_sus,output_shs, &
           drop_traj,drop_traj_elapse
 
@@ -177,7 +177,7 @@
       use droplet_module, only : droplet_driver,droplet_injection_driver, &
           compute_droplet_substeps,droplet_coalescence_driver, &
           project_droplet_qc_effc,write_drop_traj, &
-          report_droplet_solver_diagnostics
+          report_droplet_solver_diagnostics,finish_population_feedback
       use pdcomp_module, only : pidcomp
       use lsnudge_module
       use ib_module
@@ -1065,6 +1065,7 @@
           call bcs_tend_halo(dpten(ib,jb,kb,1))
           call bcs_tend_halo(dpten(ib,jb,kb,2))
 #endif
+          if( drop_pop_diag.eq.1 ) call finish_population_feedback()
 #ifdef MPI
           if(timestats.ge.1) time_dpc=time_dpc+mytime()
 #endif

@@ -181,6 +181,9 @@
       ! 3: nonlinear-solver reasons, iterations, dry-radius floor hits,
       !    and failure-size histogram.
       integer :: drop_stability_diag = 0
+      ! Optional population diagnostics: 0 = totals only (default),
+      ! 1 = totals plus A/B/mixed droplet statistics (excluding height-radius).
+      integer :: drop_pop_diag = 0
       real :: drop_traj_elapse = -1.0
       real :: tauc_mult_factor = 1.0
       integer :: coal_kernel = 2
@@ -197,7 +200,7 @@
       !$acc                 ibw,ibe,ibs,ibn,ibc,iec,jbc,jec,kbc,kec,          &
       !$acc                 ibt,iet,jbt,jet,kbt,ket,two_way_coupling,         &
       !$acc                 drop_evap,drop_traj,drop_sgs_opt,                 &
-      !$acc                 drop_stability_diag,                              &
+      !$acc                 drop_stability_diag,drop_pop_diag,                &
       !$acc                 coal_enabled,coal_kernel,                          &
       !$acc                 coal_Ndx,coal_Ndy,coal_Ndz,                       &
       !$acc                 prt,prqv,prprs,prrho,nparcelsLocal,               &
@@ -370,7 +373,7 @@
 	      drop_inject_elapse,drop_inject_time,drop_traj_elapse,           &
               tauc_mult_factor,                                           &
 	      two_way_coupling,drop_evap,drop_traj,drop_sgs_opt,              &
-	      drop_stability_diag,psd_sampling_opt,                           &
+	      drop_stability_diag,drop_pop_diag,psd_sampling_opt,             &
 	      coal_enabled,coal_kernel,                                       &
               coal_Ndx,coal_Ndy,coal_Ndz
       namelist /param14/                                                      &

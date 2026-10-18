@@ -1618,6 +1618,44 @@
                           2 = DROP_SUBSTEP and conditional DROP_COUPLING output,
                           3 = detailed solver and large droplet-temperature-difference output)
 
+ drop_pop_diag  -  Population-resolved Lagrangian droplet diagnostics in dropdiag
+                   (0 = existing totals only [default if omitted],
+                    1 = also write pure A, pure B, and mixed A+B statistics)
+
+   Existing total variable names are retained. Population variants append
+   _a, _b, or _mixed to the existing name. Included families are:
+     - domain particle/physical counts, activated/unactivated counts, liquid
+       mass, radius and temperature moments/extrema, and sampled air means;
+     - vertical number/mass concentrations, particle and sampled-air velocity
+       moments, SGS statistics, temperature/radius/humidity moments, and
+       momentum/heat/vapor feedback profiles;
+     - interval fallout, injection, reentry, evaporation and vapor-source
+       budgets, plus solver fallback/failure counts;
+     - wet/dry radius histograms and size distributions, the below-10-m
+       histogram, injection/fallout/failure histograms, and residence-time
+       versus radius histograms.
+   Height-radius arrays multnumrz and vp3meanrz are NOT population-resolved.
+   Shared atmospheric fields (fsmean, kmoist, mse, wk, u10_ssgf) stay unsplit.
+   Collision statistics retain their existing six population-pair categories.
+   Failure-size histograms accumulate when drop_stability_diag=3, as do totals.
+
+   Additional scalar and vertical diagnostics are dry_mass, component_a_mass,
+   component_b_mass, ncoll_mean, ncoll_max, collided_fraction, and
+   fracb_drymass_mean. These use _total/_a/_b/_mixed; vertical versions append
+   _profile after the population suffix. No effective radius is added.
+   Means are multiplicity-weighted except fracb_drymass_mean, which is
+   dry-mass-weighted. Empty classes have zero counts/masses and missing means
+   and extrema. Component masses include multiplicity and exclude water.
+
+   Snapshot statistics classify each particle by its CURRENT population.
+   Interval events and feedback use its population when the event occurred,
+   before any subsequent coalescence. Feedback profiles use the final droplet
+   substep, matching the existing total profiles. A=salt and B=sulfate for
+   testcase 17; B is reserved for dust in testcase 3 and unused in 15/16.
+   Enabling this option also allocates three sets of five grid feedback
+   fields and adds their deposition/halo exchanges. Output size depends on
+   levels, histogram bins, and records, not on the number of particles.
+
  coal_enabled  -  Lagrangian droplet collision-coalescence switch
                   (.false. = off, .true. = on)
 
