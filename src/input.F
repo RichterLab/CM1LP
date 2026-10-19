@@ -166,6 +166,8 @@
       integer(i8) :: nparcelsInit,nparcelsMax,nparcelsRest,nparcelsLocal, &
                      nparcelsLocalActive
       integer :: drop_sgs_opt = 0
+      ! Droplet radius/temperature integrator: 0 = Backward Euler, 1 = ANN.
+      integer :: drop_integrator = 0
       ! Droplet pdata indices, assigned by param; zero when disabled.
       ! Do not use as subscripts while zero.
       ! prpop: real population label (pop_unset/pop_a/pop_b/pop_mixed).
@@ -373,6 +375,7 @@
 	      drop_inject_elapse,drop_inject_time,drop_traj_elapse,           &
               tauc_mult_factor,                                           &
 	      two_way_coupling,drop_evap,drop_traj,drop_sgs_opt,              &
+              drop_integrator,                                             &
 	      drop_stability_diag,drop_pop_diag,psd_sampling_opt,             &
 	      coal_enabled,coal_kernel,                                       &
               coal_Ndx,coal_Ndy,coal_Ndz

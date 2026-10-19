@@ -300,6 +300,7 @@
       call bcast_int(nparcelsInit) ! DEVICE
       call bcast_int(two_way_coupling) ! DEVICE
       call bcast_int(drop_evap) ! DEVICE
+      call bcast_int(drop_integrator)
       call bcast_int(drop_traj) ! DEVICE
       call bcast_real(drop_traj_elapse)
       call bcast_real(tauc_mult_factor)
@@ -2447,6 +2448,16 @@
 
       ! for parcels:
       nparcelsInit = max(1_i8,nparcelsInit)
+      IF( drop_integrator.lt.0 .or. drop_integrator.gt.1 )THEN
+        if(myid.eq.0)then
+          print *,'  drop_integrator = ',drop_integrator
+          print *,'  drop_integrator must be 0 (BE) or 1 (ANN) '
+        endif
+#ifdef MPI
+        call MPI_BARRIER (MPI_COMM_WORLD,ierr)
+#endif
+        call stopcm1
+      ENDIF
       drop_stability_diag = max(0,min(3,drop_stability_diag))
       !$acc update device(drop_stability_diag) if_present
       IF( drop_pop_diag.lt.0 .or. drop_pop_diag.gt.1 )THEN
@@ -2789,6 +2800,7 @@
       if(dowr) write(outfile,*) 'nparcelsMax=',nparcelsMax
       if(dowr) write(outfile,*) 'two_way_coupling=',two_way_coupling
       if(dowr) write(outfile,*) 'drop_evap=',drop_evap
+      if(dowr) write(outfile,*) 'drop_integrator=',drop_integrator,' (0=BE, 1=ANN)'
       if(dowr) write(outfile,*) 'tauc_mult_factor=',tauc_mult_factor
       if(dowr) write(outfile,*) 'drop_sgs_opt=',drop_sgs_opt
       if(dowr) write(outfile,*) 'drop_stability_diag=',drop_stability_diag

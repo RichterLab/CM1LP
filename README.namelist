@@ -1609,6 +1609,11 @@
  drop_evap  -  Are the droplets allowed to evaporate/condense and change size?
                (1 = yes, 0 = no)
 
+ drop_integrator  -  Droplet radius/temperature integrator for drop_evap = 1
+                     (0 = Backward Euler [default if omitted], 1 = ANN)
+                     Configuration only at present; solver dispatch is not yet
+                     implemented, so both settings currently use Backward Euler.
+
  drop_sgs_opt  -  Lagrangian droplet subgrid transport option
                   (0 = off, 1 = stochastic position update,
                    2 = stochastic SGS velocity update)

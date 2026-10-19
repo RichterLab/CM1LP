@@ -325,6 +325,7 @@
  /
 
  &param13
+ drop_integrator = 0,  ! 0 = Backward Euler (default), 1 = ANN
  prcl_th       = 1,
  prcl_t        = 1,
  prcl_prs      = 1,
