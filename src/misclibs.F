@@ -4428,7 +4428,7 @@
           time_pdef,time_prsrho,time_diag,time_azimavg,time_hifrq,time_ercyl,time_mpu1, &
           time_mpv1,time_mpw1,time_mpp1,time_mpu2,time_mpv2,time_mpw2,time_mpp2,time_mps1, &
           time_mps3,time_mpq1,time_mptk1,time_mptk2,time_mps2,time_mps4,time_mpq2,time_mpb, &
-          time_dpc,time_lb
+          time_dpc,time_lb,time_drop_loop,timing_clock_rate
 
 
       implicit none
@@ -4492,6 +4492,8 @@
       time_parcels=0.0
       time_parceli=0.0
       time_droplet=0.0
+      time_drop_loop=0.0d0
+      call system_clock(count_rate=timing_clock_rate)
       time_dropC1=0.0
       time_dropC2=0.0
       time_dropC3=0.0

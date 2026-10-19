@@ -481,7 +481,7 @@
           prx,pry,prz,prsig,pract,prvpx,prvpy,prvpz,prtp,prrp,prmult, &
           prms,prkap,przs,pru,prv,prw,prt,prqv,prprs,prrho,prtime, &
           prpidx,prprocidx,prpop, &
-          timestats,time_droplet,mytime,ierr,maxx, &
+          timestats,time_droplet,mytime,time_drop_loop,elapsed_walltime,ierr,maxx, &
           maxy,maxz,ierr,mynw,mysw,myne,myse,mynorth,mysouth,myeast, &
           mywest,myid,nparcelsLocal,nparcelsLocalActive, &
           time_phys_H2D,time_phys_D2H,time_dropC1,time_dropC2,time_dropC3, &
@@ -566,6 +566,7 @@
       real :: esl
 
       double precision :: foot
+      integer(i8) :: loop_tick
 
       real :: uval,vval,wval,qval,prsval,tval,rhoval,rhval
       real :: khhval,khvval,dkhvdzval
@@ -851,6 +852,7 @@
     dlogsig_gt5 = 0
 
     !JMD WARNING: Loop does not yet match CPU version.
+    if(timestats.ge.1) call system_clock(count=loop_tick)
     !$acc parallel default(present)
     !$acc loop gang vector private(dlogsig_abs,dlogsig_valid,background_reinject_slot,population_slot) &
     !$acc reduction(+:num_fallout,num_fallout_reinject) reduction(max:errcode) &
@@ -1072,6 +1074,7 @@
     END DO nploop
     !$acc end parallel
     !$acc wait
+    if(timestats.ge.1) time_drop_loop=time_drop_loop+elapsed_walltime(loop_tick)
     if (drop_sgs_opt.eq.2) then
 #ifdef MPI
        call mpi_allreduce(mpi_in_place,dlogsig_sum,1,mpi_double_precision,mpi_sum,mpi_comm_world,ierr)

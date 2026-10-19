@@ -46,6 +46,24 @@
              2 = The same as 1, but include time required to complete 
                  each time step
 
+             The droplet entry groups the existing droplet processing,
+             injection (dropletI), dropC* migration/bookkeeping, and dpc
+             feedback communication buckets. These children are indented.
+             The particle loop is an independently measured child, with one
+             start/end measurement per loop rather than per particle. There
+             are no individual BE or ANN timers.
+             The loop includes interpolation, motion, feedback projection,
+             checks, bookkeeping, and the timer overhead as well as the solvers.
+             The parent is a sum of the existing accounted sections, not a new
+             stopwatch around all particle-related activity in solve3.
+             Unlisted preparation/cleanup remains in droplet, so its listed
+             children need not sum to the parent. dropC4a-f are separate
+             accounting segments at the same level as dropC4.
+             Percentages use total solve time. Nested times are not added to
+             that total again. MPI reports average ranks unless procfiles is
+             enabled, in which case each rank reports its local times. Timing
+             is disabled when timestats=0.
+
  terrain_flag -  .true.  = With terrain
                  .false. = No terrain (flat lower boundary)
 

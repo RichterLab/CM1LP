@@ -270,6 +270,7 @@ end module cuda_rt
       real steptime1,steptime2
       integer :: i,j,k,m,n,nn,fnum,frec
       real :: sum,tem0,tem
+      double precision :: droplet_total
       logical :: getsfc,getpbl,update_sfc,startup,restarted,restart_prcl,reset
       logical :: dosolve,dorad,getdbz,getvt,doit,dotbud,doqbud,doubud,dovbud,dowbud,donudge
 
@@ -286,6 +287,8 @@ end module cuda_rt
       integer, dimension(MPI_STATUS_SIZE) :: status
       real :: mp_total,minval,temx,temy,temni,temnj
       double precision :: tstart,tend
+      double precision :: drop_loop_sum
+      real :: drop_comm_local(6),drop_comm_sum(6)
       integer, dimension(:), allocatable :: isum,jsum
 #endif
 #ifdef _OPENACC
@@ -4417,6 +4420,12 @@ end module cuda_rt
         call MPI_REDUCE(time_droplet ,sum,1,MPI_REAL,MPI_SUM,0,MPI_COMM_WORLD,ierr)
         time_droplet = sum/float(numprocs)
 
+        call MPI_REDUCE(time_drop_loop,drop_loop_sum,1,MPI_DOUBLE_PRECISION, &
+                        MPI_SUM,0,MPI_COMM_WORLD,ierr)
+        if(myid.eq.0)then
+          time_drop_loop = drop_loop_sum/dble(numprocs)
+        endif
+
         sum = 0.0
         call MPI_REDUCE(time_lb ,sum,1,MPI_REAL,MPI_SUM,0,MPI_COMM_WORLD,ierr)
         time_lb = sum/float(numprocs)
@@ -4437,6 +4446,18 @@ end module cuda_rt
         sum = 0.0
         call MPI_REDUCE(time_dropC4 ,sum,1,MPI_REAL,MPI_SUM,0,MPI_COMM_WORLD,ierr)
         time_dropC4 = sum/float(numprocs)
+
+        drop_comm_local = [time_dropC4a,time_dropC4b,time_dropC4c, &
+                           time_dropC4d,time_dropC4e,time_dropC4f]
+        call MPI_REDUCE(drop_comm_local,drop_comm_sum,6,MPI_REAL,MPI_SUM,0,MPI_COMM_WORLD,ierr)
+        if(myid.eq.0)then
+          time_dropC4a = drop_comm_sum(1)/float(numprocs)
+          time_dropC4b = drop_comm_sum(2)/float(numprocs)
+          time_dropC4c = drop_comm_sum(3)/float(numprocs)
+          time_dropC4d = drop_comm_sum(4)/float(numprocs)
+          time_dropC4e = drop_comm_sum(5)/float(numprocs)
+          time_dropC4f = drop_comm_sum(6)/float(numprocs)
+        endif
 
         sum = 0.0
         call MPI_REDUCE(time_parceli_reduce ,sum,1,MPI_REAL,MPI_SUM,0,MPI_COMM_WORLD,ierr)
@@ -4611,8 +4632,32 @@ end module cuda_rt
       write(outfile,100) 'prsrho  ',time_prsrho,time_prsrho/time_solve
       write(outfile,100) 'parcels ',time_parcels,time_parcels/time_solve
       write(outfile,100) 'parceli ',time_parceli,time_parceli/time_solve
-      write(outfile,100) 'droplet ',time_droplet,time_droplet/time_solve
-      write(outfile,100) 'dropletI',time_droplet_inject,time_droplet_inject/time_solve
+      ! Report an inclusive parent assembled from the existing disjoint buckets.
+      ! Keep the accounting sums above unchanged: do not add this parent or the
+      ! independent loop child to time_solve or steptime2 again.
+      droplet_total = dble(time_droplet)+dble(time_droplet_inject)
+#ifdef MPI
+      droplet_total = droplet_total+dble(time_dpc)+ &
+                      dble(time_dropC1)+dble(time_dropC2)+dble(time_dropC3)+dble(time_dropC4)+ &
+                      dble(time_dropC4a)+dble(time_dropC4b)+dble(time_dropC4c)+ &
+                      dble(time_dropC4d)+dble(time_dropC4e)+dble(time_dropC4f)
+#endif
+      write(outfile,103) 'droplet        ',droplet_total,droplet_total/dble(time_solve)
+      write(outfile,101) 'particle loop',time_drop_loop,time_drop_loop/dble(time_solve)
+      write(outfile,101) 'dropletI     ',time_droplet_inject,time_droplet_inject/time_solve
+#ifdef MPI
+      write(outfile,101) 'dropC1       ',time_dropC1,time_dropC1/time_solve
+      write(outfile,101) 'dropC2       ',time_dropC2,time_dropC2/time_solve
+      write(outfile,101) 'dropC3       ',time_dropC3,time_dropC3/time_solve
+      write(outfile,101) 'dropC4       ',time_dropC4,time_dropC4/time_solve
+      write(outfile,101) 'dropC4a      ',time_dropC4a,time_dropC4a/time_solve
+      write(outfile,101) 'dropC4b      ',time_dropC4b,time_dropC4b/time_solve
+      write(outfile,101) 'dropC4c      ',time_dropC4c,time_dropC4c/time_solve
+      write(outfile,101) 'dropC4d      ',time_dropC4d,time_dropC4d/time_solve
+      write(outfile,101) 'dropC4e      ',time_dropC4e,time_dropC4e/time_solve
+      write(outfile,101) 'dropC4f      ',time_dropC4f,time_dropC4f/time_solve
+      write(outfile,101) 'dpc          ',time_dpc,time_dpc/time_solve
+#endif
       write(outfile,100) 'load-imb',time_lb,time_lb/time_solve
       if( dodomaindiag )  &
       write(outfile,100) 'domndiag',time_diag,time_diag/time_solve
@@ -4642,23 +4687,14 @@ end module cuda_rt
       write(outfile,100) 'mptk1   ',time_mptk1,time_mptk1/time_solve
       write(outfile,100) 'mptk2   ',time_mptk2,time_mptk2/time_solve
       write(outfile,100) 'mpb     ',time_mpb,time_mpb/time_solve
-      write(outfile,100) 'dropC1  ',time_dropC1,time_dropC1/time_solve
-      write(outfile,100) 'dropC2  ',time_dropC2,time_dropC2/time_solve
-      write(outfile,100) 'dropC3  ',time_dropC3,time_dropC3/time_solve
-      write(outfile,100) 'dropC4  ',time_dropC4,time_dropC4/time_solve
-      write(outfile,100) 'dropC4a ',time_dropC4a,time_dropC4a/time_solve
-      write(outfile,100) 'dropC4b ',time_dropC4b,time_dropC4b/time_solve
-      write(outfile,100) 'dropC4c ',time_dropC4c,time_dropC4c/time_solve
-      write(outfile,100) 'dropC4d ',time_dropC4d,time_dropC4d/time_solve
-      write(outfile,100) 'dropC4e ',time_dropC4e,time_dropC4e/time_solve
-      write(outfile,100) 'dropC4f ',time_dropC4f,time_dropC4f/time_solve
       write(outfile,100) 'parceliA',time_parceli_reduce,time_parceli_reduce/time_solve
-      write(outfile,100) 'dpc     ',time_dpc,time_dpc/time_solve
 #endif
       write(outfile,*)
     ENDIF
 
 100   format(3x,a8,' :  ',f10.2,2x,f6.2,'%')
+101   format(5x,a13,' :  ',f12.4,2x,f6.2,'%')
+103   format(3x,a15,' :  ',f12.4,2x,f6.2,'%')
 
 #ifdef MPI
       if(myid.eq.0) print *

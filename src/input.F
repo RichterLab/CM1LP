@@ -298,6 +298,9 @@
            time_prsrho,time_restart,time_poiss,time_diag,            &
            time_azimavg,time_hifrq,time_ercyl,time_lb
       integer count_last
+      ! Inclusive child timers; excluded from CM1's disjoint accounting sum.
+      double precision :: time_drop_loop
+      integer(i8) :: timing_clock_rate
 
 !-----------------------------------------------------------------------
 
@@ -418,6 +421,24 @@
       count_last=count
 
       end function mytime
+
+      ! Independent elapsed wall time for nested measurements.  Unlike mytime,
+      ! this does not change the reference used by any other timer.
+      double precision function elapsed_walltime(start_tick)
+      implicit none
+      integer(i8), intent(in) :: start_tick
+      integer(i8) :: now_tick,max_tick
+
+      call system_clock(count=now_tick,count_max=max_tick)
+      elapsed_walltime = 0.0d0
+      if (timing_clock_rate.le.0_i8) return
+      if (now_tick.ge.start_tick) then
+        elapsed_walltime = dble(now_tick-start_tick)/dble(timing_clock_rate)
+      else
+        elapsed_walltime = (dble(max_tick-start_tick)+dble(now_tick)+1.0d0)/ &
+                           dble(timing_clock_rate)
+      endif
+      end function elapsed_walltime
 
     !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 
