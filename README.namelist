@@ -1631,11 +1631,6 @@
                      Total ANN-selected updates equal ann_calls plus both BE
                      reroute counters. Accepted predictions equal ann_calls
                      minus ann_invalid_output. BE-only runs leave all at zero.
-                     ann_out_of_range and ann_invalid_input are retained as
-                     aliases of the corresponding ann_be counters. Before range
-                     rerouting was introduced, ann_out_of_range counted actual
-                     inference calls outside the bounds; older records retain
-                     that meaning.
                      Inputs must be finite and physically admissible, with positive
                      effective solute for log preprocessing and finite, representable
                      derived RH/solute. Outputs must be finite with positive radius

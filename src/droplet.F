@@ -10084,20 +10084,15 @@
    implicit none
    integer, intent(in) :: ncid,time_index
    integer :: i,varid,timeid,status
-   ! Retain the original input counters as aliases for existing analysis tools.
-   integer, parameter :: counter_index(6) = [1,2,3,4,2,3]
-   character(len=24), parameter :: names(6) = [character(len=24) :: &
-        'ann_calls','ann_out_of_range','ann_invalid_input','ann_invalid_output', &
-        'ann_be_out_of_range','ann_be_invalid_input']
-   character(len=120), parameter :: descriptions(6) = [character(len=120) :: &
+   character(len=24), parameter :: names(4) = [character(len=24) :: &
+        'ann_calls','ann_be_out_of_range','ann_be_invalid_input','ann_invalid_output']
+   character(len=120), parameter :: descriptions(4) = [character(len=120) :: &
         'ANN inference calls since last dropdiag record', &
-        'Out-of-range BE reroutes since last dropdiag record; alias of ann_be_out_of_range', &
-        'Invalid-input BE reroutes since last dropdiag record; alias of ann_be_invalid_input', &
-        'BE fallbacks for invalid ANN outputs since last dropdiag record', &
         'BE reroutes for input bounds or abs(Tp-Tf) > 3 K since last dropdiag record; no inference attempted', &
-        'BE reroutes for invalid ANN inputs since last dropdiag record; no inference attempted']
+        'BE reroutes for invalid ANN inputs since last dropdiag record; no inference attempted', &
+        'BE fallbacks for invalid ANN outputs since last dropdiag record']
 
-   do i=1,6
+   do i=1,4
       status = nf90_inq_varid(ncid,trim(names(i)),varid)
       if (status.eq.nf90_enotvar) then
          call disp_err(nf90_inq_dimid(ncid,'time',timeid),.true.)
@@ -10111,7 +10106,7 @@
       else
          call disp_err(status,.true.)
       endif
-      call disp_err(nf90_put_var(ncid,varid,ann_counts(counter_index(i)),(/time_index/)),.true.)
+      call disp_err(nf90_put_var(ncid,varid,ann_counts(i),(/time_index/)),.true.)
    enddo
    end subroutine write_ann_diagnostics_nc
 
