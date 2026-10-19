@@ -2458,6 +2458,18 @@
 #endif
         call stopcm1
       ENDIF
+#ifdef _OPENACC
+      IF( drop_integrator.eq.1 )THEN
+        if(myid.eq.0)then
+          print *,'  drop_integrator = 1 (ANN) requires a CPU build '
+          print *,'  ANN integration is not yet supported with OpenACC '
+        endif
+#ifdef MPI
+        call MPI_BARRIER (MPI_COMM_WORLD,ierr)
+#endif
+        call stopcm1
+      ENDIF
+#endif
       drop_stability_diag = max(0,min(3,drop_stability_diag))
       !$acc update device(drop_stability_diag) if_present
       IF( drop_pop_diag.lt.0 .or. drop_pop_diag.gt.1 )THEN

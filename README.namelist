@@ -1611,8 +1611,26 @@
 
  drop_integrator  -  Droplet radius/temperature integrator for drop_evap = 1
                      (0 = Backward Euler [default if omitted], 1 = ANN)
-                     Configuration only at present; solver dispatch is not yet
-                     implemented, so both settings currently use Backward Euler.
+                     ANN is currently supported for CPU/MPI only; OpenACC
+                     builds require 0. The dry-radius constraint applies only
+                     to BE. ANN uses CM1's liquid saturation vapor pressure
+                     to compute RH. Inputs outside the training ranges still
+                     use ANN; dropdiag records ann_calls and ann_out_of_range.
+                     These are MPI-summed counts since the previous record,
+                     one per superdroplet substep, without multiplicity weights.
+                     ann_out_of_range counts a call once if any of its seven
+                     inputs is outside the generated model's inclusive bounds.
+                     Invalid inputs skip inference and fall back to BE; invalid
+                     outputs also fall back to BE from the original droplet state.
+                     ann_invalid_input and ann_invalid_output count these cases
+                     over the same interval. ann_calls excludes skipped inference
+                     but includes calls with invalid outputs. Accepted predictions
+                     therefore equal ann_calls minus ann_invalid_output.
+                     Inputs must be finite and physically admissible, with positive
+                     effective solute for log preprocessing and finite, representable
+                     derived RH/solute. Outputs must be finite with positive radius
+                     and temperature, and equilibrium probability in [0,1]. No ANN
+                     output check uses the dry radius or the input training bounds.
 
  drop_sgs_opt  -  Lagrangian droplet subgrid transport option
                   (0 = off, 1 = stochastic position update,

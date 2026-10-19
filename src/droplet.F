@@ -16,6 +16,11 @@
 
   !These are quantities which are needed in the droplet_diag output, so must be public
   real :: num100,num1000
+  ! CPU ANN interval counts: inference calls, out-of-range inference calls,
+  ! invalid-input BE fallbacks, and invalid-output BE fallbacks.
+  ! Rank-local until dropdiag reduction; one count per superdroplet substep.
+  double precision :: ann_counts(4) = 0.0d0
+  integer, parameter :: ann_success = 0, ann_invalid_input = 1, ann_invalid_output = 2
   integer :: drop_solver_fallback_substep = 0
   integer :: drop_solver_failure_substep = 0
   integer :: drop_dry_floor_hits_substep = 0
@@ -3387,7 +3392,7 @@
           prw,prt,prqv,prprs,prrho,pract,prtime,prmult,ni,nj,mywest, &
           mysw,mynw,myeast,myse,myne,mysouth,mynorth,nparcelsLocal, &
           myid,dx,dy,pi_sp,pi_dp,ngxy,nbc,sbc,ebc,wbc,tsk0,drop_evap,drop_sgs_opt, &
-          drop_stability_diag
+          drop_stability_diag,drop_integrator
       use constants , only : rhow,rhow_dp,undefined_index,cpl,cpl_dp,cp_dp,i8
       use comm_module
       use parcel_module
@@ -3428,6 +3433,11 @@
       real :: rprhs,rptmp
       real :: Rep,Shp,diffnorm
       real :: tp0
+#ifndef _OPENACC
+      real :: ann_radius_new,ann_temperature_new,equilibrium_probability
+      logical :: ann_outside_range
+      integer :: ann_status
+#endif
       real :: sig1
       real :: top,bot,restime10_tmp,rad10_tmp
       real :: north,south,east,west
@@ -3436,7 +3446,7 @@
       double precision :: taup,volp,rhop,tmp_coeff
       double precision :: radius_new,temperature_new
       double precision :: dry_radius,dry_ratio
-      logical :: is_local,dry_floor_hit
+      logical :: is_local,dry_floor_hit,use_be
       integer :: mflag,flag,gn_reason,gn_iterations,lv_iterations
 
       dlogsig_abs = 0.0
@@ -3522,10 +3532,34 @@
         errcode = max(errcode,54322)
       endif
 
-      !Nonlinear solver for the radius and temperature:
-      !Only do this if the droplet evaporation is turned on
+      !Advance radius and temperature only when evaporation is turned on.
       if (drop_evap.eq.1) then
 
+      use_be = .true.
+#ifndef _OPENACC
+      if (drop_integrator.eq.1) then
+        call integrate_radius_temperature_ANN(dt,prsval,tval,qval,rhoval, &
+                         pdata(np,prtp),pdata(np,prms),pdata(np,prkap),pdata(np,prrp), &
+                         ann_radius_new,ann_temperature_new,equilibrium_probability, &
+                         ann_outside_range,ann_status)
+        if (ann_status.ne.ann_invalid_input) then
+          ann_counts(1) = ann_counts(1) + 1.0d0
+          if (ann_outside_range) ann_counts(2) = ann_counts(2) + 1.0d0
+        endif
+        if (ann_status.eq.ann_success) then
+          use_be = .false.
+          ! The dry-radius constraint belongs to BE only; use ANN output directly.
+          pdata(np,prrp) = ann_radius_new
+          pdata(np,prtp) = ann_temperature_new
+        elseif (ann_status.eq.ann_invalid_input) then
+          ann_counts(3) = ann_counts(3) + 1.0d0
+        else
+          ann_counts(4) = ann_counts(4) + 1.0d0
+        endif
+      endif
+#endif
+      ! On ANN rejection pdata still contains the original thermodynamic state.
+      if (use_be) then
       call integrate_radius_temperature_BE(dbldt,np,diffnorm, &
                          prsval,rhoval,tval,qval,pdata(np,prtp), &
                          pdata(np,prms),pdata(np,prkap),pdata(np,prrp), &
@@ -3535,6 +3569,7 @@
                          gn_reason,flag,gn_iterations,lv_iterations,dry_floor_hit)
       pdata(np,prrp) = radius_new
       pdata(np,prtp) = temperature_new
+      endif
 
       else !If droplet evaporation is turned off, leave radius unchanged and update temperature via BE
 
@@ -3862,6 +3897,96 @@
       temperature_new = rt_zeros(2)*temperature
 
       end subroutine integrate_radius_temperature_BE
+
+      ! CPU/MPI ANN adapter.  Inputs and outputs are physical, single-precision
+      ! values; normalization and equilibrium selection belong to the model.
+      ! initialize_model must have been called before using this routine.
+      subroutine integrate_radius_temperature_ANN(dt,prsval,tval,qval,rhoval, &
+                         temperature,m_s,kappa_p,radius, &
+                         radius_new,temperature_new,equilibrium_probability,outside_range,status)
+      use, intrinsic :: ieee_arithmetic, only : ieee_is_finite
+      use constants, only : rhow,rho_solute,mw,ru
+      use cm1libs, only : eslf
+      use droplet_model, only : estimate,NUMBER_INPUTS,NUMBER_OUTPUTS, &
+                         RADIUS_INDEX,TEMPERATURE_INDEX,SALT_SOLUTE_INDEX, &
+                         AIR_TEMPERATURE_INDEX,RH_INDEX,RHOA_INDEX,TFINAL_INDEX, &
+                         RADIUS_LOG_RANGE,TEMPERATURE_RANGE,SALT_SOLUTE_LOG_RANGE, &
+                         AIR_TEMPERATURE_RANGE,RH_RANGE,RHOA_RANGE,TIME_RANGE
+      implicit none
+
+      real, intent(in) :: dt,prsval,tval,qval,rhoval,temperature,m_s,kappa_p,radius
+      real, intent(out) :: radius_new,temperature_new,equilibrium_probability
+      logical, intent(out) :: outside_range
+      integer, intent(out) :: status
+      real*4 :: input_parameters(NUMBER_INPUTS),output_parameters(NUMBER_OUTPUTS)
+      real*4 :: input_lower(NUMBER_INPUTS),input_upper(NUMBER_INPUTS)
+      real :: saturation_pressure
+      double precision :: solute_input,rh_input
+
+      ! Reject invalid inputs before saturation arithmetic or model logarithms.
+      ! These defaults are not accepted predictions; the caller uses BE instead.
+      status = ann_invalid_input
+      outside_range = .false.
+      radius_new = radius
+      temperature_new = temperature
+      equilibrium_probability = 0.0
+      if (.not.all(ieee_is_finite([dt,prsval,tval,qval,rhoval, &
+                                  temperature,m_s,kappa_p,radius]))) return
+      if (dt.le.0.0 .or. prsval.le.0.0 .or. rhoval.le.0.0 .or. &
+          temperature.le.0.0 .or. radius.le.0.0 .or. qval.lt.0.0 .or. &
+          m_s.le.0.0 .or. kappa_p.le.0.0) return
+      ! CM1 eslf has a pole at 29.65 K; this is a domain check, not a training bound.
+      if (tval.le.29.65) return
+
+      ! Use CM1 saturation pressure with the RH conversion used by rad_solver2.
+      ! RH is a fraction (1 = saturation), not a percentage.
+      saturation_pressure = eslf(prsval,tval)
+      if (.not.ieee_is_finite(saturation_pressure)) return
+      if (saturation_pressure.le.0.0) return
+
+      ! Check representability before converting derived inputs to real*4.
+      solute_input = dble(kappa_p)*dble(m_s)*dble(rhow)/rho_solute
+      rh_input = (ru*tval*rhoval*qval)/(mw*saturation_pressure)
+      if (.not.ieee_is_finite(solute_input) .or. .not.ieee_is_finite(rh_input)) return
+      if (solute_input.le.0.0d0 .or. solute_input.gt.dble(huge(1.0))) return
+      if (rh_input.lt.0.0d0 .or. rh_input.gt.dble(huge(1.0))) return
+
+      input_parameters(RADIUS_INDEX) = radius
+      input_parameters(TEMPERATURE_INDEX) = temperature
+      input_parameters(SALT_SOLUTE_INDEX) = solute_input
+      input_parameters(AIR_TEMPERATURE_INDEX) = tval
+      input_parameters(RH_INDEX) = rh_input
+      input_parameters(RHOA_INDEX) = rhoval
+      ! dt is the current droplet substep duration in seconds.
+      input_parameters(TFINAL_INDEX) = dt
+      if (.not.all(ieee_is_finite(input_parameters))) return
+      if (input_parameters(SALT_SOLUTE_INDEX).le.0.0) return
+
+      ! Compare physical inputs to the generated model's training bounds.
+      ! Bounds are inclusive.  This is diagnostic only: do not clamp or reject.
+      input_lower = [10.0**RADIUS_LOG_RANGE(1),TEMPERATURE_RANGE(1), &
+                     10.0**SALT_SOLUTE_LOG_RANGE(1),AIR_TEMPERATURE_RANGE(1), &
+                     RH_RANGE(1),RHOA_RANGE(1),TIME_RANGE(1)]
+      input_upper = [10.0**RADIUS_LOG_RANGE(2),TEMPERATURE_RANGE(2), &
+                     10.0**SALT_SOLUTE_LOG_RANGE(2),AIR_TEMPERATURE_RANGE(2), &
+                     RH_RANGE(2),RHOA_RANGE(2),TIME_RANGE(2)]
+      outside_range = any(input_parameters.lt.input_lower) .or. &
+                      any(input_parameters.gt.input_upper)
+
+      status = ann_invalid_output
+      call estimate(input_parameters,output_parameters)
+      if (.not.all(ieee_is_finite(output_parameters))) return
+      if (output_parameters(RADIUS_INDEX).le.0.0 .or. &
+          output_parameters(TEMPERATURE_INDEX).le.0.0) return
+      if (output_parameters(3).lt.0.0 .or. output_parameters(3).gt.1.0) return
+
+      radius_new = output_parameters(RADIUS_INDEX)
+      temperature_new = output_parameters(TEMPERATURE_INDEX)
+      ! The model already uses this probability to select equilibrium output.
+      equilibrium_probability = output_parameters(3)
+      status = ann_success
+
+      end subroutine integrate_radius_temperature_ANN
 
       ! Record BE solver telemetry separately from the numerical update.
       subroutine record_BE_solver_diagnostics(population,m_s,gn_reason,flag, &
@@ -5835,6 +5960,7 @@
 
 #ifdef MPI
       call mpi_allreduce(mpi_in_place,np_tmp_diag,1,mpi_integer8,mpi_sum,mpi_comm_world,ierr)
+      call mpi_allreduce(mpi_in_place,ann_counts,4,mpi_double_precision,mpi_sum,mpi_comm_world,ierr)
       ! Population-pair counts use the same interval and root as totals.
       call mpi_allreduce(mpi_in_place,coal_by_pair,18,mpi_double_precision, &
                          mpi_sum,mpi_comm_world,ierr)
@@ -6689,6 +6815,7 @@
       m2_injected = 0.0
       num100 = 0.0
       num1000 = 0.0
+      ann_counts = 0.0d0
       coal_by_pair = 0.0d0
       coal_pair_attempts = 0.0d0
       coal_pair_successes = 0.0d0
@@ -8990,6 +9117,7 @@
     m2_injected = 0.0
     num100 = 0.0
     num1000 = 0.0
+    ann_counts = 0.0d0
     coal_by_pair = 0.0d0
     coal_pair_attempts = 0.0d0
     coal_pair_successes = 0.0d0
@@ -9596,6 +9724,7 @@
     ! Write data:
 
     time_index = nrec
+    call write_ann_diagnostics_nc(ncid,time_index)
     if( drop_pop_diag.eq.1 ) call write_population_extra_nc(ncid,time_index)
 
     call disp_err( nf90_inq_varid(ncid,'time',timeid) , .true. )
@@ -9939,6 +10068,40 @@
       if( myid.eq.0 ) print *,'  Leaving writedropdiag_nc '
 
    end subroutine writedropdiag_nc
+
+   ! Define on demand so restarts can append to dropdiag files created before
+   ! ANN diagnostics existed.  Old records retain NetCDF's fill value.
+   subroutine write_ann_diagnostics_nc(ncid,time_index)
+   use netcdf
+   use writeout_nc_module, only : disp_err
+   implicit none
+   integer, intent(in) :: ncid,time_index
+   integer :: i,varid,timeid,status
+   character(len=24), parameter :: names(4) = [character(len=24) :: &
+        'ann_calls','ann_out_of_range','ann_invalid_input','ann_invalid_output']
+   character(len=120), parameter :: descriptions(4) = [character(len=120) :: &
+        'ANN inference calls since last dropdiag record', &
+        'ANN inference calls with any input outside training bounds since last dropdiag record', &
+        'BE fallbacks for invalid ANN inputs since last dropdiag record; no inference attempted', &
+        'BE fallbacks for invalid ANN outputs since last dropdiag record']
+
+   do i=1,4
+      status = nf90_inq_varid(ncid,trim(names(i)),varid)
+      if (status.eq.nf90_enotvar) then
+         call disp_err(nf90_inq_dimid(ncid,'time',timeid),.true.)
+         call disp_err(nf90_redef(ncid),.true.)
+         call disp_err(nf90_def_var(ncid,trim(names(i)),nf90_double,(/timeid/),varid),.true.)
+         call disp_err(nf90_put_att(ncid,varid,'long_name',trim(descriptions(i))),.true.)
+         call disp_err(nf90_put_att(ncid,varid,'units','count'),.true.)
+         call disp_err(nf90_put_att(ncid,varid,'counting', &
+              'MPI sum; one count per superdroplet substep; not multiplicity weighted'),.true.)
+         call disp_err(nf90_enddef(ncid),.true.)
+      else
+         call disp_err(status,.true.)
+      endif
+      call disp_err(nf90_put_var(ncid,varid,ann_counts(i),(/time_index/)),.true.)
+   enddo
+   end subroutine write_ann_diagnostics_nc
 
 
 #endif
