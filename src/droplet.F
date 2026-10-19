@@ -3388,7 +3388,7 @@
           mysw,mynw,myeast,myse,myne,mysouth,mynorth,nparcelsLocal, &
           myid,dx,dy,pi_sp,pi_dp,ngxy,nbc,sbc,ebc,wbc,tsk0,drop_evap,drop_sgs_opt, &
           drop_stability_diag
-      use constants , only : rhow,rhow_dp,rho_solute,undefined_index,cpl,cpl_dp,cp_dp,i8
+      use constants , only : rhow,rhow_dp,undefined_index,cpl,cpl_dp,cp_dp,i8
       use comm_module
       use parcel_module
       use mpi
@@ -3434,14 +3434,10 @@
       real :: dzbot,dztop,zbuf_bot,zbuf_top
       integer :: i,j,k,ibin,ibin_res
       double precision :: taup,volp,rhop,tmp_coeff
-      double precision :: taup_scale,dt_nondim
-      double precision :: guess
-      double precision :: rt_zeros(2),rt_start(2)
+      double precision :: radius_new,temperature_new
       double precision :: dry_radius,dry_ratio
-      double precision :: dry_radius_fail,dry_rad10_fail
-      logical :: is_local
+      logical :: is_local,dry_floor_hit
       integer :: mflag,flag,gn_reason,gn_iterations,lv_iterations
-      integer :: fail_dry_bin
 
       dlogsig_abs = 0.0
       dlogsig_valid = 0
@@ -3530,132 +3526,15 @@
       !Only do this if the droplet evaporation is turned on
       if (drop_evap.eq.1) then
 
-      !Nondimensionalize parameters before the solver using 1-micron water droplet as ref
-      taup_scale = rhow_dp*(1.0d-6)**2/(18.0d0*dble(rhoval)*dble(viscosity))
-
-      dt_nondim = dbldt/taup_scale
-
-      guess = 0.0d0
-
-      !Gives initial guess into nonlinear solver
-      !mflag = 0, has equilibrium radius; mflag = 1, no equilibrium (uses itself as initial guess)
-      call rad_solver2(guess,mflag,prsval,rhoval,tval,qval, &
-                       pdata(np,prtp),pdata(np,prms),pdata(np,prkap), &
-                       pdata(np,prrp),np)
-
-      if (pdata(np,prms).gt.0.0) then
-         dry_radius = (3.0d0*dble(pdata(np,prms))/ &
-              (4.0d0*pi_dp*rho_solute))**(1.0d0/3.0d0)
-      else
-         dry_radius = 0.0d0
-      endif
-      dry_ratio = dry_radius/dble(pdata(np,prrp))
-
-      !Nondimensionalize the guesses
-      if (mflag.eq.0) then
-         rt_start(1) = max(guess/dble(pdata(np,prrp)),dry_ratio)
-         rt_start(2) = dble(tval)/dble(pdata(np,prtp))
-      else
-         rt_start(1) = max(1.0d0,dry_ratio)
-         rt_start(2) = 1.0
-      end if
-
-      !Start using the standard Gauss-Newton algorithm
-      call gauss_newton_2d(dble(diffnorm),dt_nondim,taup_scale, &
-                           rt_start,rt_zeros,flag,dble(prsval), &
-                           dble(rhoval),dble(tval),dble(qval), &
-                           dble(pdata(np,prtp)),dble(pdata(np,prms)), &
-                           dble(pdata(np,prkap)),dble(pdata(np,prrp)), &
-                           dry_ratio,np, &
-                           gn_iterations)
-
-      !If Gauss-Newton failed, flag identifies the reason; try Levenberg-Marquardt.
-      if (flag.ne.0) then
-         gn_reason = flag
-         num100 = num100+1.0
-            call population_event(pdata(np,prpop),11, &
-                 dble(1.0))
-         if (drop_stability_diag.ge.2) then
-            !$acc atomic update
-            drop_solver_fallback_substep = drop_solver_fallback_substep + 1
-         endif
-         if (drop_stability_diag.ge.3) then
-            !$acc atomic update
-            drop_solver_fallback_reason(gn_reason) = &
-               drop_solver_fallback_reason(gn_reason) + 1
-            !$acc atomic update
-            drop_solver_iteration_sums(1) = &
-               drop_solver_iteration_sums(1) + dble(gn_iterations)
-         endif
-         call LV_solver(dble(diffnorm),dt_nondim,taup_scale,rt_start, &
-                        rt_zeros,flag,dble(prsval),dble(rhoval), &
-                        dble(tval),dble(qval),dble(pdata(np,prtp)), &
-                        dble(pdata(np,prms)),dble(pdata(np,prkap)), &
-                        dble(pdata(np,prrp)),dry_ratio,np,lv_iterations)
-         if (drop_stability_diag.ge.3) then
-            !$acc atomic update
-            drop_solver_iteration_sums(2) = &
-               drop_solver_iteration_sums(2) + dble(lv_iterations)
-         endif
-      end if
-
-      !In rare cases both nonlinear solvers fail to converge
-      if (flag.ne.0)  then
-
-       num1000 = num1000+1.0
-            call population_event(pdata(np,prpop),12, &
-                 dble(1.0))
-       if (drop_stability_diag.ge.2) then
-          !$acc atomic update
-          drop_solver_failure_substep = drop_solver_failure_substep + 1
-       endif
-       if (drop_stability_diag.ge.3) then
-          !$acc atomic update
-          drop_solver_failure_reason(flag) = &
-             drop_solver_failure_reason(flag) + 1
-          !$acc atomic update
-          drop_solver_iteration_sums(3) = &
-             drop_solver_iteration_sums(3) + dble(lv_iterations)
-
-          if (pdata(np,prms).gt.0.0) then
-             dry_radius_fail = (3.0d0*dble(pdata(np,prms))/ &
-                  (4.0d0*pi_dp*rho_solute))**(1.0d0/3.0d0)
-             dry_rad10_fail = log10(dry_radius_fail)
-          else
-             dry_rad10_fail = dble(rmin10)-0.5d0*dble(dhrad)
-          endif
-          if (dry_rad10_fail.gt.dble(rmax10)+0.5d0*dble(dhrad)) then
-             fail_dry_bin = nbins
-          elseif (dry_rad10_fail.lt.dble(rmin10)-0.5d0*dble(dhrad)) then
-             fail_dry_bin = 1
-          else
-             fail_dry_bin = floor((dry_rad10_fail- &
-                  (dble(rmin10)-0.5d0*dble(dhrad)))/dble(dhrad))+1
-          endif
-          !$acc atomic update
-          hist_solver_failure_dry_radius(fail_dry_bin) = &
-             hist_solver_failure_dry_radius(fail_dry_bin) + 1.0d0
-            call population_hist_event(pdata(np,prpop),4,fail_dry_bin,dble(1.0d0))
-       endif
-
-       !If this happens keep radius unchanged and temp equal to surrounding
-       rt_zeros(1) = 1.0
-       rt_zeros(2) = tval/pdata(np,prtp)
-
-      end if
-
-      !The implicit radius equation enforces this bound.  Retain a final
-      !roundoff guard before converting the normalized solution back to meters.
-      rt_zeros(1) = max(rt_zeros(1),dry_ratio)
-      if (drop_stability_diag.ge.3 .and. dry_radius.gt.0.0d0 .and. &
-          rt_zeros(1).le.dry_ratio*(1.0d0+1.0d-10)) then
-         !$acc atomic update
-         drop_dry_floor_hits_substep = drop_dry_floor_hits_substep + 1
-      endif
-
-      !Now redimsionalize
-      pdata(np,prrp) = rt_zeros(1)*pdata(np,prrp)
-      pdata(np,prtp) = rt_zeros(2)*pdata(np,prtp)
+      call integrate_radius_temperature_BE(dbldt,np,diffnorm, &
+                         prsval,rhoval,tval,qval,pdata(np,prtp), &
+                         pdata(np,prms),pdata(np,prkap),pdata(np,prrp), &
+                         radius_new,temperature_new,dry_radius,dry_ratio, &
+                         mflag,flag,gn_reason,gn_iterations,lv_iterations,dry_floor_hit)
+      call record_BE_solver_diagnostics(pdata(np,prpop),pdata(np,prms), &
+                         gn_reason,flag,gn_iterations,lv_iterations,dry_floor_hit)
+      pdata(np,prrp) = radius_new
+      pdata(np,prtp) = temperature_new
 
       else !If droplet evaporation is turned off, leave radius unchanged and update temperature via BE
 
@@ -3890,6 +3769,177 @@
       end if
 
       end subroutine BE_integration
+
+      ! Advance radius and temperature only.  Diagnostics are recorded by
+      ! the caller so this routine has no counter or particle-storage updates.
+      subroutine integrate_radius_temperature_BE(dbldt,np,diffnorm, &
+                         prsval,rhoval,tval,qval,temperature,m_s,kappa_p,radius, &
+                         radius_new,temperature_new,dry_radius,dry_ratio, &
+                         mflag,flag,gn_reason,gn_iterations,lv_iterations,dry_floor_hit)
+      !$acc routine seq
+      use input, only : viscosity,pi_dp
+      use constants, only : rhow_dp,rho_solute
+      implicit none
+
+      double precision, intent(in) :: dbldt
+      integer, intent(in) :: np
+      real, intent(in) :: diffnorm,prsval,rhoval,tval,qval
+      real, intent(in) :: temperature,m_s,kappa_p,radius
+      double precision, intent(out) :: radius_new,temperature_new,dry_radius,dry_ratio
+      integer, intent(out) :: mflag,flag,gn_reason,gn_iterations,lv_iterations
+      logical, intent(out) :: dry_floor_hit
+      double precision :: taup_scale,dt_nondim,guess,rt_zeros(2),rt_start(2)
+
+      mflag = 0
+      flag = 0
+      gn_reason = 0
+      gn_iterations = 0
+      lv_iterations = 0
+
+      !Nondimensionalize parameters before the solver using 1-micron water droplet as ref
+      taup_scale = rhow_dp*(1.0d-6)**2/(18.0d0*dble(rhoval)*dble(viscosity))
+
+      dt_nondim = dbldt/taup_scale
+
+      guess = 0.0d0
+
+      !Gives initial guess into nonlinear solver
+      !mflag = 0, has equilibrium radius; mflag = 1, no equilibrium (uses itself as initial guess)
+      call rad_solver2(guess,mflag,prsval,rhoval,tval,qval, &
+                       temperature,m_s,kappa_p,radius,np)
+
+      if (m_s.gt.0.0) then
+         dry_radius = (3.0d0*dble(m_s)/ &
+              (4.0d0*pi_dp*rho_solute))**(1.0d0/3.0d0)
+      else
+         dry_radius = 0.0d0
+      endif
+      dry_ratio = dry_radius/dble(radius)
+
+      !Nondimensionalize the guesses
+      if (mflag.eq.0) then
+         rt_start(1) = max(guess/dble(radius),dry_ratio)
+         rt_start(2) = dble(tval)/dble(temperature)
+      else
+         rt_start(1) = max(1.0d0,dry_ratio)
+         rt_start(2) = 1.0
+      end if
+
+      !Start using the standard Gauss-Newton algorithm
+      call gauss_newton_2d(dble(diffnorm),dt_nondim,taup_scale, &
+                           rt_start,rt_zeros,flag,dble(prsval), &
+                           dble(rhoval),dble(tval),dble(qval), &
+                           dble(temperature),dble(m_s), &
+                           dble(kappa_p),dble(radius), &
+                           dry_ratio,np, &
+                           gn_iterations)
+
+      !If Gauss-Newton failed, flag identifies the reason; try Levenberg-Marquardt.
+      if (flag.ne.0) then
+         gn_reason = flag
+         call LV_solver(dble(diffnorm),dt_nondim,taup_scale,rt_start, &
+                        rt_zeros,flag,dble(prsval),dble(rhoval), &
+                        dble(tval),dble(qval),dble(temperature), &
+                        dble(m_s),dble(kappa_p), &
+                        dble(radius),dry_ratio,np,lv_iterations)
+      end if
+
+      !In rare cases both nonlinear solvers fail to converge
+      if (flag.ne.0)  then
+         !If this happens keep radius unchanged and temp equal to surrounding
+         rt_zeros(1) = 1.0
+         rt_zeros(2) = tval/temperature
+      end if
+
+      !The implicit radius equation enforces this bound.  Retain a final
+      !roundoff guard before converting the normalized solution back to meters.
+      rt_zeros(1) = max(rt_zeros(1),dry_ratio)
+      dry_floor_hit = dry_radius.gt.0.0d0 .and. &
+                      rt_zeros(1).le.dry_ratio*(1.0d0+1.0d-10)
+
+      !Return physical values; the caller assigns them to particle storage.
+      radius_new = rt_zeros(1)*radius
+      temperature_new = rt_zeros(2)*temperature
+
+      end subroutine integrate_radius_temperature_BE
+
+      ! Record BE solver telemetry separately from the numerical update.
+      subroutine record_BE_solver_diagnostics(population,m_s,gn_reason,flag, &
+                             gn_iterations,lv_iterations,dry_floor_hit)
+      !$acc routine seq
+      use input, only : drop_stability_diag,pi_dp
+      use constants, only : rho_solute
+      implicit none
+
+      real, intent(in) :: population,m_s
+      integer, intent(in) :: gn_reason,flag,gn_iterations,lv_iterations
+      logical, intent(in) :: dry_floor_hit
+      double precision :: dry_radius_fail,dry_rad10_fail
+      integer :: fail_dry_bin
+
+      if (gn_reason.ne.0) then
+         num100 = num100+1.0
+         call population_event(population,11,dble(1.0))
+         if (drop_stability_diag.ge.2) then
+            !$acc atomic update
+            drop_solver_fallback_substep = drop_solver_fallback_substep + 1
+         endif
+         if (drop_stability_diag.ge.3) then
+            !$acc atomic update
+            drop_solver_fallback_reason(gn_reason) = &
+               drop_solver_fallback_reason(gn_reason) + 1
+            !$acc atomic update
+            drop_solver_iteration_sums(1) = &
+               drop_solver_iteration_sums(1) + dble(gn_iterations)
+            !$acc atomic update
+            drop_solver_iteration_sums(2) = &
+               drop_solver_iteration_sums(2) + dble(lv_iterations)
+         endif
+      endif
+      if (flag.ne.0) then
+       num1000 = num1000+1.0
+            call population_event(population,12, &
+                 dble(1.0))
+       if (drop_stability_diag.ge.2) then
+          !$acc atomic update
+          drop_solver_failure_substep = drop_solver_failure_substep + 1
+       endif
+       if (drop_stability_diag.ge.3) then
+          !$acc atomic update
+          drop_solver_failure_reason(flag) = &
+             drop_solver_failure_reason(flag) + 1
+          !$acc atomic update
+          drop_solver_iteration_sums(3) = &
+             drop_solver_iteration_sums(3) + dble(lv_iterations)
+
+          if (m_s.gt.0.0) then
+             dry_radius_fail = (3.0d0*dble(m_s)/ &
+                  (4.0d0*pi_dp*rho_solute))**(1.0d0/3.0d0)
+             dry_rad10_fail = log10(dry_radius_fail)
+          else
+             dry_rad10_fail = dble(rmin10)-0.5d0*dble(dhrad)
+          endif
+          if (dry_rad10_fail.gt.dble(rmax10)+0.5d0*dble(dhrad)) then
+             fail_dry_bin = nbins
+          elseif (dry_rad10_fail.lt.dble(rmin10)-0.5d0*dble(dhrad)) then
+             fail_dry_bin = 1
+          else
+             fail_dry_bin = floor((dry_rad10_fail- &
+                  (dble(rmin10)-0.5d0*dble(dhrad)))/dble(dhrad))+1
+          endif
+          !$acc atomic update
+          hist_solver_failure_dry_radius(fail_dry_bin) = &
+             hist_solver_failure_dry_radius(fail_dry_bin) + 1.0d0
+            call population_hist_event(population,4,fail_dry_bin,dble(1.0d0))
+       endif
+
+      endif
+      if (drop_stability_diag.ge.3 .and. dry_floor_hit) then
+         !$acc atomic update
+         drop_dry_floor_hits_substep = drop_dry_floor_hits_substep + 1
+      endif
+
+      end subroutine record_BE_solver_diagnostics
 
       subroutine compute_sfs_fs_profile(ua,va,wa,tkea,fs_sgs)
 

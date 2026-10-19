@@ -60,6 +60,7 @@ end module cuda_rt
       use hifrq_module, only : writeout_hifrq
       use parcel_module
       use droplet_module, only : droplet_diag
+      use droplet_model, only : initialize_model
       use init_physics_module
       use init_surface_module
       use ib_module
@@ -1292,6 +1293,11 @@ end module cuda_rt
                        uw31,uw32,ue31,ue32,us31,us32,un31,un32,         &
                        vw31,vw32,ve31,ve32,vs31,vs32,vn31,vn32,         &
                        ww31,ww32,we31,we32,ws31,ws32,wn31,wn32)
+
+      ! Initialize the ANN model once on every rank, including restart runs.
+      if (drop_integrator.eq.1) then
+        call initialize_model()
+      endif
 
 !----------------------------------------------------------------------
 
