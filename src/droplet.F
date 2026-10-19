@@ -16,11 +16,12 @@
 
   !These are quantities which are needed in the droplet_diag output, so must be public
   real :: num100,num1000
-  ! CPU ANN interval counts: inference calls, out-of-range inference calls,
-  ! invalid-input BE fallbacks, and invalid-output BE fallbacks.
+  ! CPU ANN interval counts: inference calls, out-of-range BE reroutes,
+  ! invalid-input BE reroutes, and invalid-output BE fallbacks.
   ! Rank-local until dropdiag reduction; one count per superdroplet substep.
   double precision :: ann_counts(4) = 0.0d0
   integer, parameter :: ann_success = 0, ann_invalid_input = 1, ann_invalid_output = 2
+  integer, parameter :: ann_range_reroute = 3
   integer :: drop_solver_fallback_substep = 0
   integer :: drop_solver_failure_substep = 0
   integer :: drop_dry_floor_hits_substep = 0
@@ -3542,9 +3543,8 @@
                          pdata(np,prtp),pdata(np,prms),pdata(np,prkap),pdata(np,prrp), &
                          ann_radius_new,ann_temperature_new,equilibrium_probability, &
                          ann_outside_range,ann_status)
-        if (ann_status.ne.ann_invalid_input) then
+        if (ann_status.eq.ann_success .or. ann_status.eq.ann_invalid_output) then
           ann_counts(1) = ann_counts(1) + 1.0d0
-          if (ann_outside_range) ann_counts(2) = ann_counts(2) + 1.0d0
         endif
         if (ann_status.eq.ann_success) then
           use_be = .false.
@@ -3553,6 +3553,8 @@
           pdata(np,prtp) = ann_temperature_new
         elseif (ann_status.eq.ann_invalid_input) then
           ann_counts(3) = ann_counts(3) + 1.0d0
+        elseif (ann_status.eq.ann_range_reroute) then
+          ann_counts(2) = ann_counts(2) + 1.0d0
         else
           ann_counts(4) = ann_counts(4) + 1.0d0
         endif
@@ -3963,7 +3965,7 @@
       if (input_parameters(SALT_SOLUTE_INDEX).le.0.0) return
 
       ! Compare physical inputs to the generated model's training bounds.
-      ! Bounds are inclusive.  This is diagnostic only: do not clamp or reject.
+      ! Bounds are inclusive; reroute to BE before inference if outside them.
       input_lower = [10.0**RADIUS_LOG_RANGE(1),TEMPERATURE_RANGE(1), &
                      10.0**SALT_SOLUTE_LOG_RANGE(1),AIR_TEMPERATURE_RANGE(1), &
                      RH_RANGE(1),RHOA_RANGE(1),TIME_RANGE(1)]
@@ -3971,7 +3973,12 @@
                      10.0**SALT_SOLUTE_LOG_RANGE(2),AIR_TEMPERATURE_RANGE(2), &
                      RH_RANGE(2),RHOA_RANGE(2),TIME_RANGE(2)]
       outside_range = any(input_parameters.lt.input_lower) .or. &
-                      any(input_parameters.gt.input_upper)
+                      any(input_parameters.gt.input_upper) .or. &
+                      abs(dble(temperature)-dble(tval)).gt.3.0d0
+      if (outside_range) then
+        status = ann_range_reroute
+        return
+      endif
 
       status = ann_invalid_output
       call estimate(input_parameters,output_parameters)
@@ -10077,15 +10084,20 @@
    implicit none
    integer, intent(in) :: ncid,time_index
    integer :: i,varid,timeid,status
-   character(len=24), parameter :: names(4) = [character(len=24) :: &
-        'ann_calls','ann_out_of_range','ann_invalid_input','ann_invalid_output']
-   character(len=120), parameter :: descriptions(4) = [character(len=120) :: &
+   ! Retain the original input counters as aliases for existing analysis tools.
+   integer, parameter :: counter_index(6) = [1,2,3,4,2,3]
+   character(len=24), parameter :: names(6) = [character(len=24) :: &
+        'ann_calls','ann_out_of_range','ann_invalid_input','ann_invalid_output', &
+        'ann_be_out_of_range','ann_be_invalid_input']
+   character(len=120), parameter :: descriptions(6) = [character(len=120) :: &
         'ANN inference calls since last dropdiag record', &
-        'ANN inference calls with any input outside training bounds since last dropdiag record', &
-        'BE fallbacks for invalid ANN inputs since last dropdiag record; no inference attempted', &
-        'BE fallbacks for invalid ANN outputs since last dropdiag record']
+        'Out-of-range BE reroutes since last dropdiag record; alias of ann_be_out_of_range', &
+        'Invalid-input BE reroutes since last dropdiag record; alias of ann_be_invalid_input', &
+        'BE fallbacks for invalid ANN outputs since last dropdiag record', &
+        'BE reroutes for input bounds or abs(Tp-Tf) > 3 K since last dropdiag record; no inference attempted', &
+        'BE reroutes for invalid ANN inputs since last dropdiag record; no inference attempted']
 
-   do i=1,4
+   do i=1,6
       status = nf90_inq_varid(ncid,trim(names(i)),varid)
       if (status.eq.nf90_enotvar) then
          call disp_err(nf90_inq_dimid(ncid,'time',timeid),.true.)
@@ -10099,7 +10111,7 @@
       else
          call disp_err(status,.true.)
       endif
-      call disp_err(nf90_put_var(ncid,varid,ann_counts(i),(/time_index/)),.true.)
+      call disp_err(nf90_put_var(ncid,varid,ann_counts(counter_index(i)),(/time_index/)),.true.)
    enddo
    end subroutine write_ann_diagnostics_nc
 
