@@ -254,6 +254,7 @@ SRC   = cm1.F \
 	mp_driver.F \
 	param.F \
 	parcel.F \
+	droplet_model.F \
 	droplet.F \
 	pdef.F \
 	pdcomp.F \
@@ -334,6 +335,15 @@ cm1:			$(OBJS)
 $(OBJS): %.o: %.f90
 			$(FC) $(FFLAGS) $(OUTPUTINC) -c $<
 
+# The generated ANN model contains long free-form lines.  Intel accepts
+# these natively; GNU already uses -ffree-line-length-none above.  MPI builds
+# use Intel ifx through mpiifort, regardless of the original FC setting.
+ifeq (${USE_MPI_L},true)
+droplet_model.o: FFLAGS += -free
+else ifeq (${FC},ifort)
+droplet_model.o: FFLAGS += -free
+endif
+
 code:
 			$(AR) onefile.F $(SRC)
 			mv onefile.F ../run
@@ -387,7 +397,7 @@ module_mp_jensen_ishmael.o: input.o module_ra_etc.o
 mp_driver.o: constants.o input.o misclibs.o kessler.o goddard.o thompson.o lfoice.o morrison.o module_mp_nssl_2mom.o module_mp_p3.o module_mp_jensen_ishmael.o
 param.o: constants.o input.o init_terrain.o bc.o comm.o bcast.o thompson.o morrison.o module_mp_nssl_2mom.o goddard.o lfoice.o module_mp_p3.o module_mp_jensen_ishmael.o ib_module.o eddy_recycle.o lsnudge.o
 parcel.o: constants.o input.o cm1libs.o misclibs.o bc.o comm.o writeout_nc.o comm_droplet.o
-droplet.o: constants.o input.o cm1libs.o bc.o comm.o comm_droplet.o parcel.o mersennetwister_mod.o writeout_nc.o
+droplet.o: constants.o input.o cm1libs.o bc.o comm.o comm_droplet.o parcel.o mersennetwister_mod.o writeout_nc.o droplet_model.o
 pdef.o: input.o bc.o comm.o
 pdcomp.o: constants.o input.o adv.o poiss.o ib_module.o
 poiss.o: input.o singleton.o
