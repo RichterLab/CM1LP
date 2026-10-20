@@ -1651,7 +1651,11 @@
    Interval events and feedback use its population when the event occurred,
    before any subsequent coalescence. Feedback profiles use the final droplet
    substep, matching the existing total profiles. A=salt and B=sulfate for
-   testcase 17; B is reserved for dust in testcase 3 and unused in 15/16.
+   testcase 17; B=dust in testcase 3 and unused in 15/16.
+   Testcase 3 initializes pure A with kappa=1.2 below 500 m and pure B with
+   kappa=0.03 at/above 500 m. Both layers use the existing three-mode dry PSD
+   and share the namelist particle count and multiplicity settings; the
+   particle count is for the whole domain, not separately for each layer.
    Enabling this option also allocates three sets of five grid feedback
    fields and adds their deposition/halo exchanges. Output size depends on
    levels, histogram bins, and records, not on the number of particles.

@@ -687,11 +687,20 @@
                 end if
                 pdata(i,prrp0) = pdata(i,prrp)
              else if (testcase.eq.3) then
-                ! BOMEX: A = marine/salt aerosol, B = dust (reserved).
-                ! Keep the existing homogeneous PSD/kappa: no dust yet.
-                pdata(i,prpop) = pop_a
-                pdata(i,prfracb) = 0.0
-                pdata(i,prkap) = 0.6
+                ! BOMEX: A = sea salt below 500 m; B = dust at/above 500 m.
+                ! prfracb is the B fraction of dry mass: pure A=0, pure B=1.
+                ! Both layers retain the same three-mode dry PSD and namelist
+                ! particle count/multiplicity settings. Set kappa before the
+                ! size helper calculates the equilibrium wet radius at 80% RH.
+                if (pdata(i,prz).lt.500.0) then
+                   pdata(i,prpop) = pop_a
+                   pdata(i,prfracb) = 0.0
+                   pdata(i,prkap) = 1.2
+                else
+                   pdata(i,prpop) = pop_b
+                   pdata(i,prfracb) = 1.0
+                   pdata(i,prkap) = 0.03
+                end if
                 if (psd_sampling_opt.eq.0) then
                    call bomex_lognormal_droplet(pdata(i,prrp), &
                         pdata(i,prms),pdata(i,prkap),randomNumbers)
