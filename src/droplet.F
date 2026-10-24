@@ -6672,61 +6672,116 @@
       integer, intent(in) :: nstep
       real, intent(in) :: mtime
       real, intent(in), dimension(nparcelsLocal,npvals) :: pdata
-      integer, parameter :: num_local_traj = 500 !The maximum number of droplets which could be selected on a single MPI rank
-      integer, parameter :: num_traj_skip = 1 !The stride of the droplet trajectory PIDX
-      real :: compacted(num_local_traj,npvals)  !A buffer array to collect all droplets selected for trajectory output
-      integer :: np,pcount,idx
-      integer :: funit
+      integer, parameter :: num_traj_vars = 18
+      ! Temporary compile-time controls for testing; these can move to the
+      ! droplet namelist after the selection and buffering path is validated.
+      integer, parameter :: drop_traj_stride = 10000
+      real, parameter :: drop_traj_start = 0.0
+      real, parameter :: drop_traj_end = -1.0
+      real, allocatable :: compacted(:,:)
+      integer :: np,pcount,idx,nselected,pidx,procidx
+      integer :: funit,alloc_status
       logical :: exist
       character*180 :: fname
       character*4 :: myid_char
 
-      pcount = 0
+      ! The trajectory sample is stable across MPI migration because both
+      ! values used by the hash identify the process on which the particle
+      ! was created, not the process that currently owns it.
+      if( drop_traj_stride.lt.1 )then
+         if( myid.eq.0 ) print *, 'ERROR: drop_traj_stride must be at least 1'
+         call stopcm1
+      endif
+      if( drop_traj_end.ge.0.0 .and. drop_traj_end.lt.drop_traj_start )then
+         if( myid.eq.0 ) print *, 'ERROR: drop_traj_end precedes drop_traj_start'
+         call stopcm1
+      endif
 
-      !$acc data create(compacted,pcount)
-
-      !$acc update device(ngidx,pcount)
-      
-      !Pull out some subset of trajectories
-
-      !$acc parallel loop gang vector default(present) private(idx)
-      do np=1,nparcelsLocalActive
-
-        !if ( transfer(pdata(np,prpidx),ngidx).eq.15 .and. transfer(pdata(np,prprocidx),ngidx).eq.1 ) then
-        !   print *, 'DHR TRAJ:',pdata(np,prx),pdata(np,pry),pdata(np,prz),pdata(np,prrp)
-        !end if
-
-
-         if (mod(transfer(pdata(np,prpidx),ngidx),num_traj_skip).eq.0) then
-           !$acc atomic capture
-           pcount = pcount + 1
-           idx = pcount
-           !$acc end atomic
-
-           if (idx.le.num_local_traj) then
-             compacted(idx,:) = pdata(np,:)
-           end if
-
-         end if
-
-      end do
-      !$acc end parallel
-
-      !$acc update host(compacted,pcount)
-
-      ! Never allow the host write loop to exceed the compacted buffer.
-      if (pcount.gt.num_local_traj) then
-         print *, 'WARNING: SELECTED TRAJECTORIES EXCEED MAXIMUM NUMBER ON RANK ',myid, &
-                  '; WRITING AT MOST ',num_local_traj
-         pcount = num_local_traj
-      end if
-      
-      !$acc end data
-
-      !Now write them to a file
+      ! Set up the per-rank file before applying the time window so nstep=1
+      ! still clears trajectory files left by an earlier run.
       funit = 17
       write(myid_char,'(i4.4)') myid
       fname = trim(adjustl("./particle_traj/"//myid_char//".dat"))
+
+      if( mtime.lt.drop_traj_start .or. &
+          (drop_traj_end.ge.0.0 .and. mtime.gt.drop_traj_end) )then
+         if( nstep.eq.1 )then
+            open(unit=funit,file=fname,access="stream",form="unformatted",status="replace")
+            close(funit)
+         endif
+         return
+      endif
+
+      ! First pass: count all locally owned particles in the deterministic
+      ! global sample.  This determines the exact temporary buffer size.
+      nselected = 0
+      !$acc data copy(nselected)
+      !$acc parallel loop gang vector default(present) &
+      !$acc reduction(+:nselected) private(pidx,procidx)
+      do np=1,nparcelsLocalActive
+         pidx = transfer(pdata(np,prpidx),0)
+         procidx = transfer(pdata(np,prprocidx),0)
+         if( trajectory_is_selected(pidx,procidx,drop_traj_stride) )then
+            nselected = nselected+1
+         endif
+      enddo
+      !$acc end parallel loop
+      !$acc end data
+
+      if( nselected.gt.0 )then
+         allocate(compacted(nselected,num_traj_vars),stat=alloc_status)
+         if( alloc_status.ne.0 )then
+            print *, 'ERROR: trajectory buffer allocation failed on rank ',myid, &
+                     ' for ',nselected,' particles'
+            call stopcm1
+         endif
+
+         ! Second pass: compact only the 18 values written to the file.
+         pcount = 0
+         !$acc data create(compacted) copy(pcount) copyin(mtime)
+         !$acc parallel loop gang vector default(present) &
+         !$acc private(idx,pidx,procidx)
+         do np=1,nparcelsLocalActive
+            pidx = transfer(pdata(np,prpidx),0)
+            procidx = transfer(pdata(np,prprocidx),0)
+            if( trajectory_is_selected(pidx,procidx,drop_traj_stride) )then
+               !$acc atomic capture
+               pcount = pcount+1
+               idx = pcount
+               !$acc end atomic
+
+               compacted(idx, 1) = real(pidx)
+               compacted(idx, 2) = real(procidx)
+               compacted(idx, 3) = mtime
+               compacted(idx, 4) = pdata(np,prx)
+               compacted(idx, 5) = pdata(np,pry)
+               compacted(idx, 6) = pdata(np,prz)
+               compacted(idx, 7) = pdata(np,prvpx)
+               compacted(idx, 8) = pdata(np,prvpy)
+               compacted(idx, 9) = pdata(np,prvpz)
+               compacted(idx,10) = pdata(np,prrp)
+               compacted(idx,11) = pdata(np,prtp)
+               compacted(idx,12) = pdata(np,prms)
+               compacted(idx,13) = pdata(np,prmult)
+               compacted(idx,14) = pdata(np,prt)
+               compacted(idx,15) = pdata(np,prqv)
+               compacted(idx,16) = pdata(np,prpop)
+               compacted(idx,17) = pdata(np,prfracb)
+               compacted(idx,18) = pdata(np,prncoll)
+            endif
+         enddo
+         !$acc end parallel loop
+         !$acc update host(compacted,pcount)
+         !$acc end data
+
+         if( pcount.ne.nselected )then
+            print *, 'ERROR: trajectory count mismatch on rank ',myid, &
+                     ': counted ',nselected,' but packed ',pcount
+            call stopcm1
+         endif
+      else
+         pcount = 0
+      endif
 
       if (nstep.eq.1) then  !If you are on the first time step of a run, just overwrite
          open(unit=funit,file=fname,access="stream",form="unformatted",status="replace")
@@ -6743,15 +6798,37 @@
 
 
       do np=1,pcount
-        write(funit) real(transfer(compacted(np,prpidx),ngidx)),real(transfer(compacted(np,prprocidx),ngidx)),mtime,compacted(np,prx),compacted(np,pry),compacted(np,prz),compacted(np,prvpx),compacted(np,prvpy),compacted(np,prvpz),compacted(np,prrp),compacted(np,prtp),compacted(np,prms),compacted(np,prmult),compacted(np,prt),compacted(np,prqv), &
-                     compacted(np,prpop),compacted(np,prfracb),compacted(np,prncoll)
+        write(funit) compacted(np,1:num_traj_vars)
       end do
       
       close(funit)
 
+      if( allocated(compacted) ) deallocate(compacted)
+
 
 
       end subroutine write_drop_traj
+
+      logical function trajectory_is_selected(pidx,procidx,stride) result(selected)
+      !$acc routine seq
+      use constants, only : i8
+      implicit none
+
+      integer, intent(in) :: pidx,procidx,stride
+      integer(i8), parameter :: hash_modulus = 2147483647_i8
+      integer(i8) :: trajectory_hash
+
+      selected = .false.
+      if( stride.lt.1 ) return
+
+      ! Both coefficients are odd so common power-of-two strides also mix
+      ! the permanent particle index and its originating MPI rank.
+      trajectory_hash = modulo((abs(int(pidx,i8))+1_i8)*1000003_i8 + &
+                               (abs(int(procidx,i8))+1_i8)*91771_i8, &
+                               hash_modulus)
+      selected = modulo(trajectory_hash,int(stride,i8)).eq.0_i8
+
+      end function trajectory_is_selected
 
       subroutine find_horizontal_location_index (loc_ind, loc, lb, ub, dsize, end_ind, ind)
       !$acc routine seq
