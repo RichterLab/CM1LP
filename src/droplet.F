@@ -6666,18 +6666,13 @@
 
       subroutine write_drop_traj(nstep,mtime,pdata)
       use input, only : myid,nparcelsLocal,npvals,nparcelsLocalActive,prpidx,prprocidx,prx,pry,prz,prvpx,prvpy,prvpz,prrp,prtp,prms,prmult,prt,prqv, &
-                        prpop,prfracb,prncoll
+                        prpop,prfracb,prncoll,drop_traj_stride,drop_traj_start,drop_traj_end
       implicit none
 
       integer, intent(in) :: nstep
       real, intent(in) :: mtime
       real, intent(in), dimension(nparcelsLocal,npvals) :: pdata
       integer, parameter :: num_traj_vars = 18
-      ! Temporary compile-time controls for testing; these can move to the
-      ! droplet namelist after the selection and buffering path is validated.
-      integer, parameter :: drop_traj_stride = 10000
-      real, parameter :: drop_traj_start = 0.0
-      real, parameter :: drop_traj_end = -1.0
       real, allocatable :: compacted(:,:)
       integer :: np,pcount,idx,nselected,pidx,procidx
       integer :: funit,alloc_status
