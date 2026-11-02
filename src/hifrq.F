@@ -140,13 +140,13 @@
 
     !---------------------------------------------------------------------------
 
-    integer :: nvar,orec,i,j,k,n,nn,nlevels,diffit,wloopmax
+    integer :: nvar,orec,i,j,k,n,nn,nlevels,diffit,wloopmax,knearest,nrequested
     real :: delz,delzmin,pint,plast,qvs,tx,havg
     logical :: doit,domse
     double precision :: sum,weps,bfoo
 
-    integer, dimension(nk) :: klev
-    real, dimension(nk) :: zlev
+    integer, dimension(max(nk,7)) :: klev
+    real, dimension(max(nk,7)) :: zlev
 
     character(len=80), dimension(varmax) :: varname,vardesc,varunit
     integer, dimension(varmax) :: varlvls
@@ -159,6 +159,10 @@
       if( myid.eq.0 ) print *,'  Entering writeout_hifrq ... '
       if( myid.eq.0 ) print *
 
+      IF( testcase.eq.3 )THEN
+        nlevels = 7
+        zlev(1:7) = (/ 0.0,25.0,50.0,250.0,500.0,1000.0,2000.0 /)
+      ELSE
 !!!      nlevels = 3
 !!!      zlev(1) =     0.0
 !!!      zlev(2) =   100.0
@@ -174,6 +178,8 @@
       zlev(7) = 45000.0
 
       if(myid.eq.0) print *
+      ENDIF
+
       if(myid.eq.0) print *,'  levels for hifrq output: '
 
       if(myid.eq.0) print *
@@ -182,6 +188,30 @@
         if(myid.eq.0) print *,'    n,z = ',n,zlev(n)
       enddo
 
+      IF( testcase.eq.3 )THEN
+        ! Retain nearest scalar levels, omitting requests above the model top
+        ! and duplicate levels rather than moving a slice to a different height.
+        nrequested = nlevels
+        nlevels = 0
+        do n=1,nrequested
+          if( zlev(n).gt.maxz ) cycle
+          delzmin = huge(delzmin)
+          knearest = 1
+          do k=1,nk
+            delz = abs(sigma(k)-zlev(n))
+            if( delz.lt.delzmin )then
+              delzmin = delz
+              knearest = k
+            endif
+          enddo
+          if( nlevels.gt.0 )then
+            if( knearest.eq.klev(nlevels) ) cycle
+          endif
+          nlevels = nlevels+1
+          klev(nlevels) = knearest
+          zlev(nlevels) = zlev(n)
+        enddo
+      ELSE
       ! find level that is closest to the requested level:
       do n=1,nlevels
         if( zlev(n).le.maxz )then
@@ -219,6 +249,8 @@
       enddo
 
       if(myid.eq.0) print *
+      ENDIF
+
       if(myid.eq.0) print *,'    ... after checks ...'
 
       do n=1,nlevels
@@ -298,6 +330,258 @@
       if( myid.eq.0 ) print *,'  wloop = ',wloop
 
       nvar = 0
+
+      IF( testcase.eq.3 )THEN
+
+      ! Case-specific x-y maps and scalar-level slices.  In ptype=7 runs,
+      ! solve3 projects droplet qc into q3d before this output routine runs.
+
+      nvar = nvar+1
+      varname(nvar) = 'mtime'
+      vardesc(nvar) = 'model time (seconds since beginning of simulation)'
+      varunit(nvar) = 's'
+      varlvls(nvar) = 0
+
+      do j=1,nj
+      do i=1,ni
+        dum1(i,j,1) = mtime
+      enddo
+      enddo
+
+      call writehf(1,dum1(ib,jb,1),dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+
+      IF( imoist.eq.1 )THEN
+
+      nvar = nvar+1
+      varname(nvar) = 'prate'
+      vardesc(nvar) = 'surface precipitation rate'
+      varunit(nvar) = 'kg/m2/s'
+      varlvls(nvar) = 0
+
+      call writehf(1,prate,dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+      ENDIF
+
+      nvar = nvar+1
+      varname(nvar) = 'thflux'
+      vardesc(nvar) = 'surface potential temperature flux'
+      varunit(nvar) = 'K m/s'
+      varlvls(nvar) = 0
+
+      call writehf(1,thflux,dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+
+      IF( imoist.eq.1 )THEN
+
+      nvar = nvar+1
+      varname(nvar) = 'qvflux'
+      vardesc(nvar) = 'surface water vapor mixing ratio flux'
+      varunit(nvar) = 'g/g m/s'
+      varlvls(nvar) = 0
+
+      call writehf(1,qvflux,dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+      ENDIF
+
+      IF( (sfcmodel.ge.1) .or. (oceanmodel.eq.2) .or. (ipbl.ge.1) .or. (bbc.eq.3) )THEN
+
+      nvar = nvar+1
+      varname(nvar) = 'u10'
+      vardesc(nvar) = 'u component of 10m wind speed'
+      varunit(nvar) = 'm/s'
+      varlvls(nvar) = 0
+
+      if( imove.eq.1 ) vardesc(nvar) = 'u component of 10m wind speed (ground-rel.)'
+
+      call writehf(1,u10,dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+      ENDIF
+
+      IF( (sfcmodel.ge.1) .or. (oceanmodel.eq.2) .or. (ipbl.ge.1) .or. (bbc.eq.3) )THEN
+
+      nvar = nvar+1
+      varname(nvar) = 'v10'
+      vardesc(nvar) = 'v component of 10m wind speed'
+      varunit(nvar) = 'm/s'
+      varlvls(nvar) = 0
+
+      if( imove.eq.1 ) vardesc(nvar) = 'v component of 10m wind speed (ground-rel.)'
+
+      call writehf(1,v10,dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+      ENDIF
+
+
+      nvar = nvar+1
+      varname(nvar) = 'ust'
+      vardesc(nvar) = 'friction velocity (u star)'
+      varunit(nvar) = 'm/s'
+      varlvls(nvar) = 0
+
+      call writehf(1,ust,dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+
+
+      nvar = nvar+1
+      varname(nvar) = 'stau'
+      vardesc(nvar) = 'surface stress'
+      varunit(nvar) = 'm2/s2'
+      varlvls(nvar) = 0
+
+      call writehf(1,stau,dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+
+      IF( imoist.eq.1 )THEN
+        ! Cloud-only and total liquid paths, both in kg/m^2.
+        do j=1,nj
+        do i=1,ni
+          dum1(i,j,1) = 0.0
+          dum1(i,j,2) = 0.0
+        enddo
+        enddo
+        do k=1,nk
+          if( nqc.ge.1 )then
+            do j=1,nj
+            do i=1,ni
+              dum1(i,j,1) = dum1(i,j,1) + rho(i,j,k)*q3d(i,j,k,nqc)*dz*rmh(i,j,k)
+            enddo
+            enddo
+          endif
+          if( nqr.ge.1 )then
+            do j=1,nj
+            do i=1,ni
+              dum1(i,j,2) = dum1(i,j,2) + rho(i,j,k)*q3d(i,j,k,nqr)*dz*rmh(i,j,k)
+            enddo
+            enddo
+          endif
+        enddo
+
+      nvar = nvar+1
+      varname(nvar) = 'cwp'
+      vardesc(nvar) = 'cloud water path'
+      varunit(nvar) = 'kg/m^2'
+      varlvls(nvar) = 0
+
+      call writehf(1,dum1(ib,jb,1),dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+
+      nvar = nvar+1
+      varname(nvar) = 'lwp'
+      vardesc(nvar) = 'liquid water path (cloud plus rain)'
+      varunit(nvar) = 'kg/m^2'
+      varlvls(nvar) = 0
+
+      do j=1,nj
+      do i=1,ni
+        dum1(i,j,2) = dum1(i,j,1)+dum1(i,j,2)
+      enddo
+      enddo
+
+      call writehf(1,dum1(ib,jb,2),dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+      ENDIF
+
+      nvar = nvar+1
+      varname(nvar) = 'th'
+      vardesc(nvar) = 'potential temperature'
+      varunit(nvar) = 'K'
+      varlvls(nvar) = nlevels
+
+      do n=1,nlevels
+        k = klev(n)
+        do j=1,nj
+        do i=1,ni
+          dum1(i,j,n) = th0(i,j,k)+th3d(i,j,k)
+        enddo
+        enddo
+      enddo
+
+      call writehf(nlevels,dum1(ib,jb,1),dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+
+      IF( imoist.eq.1 .and. nqv.ge.1 )THEN
+
+      nvar = nvar+1
+      varname(nvar) = 'qv'
+      vardesc(nvar) = 'water vapor mixing ratio'
+      varunit(nvar) = 'kg/kg'
+      varlvls(nvar) = nlevels
+
+      do n=1,nlevels
+        k = klev(n)
+        do j=1,nj
+        do i=1,ni
+          dum1(i,j,n) = q3d(i,j,k,nqv)
+        enddo
+        enddo
+      enddo
+
+      call writehf(nlevels,dum1(ib,jb,1),dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+      ENDIF
+
+      IF( imoist.eq.1 .and. nqc.ge.1 )THEN
+
+      nvar = nvar+1
+      varname(nvar) = 'qc'
+      vardesc(nvar) = 'cloud water mixing ratio'
+      varunit(nvar) = 'kg/kg'
+      varlvls(nvar) = nlevels
+
+      do n=1,nlevels
+        k = klev(n)
+        do j=1,nj
+        do i=1,ni
+          dum1(i,j,n) = q3d(i,j,k,nqc)
+        enddo
+        enddo
+      enddo
+
+      call writehf(nlevels,dum1(ib,jb,1),dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+      ENDIF
+
+      nvar = nvar+1
+      varname(nvar) = 'u'
+      vardesc(nvar) = 'u interpolated to scalar points (grid-relative)'
+      varunit(nvar) = 'm/s'
+      varlvls(nvar) = nlevels
+
+      do n=1,nlevels
+        k = klev(n)
+        do j=1,nj
+        do i=1,ni
+          dum1(i,j,n) = 0.5*(u3d(i,j,k)+u3d(i+1,j,k))
+        enddo
+        enddo
+      enddo
+
+      call writehf(nlevels,dum1(ib,jb,1),dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+
+      nvar = nvar+1
+      varname(nvar) = 'v'
+      vardesc(nvar) = 'v interpolated to scalar points (grid-relative)'
+      varunit(nvar) = 'm/s'
+      varlvls(nvar) = nlevels
+
+      do n=1,nlevels
+        k = klev(n)
+        do j=1,nj
+        do i=1,ni
+          dum1(i,j,n) = 0.5*(v3d(i,j,k)+v3d(i,j+1,k))
+        enddo
+        enddo
+      enddo
+
+      call writehf(nlevels,dum1(ib,jb,1),dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+
+      nvar = nvar+1
+      varname(nvar) = 'w'
+      vardesc(nvar) = 'w interpolated to scalar points'
+      varunit(nvar) = 'm/s'
+      varlvls(nvar) = nlevels
+
+      do n=1,nlevels
+        k = klev(n)
+        do j=1,nj
+        do i=1,ni
+          dum1(i,j,n) = 0.5*(w3d(i,j,k)+w3d(i,j,k+1))
+        enddo
+        enddo
+      enddo
+
+      call writehf(nlevels,dum1(ib,jb,1),dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+
+      ELSE
+      ! Legacy high-frequency output for all other testcases.
 
       !c-c-c-c-c-c-c-c-c-c
 
@@ -1142,6 +1426,8 @@
     !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
     !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
     !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      ENDIF  ! testcase-specific output
+
     ! close output file:
 
     id0:  IF( myid.eq.0 )THEN

@@ -2503,9 +2503,9 @@ end module cuda_rt
 !----------------------------------------------------------------------
 !  New for cm1r19.6  (not thoroughly tested)
 
-      dohifrq = .false.     ! do high-frequency output?
+      dohifrq = .true.      ! do high-frequency output?
 
-      hifrqfrq =  3600.0    ! frequency (seconds)
+      hifrqfrq = statfrq    ! match droplet diagnostics / statpack (seconds)
 
 !----------------------------------------------------------------------
 
