@@ -1530,6 +1530,10 @@
 
   ENDDO  bigwloop
 
+      ! Companion full-height section for every testcase, on the same clock.
+      call writeout_hfxz(mtime,nwriteh,xfref,yfref,sigma,th0,th3d,q3d, &
+                         u3d,v3d,w3d,myi1p,myi2p,myj1p,myj2p)
+
       if( myid.eq.0 ) print *
       if( myid.eq.0 ) print *,'  ... Leaving writeout_hifrq '
       if( myid.eq.0 ) print *
@@ -1540,6 +1544,170 @@
   !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
   !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
   !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+
+!-------------------------------------------------------------------------------
+! Write a full-height x-z section at the global ny/2 scalar row.  This GrADS
+! companion stream is independent of testcase and output_format, and is called
+! once per high-frequency output time (not once per NetCDF metadata/data pass).
+!-------------------------------------------------------------------------------
+
+    subroutine writeout_hfxz(mtime,nwriteh,xfref,yfref,sigma,th0,th3d,q3d, &
+                             u3d,v3d,w3d,myi1p,myi2p,myj1p,myj2p)
+    use input
+    use constants, only: grads_undef
+#ifdef MPI
+    use mpi
+#endif
+    implicit none
+
+    double precision, intent(in) :: mtime
+    integer, intent(in) :: nwriteh
+    real, intent(in) :: xfref(1-ngxy:nx+ngxy+1),yfref(1-ngxy:ny+ngxy+1)
+    real, intent(in) :: sigma(kb:ke)
+    real, intent(in) :: th0(ib:ie,jb:je,kb:ke),th3d(ib:ie,jb:je,kb:ke)
+    real, intent(in) :: q3d(ibm:iem,jbm:jem,kbm:kem,numq)
+    real, intent(in) :: u3d(ib:ie+1,jb:je,kb:ke)
+    real, intent(in) :: v3d(ib:ie,jb:je+1,kb:ke)
+    real, intent(in) :: w3d(ib:ie,jb:je,kb:ke+1)
+    integer, intent(in) :: myi1p(numprocs),myi2p(numprocs)
+    integer, intent(in) :: myj1p(numprocs),myj2p(numprocs)
+
+    integer :: jmid,jlocal,p,i,k,n,index,nlocal,sendcount,totalcount,orec
+    integer :: unitdat,unitctl
+#ifdef MPI
+    integer :: realtype
+#endif
+    integer :: counts(numprocs),offsets(numprocs)
+    real, allocatable :: sendbuf(:),recvbuf(:),plane(:,:)
+    logical :: owns_row
+    character(len=120) :: filename
+    character(len=8), parameter :: names(6) = &
+        (/ 'th      ','qv      ','qc      ','u       ','v       ','w       ' /)
+    character(len=64), parameter :: descriptions(6) = (/ &
+        'potential temperature (K)                                       ', &
+        'water vapor mixing ratio (kg/kg)                                ', &
+        'cloud water mixing ratio (kg/kg)                                ', &
+        'scalar-point u velocity, grid-relative (m/s)                    ', &
+        'scalar-point v velocity, grid-relative (m/s)                    ', &
+        'scalar-point w velocity (m/s)                                   ' /)
+
+    jmid = max(1,ny/2)
+    owns_row = jmid.ge.myj1p(myid+1) .and. jmid.le.myj2p(myid+1)
+    jlocal = jmid-myj1p(myid+1)+1
+
+    ! Each contributing rank packs x fastest, then z.  Non-owning ranks join
+    ! the collective with a zero count; rank 0 need not own any of the plane.
+    totalcount = 0
+    do p=1,numprocs
+      offsets(p) = totalcount
+      counts(p) = 0
+      if( jmid.ge.myj1p(p) .and. jmid.le.myj2p(p) )then
+        counts(p) = (myi2p(p)-myi1p(p)+1)*nk
+      endif
+      totalcount = totalcount+counts(p)
+    enddo
+    if( totalcount.ne.nx*nk )then
+      if( myid.eq.0 ) print *, 'ERROR: incomplete x-z section decomposition'
+      call stopcm1
+    endif
+    sendcount = counts(myid+1)
+    allocate(sendbuf(max(1,sendcount)))
+    if( myid.eq.0 )then
+      allocate(recvbuf(totalcount),plane(nx,nk))
+      write(filename,'("cm1out_hfxz_",i6.6,".dat")') nwriteh
+      print *,trim(filename),'  global j = ',jmid
+      open(newunit=unitdat,file=trim(filename),status='replace', &
+           form='unformatted',access='direct',recl=4*nx)
+      ! mtime is a single x row (no vertical dimension in the descriptor).
+      write(unitdat,rec=1) (real(mtime,kind=4),i=1,nx)
+      orec = 2
+    else
+      allocate(recvbuf(1),plane(1,1))
+    endif
+#ifdef MPI
+    ! Match default REAL even in builds that promote it to double precision.
+    call MPI_TYPE_MATCH_SIZE(MPI_TYPECLASS_REAL,storage_size(0.0)/8,realtype,ierr)
+#endif
+
+    do n=1,6
+      if( owns_row )then
+        index = 0
+        do k=1,nk
+        do i=1,ni
+          index = index+1
+          select case(n)
+          case(1)
+            sendbuf(index) = th0(i,jlocal,k)+th3d(i,jlocal,k)
+          case(2)
+            sendbuf(index) = grads_undef
+            if( imoist.eq.1 .and. nqv.ge.1 .and. nqv.le.numq ) &
+              sendbuf(index) = q3d(i,jlocal,k,nqv)
+          case(3)
+            ! For ptype=7, solve3 has already projected droplet qc here.
+            sendbuf(index) = grads_undef
+            if( imoist.eq.1 .and. nqc.ge.1 .and. nqc.le.numq ) &
+              sendbuf(index) = q3d(i,jlocal,k,nqc)
+          case(4)
+            sendbuf(index) = 0.5*(u3d(i,jlocal,k)+u3d(i+1,jlocal,k))
+          case(5)
+            sendbuf(index) = 0.5*(v3d(i,jlocal,k)+v3d(i,jlocal+1,k))
+          case(6)
+            sendbuf(index) = 0.5*(w3d(i,jlocal,k)+w3d(i,jlocal,k+1))
+          end select
+        enddo
+        enddo
+      endif
+#ifdef MPI
+      call MPI_GATHERV(sendbuf,sendcount,realtype,recvbuf,counts,offsets, &
+                       realtype,0,MPI_COMM_WORLD,ierr)
+#else
+      recvbuf = sendbuf
+#endif
+      if( myid.eq.0 )then
+        do p=1,numprocs
+          if( counts(p).eq.0 ) cycle
+          nlocal = myi2p(p)-myi1p(p)+1
+          plane(myi1p(p):myi2p(p),:) = &
+              reshape(recvbuf(offsets(p)+1:offsets(p)+counts(p)),(/nlocal,nk/))
+        enddo
+        do k=1,nk
+          write(unitdat,rec=orec) real(plane(:,k),kind=4)
+          orec = orec+1
+        enddo
+      endif
+    enddo
+
+    if( myid.eq.0 )then
+      close(unitdat)
+      open(newunit=unitctl,file='cm1out_hfxz.ctl',status='replace')
+      write(unitctl,'(a)') 'dset ^cm1out_hfxz_00%y4.dat'
+      write(unitctl,'(a)') 'options template'
+      write(unitctl,'(a)') 'title CM1 x-z high-frequency output '//trim(cm1version)// &
+                          '; x,y,z in km; use mtime for actual model seconds'
+      write(unitctl,'(a,f10.1)') 'undef ',grads_undef
+      write(unitctl,'(a,i6,a)') 'xdef ',nx,' levels'
+      do i=1,nx
+        write(unitctl,'(2x,f13.6)') 0.001*0.5*(xfref(i)+xfref(i+1))
+      enddo
+      write(unitctl,'(a,f13.6,a)') 'ydef 1 linear ', &
+          0.001*0.5*(yfref(jmid)+yfref(jmid+1)),' 1'
+      write(unitctl,'(a,i6,a)') 'zdef ',nk,' levels'
+      do k=1,nk
+        write(unitctl,'(2x,f13.6)') 0.001*sigma(k)
+      enddo
+      write(unitctl,'(a,i10,a)') 'tdef ',nwriteh,' linear 00:00Z01JAN0001 1YR'
+      write(unitctl,'(a)') 'vars 7'
+      write(unitctl,'(a)') 'mtime 0 99 model time (s)'
+      do n=1,6
+        write(unitctl,'(a,1x,i6,a,a)') trim(names(n)),nk,' 99 ',trim(descriptions(n))
+      enddo
+      write(unitctl,'(a)') 'endvars'
+      close(unitctl)
+    endif
+    deallocate(sendbuf,recvbuf,plane)
+
+    end subroutine writeout_hfxz
+
 
     subroutine writehf(nout,var,dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
     use input
