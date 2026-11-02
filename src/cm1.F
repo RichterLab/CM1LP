@@ -2505,7 +2505,7 @@ end module cuda_rt
 
       dohifrq = .true.      ! do high-frequency output?
 
-      hifrqfrq = statfrq    ! match droplet diagnostics / statpack (seconds)
+      hifrqfrq = diagfrq    ! match domain diagnostics (seconds)
 
 !----------------------------------------------------------------------
 
