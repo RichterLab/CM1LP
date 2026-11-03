@@ -6821,7 +6821,7 @@
       ! Application-specific filter: set this to .false. to restore the
       ! original behavior of sampling trajectories throughout the domain.
       logical, parameter :: restrict_to_midplane_y_band = .true.
-      real, parameter :: y_band_half_width_fraction = 0.05
+      real, parameter :: y_band_half_width_fraction = 0.02
       integer(i8) :: trajectory_hash
 
       selected = .false.
