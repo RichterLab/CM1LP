@@ -6665,8 +6665,11 @@
       end subroutine droplet_diag
 
       subroutine write_drop_traj(nstep,mtime,pdata)
-      use input, only : myid,nparcelsLocal,npvals,nparcelsLocalActive,prpidx,prprocidx,prx,pry,prz,prvpx,prvpy,prvpz,prrp,prtp,prms,prmult,prt,prqv, &
-                        prpop,prfracb,prncoll,drop_traj_stride,drop_traj_start,drop_traj_end
+      use input, only : myid,ny,dy,nparcelsLocal,npvals, &
+                        nparcelsLocalActive,prpidx,prprocidx,prx,pry,prz, &
+                        prvpx,prvpy,prvpz,prrp,prtp,prms,prmult,prt,prqv, &
+                        prpop,prfracb,prncoll,drop_traj_stride, &
+                        drop_traj_start,drop_traj_end
       implicit none
 
       integer, intent(in) :: nstep
@@ -6682,7 +6685,8 @@
 
       ! The trajectory sample is stable across MPI migration because both
       ! values used by the hash identify the process on which the particle
-      ! was created, not the process that currently owns it.
+      ! was created, not the process that currently owns it.  The optional
+      ! application-specific y filter below is evaluated at each write time.
       if( drop_traj_stride.lt.1 )then
          if( myid.eq.0 ) print *, 'ERROR: drop_traj_stride must be at least 1'
          call stopcm1
@@ -6707,8 +6711,8 @@
          return
       endif
 
-      ! First pass: count all locally owned particles in the deterministic
-      ! global sample.  This determines the exact temporary buffer size.
+      ! First pass: count all locally owned particles selected for this
+      ! output time.  This determines the exact temporary buffer size.
       nselected = 0
       !$acc data copy(nselected)
       !$acc parallel loop gang vector default(present) &
@@ -6716,7 +6720,8 @@
       do np=1,nparcelsLocalActive
          pidx = transfer(pdata(np,prpidx),0)
          procidx = transfer(pdata(np,prprocidx),0)
-         if( trajectory_is_selected(pidx,procidx,drop_traj_stride) )then
+         if( trajectory_is_selected(pidx,procidx,drop_traj_stride, &
+                                     pdata(np,pry),real(ny)*dy) )then
             nselected = nselected+1
          endif
       enddo
@@ -6739,7 +6744,8 @@
          do np=1,nparcelsLocalActive
             pidx = transfer(pdata(np,prpidx),0)
             procidx = transfer(pdata(np,prprocidx),0)
-            if( trajectory_is_selected(pidx,procidx,drop_traj_stride) )then
+            if( trajectory_is_selected(pidx,procidx,drop_traj_stride, &
+                                        pdata(np,pry),real(ny)*dy) )then
                !$acc atomic capture
                pcount = pcount+1
                idx = pcount
@@ -6804,13 +6810,18 @@
 
       end subroutine write_drop_traj
 
-      logical function trajectory_is_selected(pidx,procidx,stride) result(selected)
+      logical function trajectory_is_selected(pidx,procidx,stride,ypos,domain_y_width) result(selected)
       !$acc routine seq
       use constants, only : i8
       implicit none
 
       integer, intent(in) :: pidx,procidx,stride
+      real, intent(in) :: ypos,domain_y_width
       integer(i8), parameter :: hash_modulus = 2147483647_i8
+      ! Application-specific filter: set this to .false. to restore the
+      ! original behavior of sampling trajectories throughout the domain.
+      logical, parameter :: restrict_to_midplane_y_band = .true.
+      real, parameter :: y_band_half_width_fraction = 0.05
       integer(i8) :: trajectory_hash
 
       selected = .false.
@@ -6822,6 +6833,12 @@
                                (abs(int(procidx,i8))+1_i8)*91771_i8, &
                                hash_modulus)
       selected = modulo(trajectory_hash,int(stride,i8)).eq.0_i8
+
+      if( restrict_to_midplane_y_band )then
+         selected = selected .and. &
+                    abs(ypos-0.5*domain_y_width).le. &
+                    y_band_half_width_fraction*domain_y_width
+      endif
 
       end function trajectory_is_selected
 
