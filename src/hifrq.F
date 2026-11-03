@@ -1428,6 +1428,26 @@
     !ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
       ENDIF  ! testcase-specific output
 
+      ! Common liquid-relative RH slices for all testcases. Match domaindiag:
+      ! RH is a fraction (1 = saturation), with supersaturation retained.
+      IF( imoist.eq.1 .and. nqv.ge.1 .and. nqv.le.numq )THEN
+        nvar = nvar+1
+        varname(nvar) = 'rh'
+        vardesc(nvar) = 'relative humidity (wrt liquid)'
+        varunit(nvar) = 'nondimensional'
+        varlvls(nvar) = nlevels
+        do n=1,nlevels
+          k = klev(n)
+          do j=1,nj
+          do i=1,ni
+            qvs = rslf(prs(i,j,k),(th0(i,j,k)+th3d(i,j,k))*(pi0(i,j,k)+pp3d(i,j,k)))
+            dum1(i,j,n) = q3d(i,j,k,nqv)/qvs
+          enddo
+          enddo
+        enddo
+        call writehf(nlevels,dum1(ib,jb,1),dat1,dat2,dat3,reqt,orec,nvar,varname,vardesc,varunit,myi1p,myi2p,myj1p,myj2p)
+      ENDIF
+
     ! close output file:
 
     id0:  IF( myid.eq.0 )THEN
@@ -1532,7 +1552,7 @@
 
       ! Companion full-height section for every testcase, on the same clock.
       call writeout_hfxz(mtime,nwriteh,xfref,yfref,sigma,th0,th3d,q3d, &
-                         u3d,v3d,w3d,myi1p,myi2p,myj1p,myj2p)
+                         prs,pi0,pp3d,u3d,v3d,w3d,myi1p,myi2p,myj1p,myj2p)
 
       if( myid.eq.0 ) print *
       if( myid.eq.0 ) print *,'  ... Leaving writeout_hifrq '
@@ -1552,9 +1572,10 @@
 !-------------------------------------------------------------------------------
 
     subroutine writeout_hfxz(mtime,nwriteh,xfref,yfref,sigma,th0,th3d,q3d, &
-                             u3d,v3d,w3d,myi1p,myi2p,myj1p,myj2p)
+                             prs,pi0,pp3d,u3d,v3d,w3d,myi1p,myi2p,myj1p,myj2p)
     use input
     use constants, only: grads_undef
+    use cm1libs, only: rslf
 #ifdef MPI
     use mpi
 #endif
@@ -1566,12 +1587,16 @@
     real, intent(in) :: sigma(kb:ke)
     real, intent(in) :: th0(ib:ie,jb:je,kb:ke),th3d(ib:ie,jb:je,kb:ke)
     real, intent(in) :: q3d(ibm:iem,jbm:jem,kbm:kem,numq)
+    real, intent(in) :: prs(ib:ie,jb:je,kb:ke),pi0(ib:ie,jb:je,kb:ke)
+    real, intent(in) :: pp3d(ib:ie,jb:je,kb:ke)
     real, intent(in) :: u3d(ib:ie+1,jb:je,kb:ke)
     real, intent(in) :: v3d(ib:ie,jb:je+1,kb:ke)
     real, intent(in) :: w3d(ib:ie,jb:je,kb:ke+1)
     integer, intent(in) :: myi1p(numprocs),myi2p(numprocs)
     integer, intent(in) :: myj1p(numprocs),myj2p(numprocs)
 
+    integer, parameter :: nfields = 7
+    real :: qvs
     integer :: jmid,jlocal,p,i,k,n,index,nlocal,sendcount,totalcount,orec
     integer :: unitdat,unitctl
 #ifdef MPI
@@ -1581,15 +1606,16 @@
     real, allocatable :: sendbuf(:),recvbuf(:),plane(:,:)
     logical :: owns_row
     character(len=120) :: filename
-    character(len=8), parameter :: names(6) = &
-        (/ 'th      ','qv      ','qc      ','u       ','v       ','w       ' /)
-    character(len=64), parameter :: descriptions(6) = (/ &
+    character(len=8), parameter :: names(nfields) = &
+        (/ 'th      ','qv      ','qc      ','u       ','v       ','w       ','rh      ' /)
+    character(len=64), parameter :: descriptions(nfields) = (/ &
         'potential temperature (K)                                       ', &
         'water vapor mixing ratio (kg/kg)                                ', &
         'cloud water mixing ratio (kg/kg)                                ', &
         'scalar-point u velocity, grid-relative (m/s)                    ', &
         'scalar-point v velocity, grid-relative (m/s)                    ', &
-        'scalar-point w velocity (m/s)                                   ' /)
+        'scalar-point w velocity (m/s)                                   ', &
+        'relative humidity wrt liquid (nondimensional)                   ' /)
 
     jmid = max(1,ny/2)
     owns_row = jmid.ge.myj1p(myid+1) .and. jmid.le.myj2p(myid+1)
@@ -1629,7 +1655,7 @@
     call MPI_TYPE_MATCH_SIZE(MPI_TYPECLASS_REAL,storage_size(0.0)/8,realtype,ierr)
 #endif
 
-    do n=1,6
+    do n=1,nfields
       if( owns_row )then
         index = 0
         do k=1,nk
@@ -1653,6 +1679,13 @@
             sendbuf(index) = 0.5*(v3d(i,jlocal,k)+v3d(i,jlocal+1,k))
           case(6)
             sendbuf(index) = 0.5*(w3d(i,jlocal,k)+w3d(i,jlocal,k+1))
+          case(7)
+            sendbuf(index) = grads_undef
+            if( imoist.eq.1 .and. nqv.ge.1 .and. nqv.le.numq )then
+              qvs = rslf(prs(i,jlocal,k), &
+                  (th0(i,jlocal,k)+th3d(i,jlocal,k))*(pi0(i,jlocal,k)+pp3d(i,jlocal,k)))
+              sendbuf(index) = q3d(i,jlocal,k,nqv)/qvs
+            endif
           end select
         enddo
         enddo
@@ -1696,9 +1729,9 @@
         write(unitctl,'(2x,f13.6)') 0.001*sigma(k)
       enddo
       write(unitctl,'(a,i10,a)') 'tdef ',nwriteh,' linear 00:00Z01JAN0001 1YR'
-      write(unitctl,'(a)') 'vars 7'
+      write(unitctl,'(a,i0)') 'vars ',nfields+1
       write(unitctl,'(a)') 'mtime 0 99 model time (s)'
-      do n=1,6
+      do n=1,nfields
         write(unitctl,'(a,1x,i6,a,a)') trim(names(n)),nk,' 99 ',trim(descriptions(n))
       enddo
       write(unitctl,'(a)') 'endvars'
