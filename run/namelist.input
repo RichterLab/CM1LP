@@ -347,6 +347,10 @@
  &param14
  dodomaindiag   =    .true.,
  diagfrq        =       2.0,
+ dohifrq        =   .false.,
+ hifrqfrq       =       2.0,  ! seconds; specify independently of diagfrq
+ hifrq_start    =       0.0,  ! absolute model time (seconds)
+ hifrq_end      =    1.0e30,  ! absolute model time (seconds)
  /
 
  &param15

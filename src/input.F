@@ -216,6 +216,7 @@
 
       real dx,dy,dz,dtl,timax,run_time,                                       &
            tapfrq,rstfrq,statfrq,prclfrq,diagfrq,azimavgfrq,hifrqfrq,         &
+           hifrq_start,hifrq_end,                                          &
            kdiff2,kdiff6,fcor,kdiv,alph,rdalpha,zd,xhd,alphobc,umove,vmove,   &
            v_t,l_h,lhref1,lhref2,l_inf,ndcnst,cnstce,cnstcd,                  &
            dx_inner,dx_outer,nos_x_len,tot_x_len,                             &
@@ -381,7 +382,7 @@
 	      coal_enabled,coal_kernel,                                       &
               coal_Ndx,coal_Ndy,coal_Ndz
       namelist /param14/                                                      &
-              dodomaindiag,diagfrq
+              dodomaindiag,diagfrq,dohifrq,hifrqfrq,hifrq_start,hifrq_end
       namelist /param15/                                                      &
               doazimavg,azimavgfrq,rlen,do_adapt_move,adapt_move_frq
 

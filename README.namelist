@@ -1734,7 +1734,7 @@
 
 -------------------------------------------------------------------------
 
-  param14 section:  Options related to domain-wide diagnostics.
+  param14 section:  Domain-wide diagnostics and high-frequency output.
 
 
   dodomaindiag - Calculate and write domain-wide / domain-averaged diagnostics 
@@ -1746,6 +1746,36 @@
                      Use output_format = 2
 
   diagfrq - Frequency (seconds) for calculating/writing diagnostics.
+
+  dohifrq - Enable high-frequency output (default: .false.). Controls both
+             cm1out_hf* horizontal output and cm1out_hfxz* x-z sections.
+             The x-z stream is GrADS format for all testcases; the existing
+             horizontal stream follows output_format. OpenACC is unsupported.
+
+  hifrqfrq - Output interval in seconds. Must be explicitly positive when
+              dohifrq=.true.; the default is 0.0 (invalid when enabled).
+              It is independent of statfrq and diagfrq; negative values have
+              no special meaning and are rejected when output is enabled.
+
+  hifrq_start - First scheduled output time, in seconds since simulation start
+                (default: 0.0). Must be nonnegative.
+
+  hifrq_end - Last allowed output time, in seconds since simulation start
+              (default: 1.0e30, effectively unlimited). Must be >= hifrq_start.
+
+      Outputs are scheduled at hifrq_start + n*hifrqfrq, n=0,1,2,...,
+      through hifrq_end inclusive. The end time is not an extra output event
+      unless it falls on that schedule. With a fixed timestep, output occurs
+      on model steps that reach the schedule, only inside the time window.
+      Adaptive timesteps approach scheduled times. Restarted runs resume at
+      the next scheduled time strictly after the restart model time, retaining
+      the start-time anchor and the existing output file counter.
+
+      Example: write every 2 s between model times 600 and 1200 s:
+        dohifrq = .true.,
+        hifrqfrq = 2.0,
+        hifrq_start = 600.0,
+        hifrq_end = 1200.0,
 
 
 -------------------------------------------------------------------------

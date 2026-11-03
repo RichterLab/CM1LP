@@ -555,6 +555,10 @@
 
       call bcast_log(dodomaindiag)
       call bcast_real(diagfrq)
+      call bcast_log(dohifrq)
+      call bcast_real(hifrqfrq)
+      call bcast_real(hifrq_start)
+      call bcast_real(hifrq_end)
 
       call bcast_log(doazimavg)
       call bcast_real(azimavgfrq)
@@ -595,6 +599,17 @@
 
 !-----------------------------------------------------------------------
 !  Some "dummy" checks:
+
+      IF( dohifrq )THEN
+        if( .not. (hifrqfrq.gt.0.0) )then
+          if(myid.eq.0) print *, 'ERROR: specify hifrqfrq > 0 in param14 when dohifrq is true'
+          call stopcm1
+        endif
+        if( .not. (hifrq_start.ge.0.0 .and. hifrq_end.ge.hifrq_start) )then
+          if(myid.eq.0) print *, 'ERROR: require 0 <= hifrq_start <= hifrq_end in param14'
+          call stopcm1
+        endif
+      ENDIF
 
       dt = dtl
       dtlast = dtl
@@ -6117,6 +6132,11 @@
       if(dowr) write(outfile,*) 'diagfrq      = ',diagfrq
       if(dowr) write(outfile,*)
     ENDIF
+      if(dowr) write(outfile,*) 'dohifrq      = ',dohifrq
+      if(dowr) write(outfile,*) 'hifrqfrq     = ',hifrqfrq
+      if(dowr) write(outfile,*) 'hifrq_start  = ',hifrq_start
+      if(dowr) write(outfile,*) 'hifrq_end    = ',hifrq_end
+
 
 !------------------------------------------------------------------
 !  "constants" in subgrid turbulence schemes:

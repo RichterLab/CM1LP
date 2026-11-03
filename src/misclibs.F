@@ -530,7 +530,7 @@
                           hifrqtim,dohifrqwrite,doinit)
       use input, only : nx,ny,cm1setup,myid,cflmax,ksmax,dtl,tapfrq,rstfrq,statfrq, &
           diagfrq,azimavgfrq,hifrqfrq,ierr,imoist,ptype,timestats,mytime,time_misc01, &
-          time_microphy,dodomaindiag,doazimavg,dohifrq
+          time_microphy,dodomaindiag,doazimavg,dohifrq,hifrq_end
       use goddard_module, only : consat2
       use lfoice_module, only : lfoice_init
 #ifdef MPI
@@ -673,19 +673,23 @@
               endif
             ENDIF
 
-            IF( dohifrq .and. hifrqtim.gt.0.0 )THEN
+            IF( dohifrq .and. hifrqtim.gt.0.0 .and. &
+                hifrqtim.le.dble(hifrq_end) .and. mtime.le.dble(hifrq_end) )THEN
               ! ramp-down timestep when approaching hifrq time
               if( dohifrqwrite )then
                 tout = ( ( hifrqtim - mtime ) + hifrqfrq )
               else
                 tout = ( hifrqtim - mtime )
               endif
-              if( tout.gt.(2.0*dbldt) .and. tout.le.(3.0*dbldt)  )then
-                dbldt = tout/3.0
-              elseif( tout.gt.dbldt .and. tout.le.(2.0*dbldt)  )then
-                dbldt = tout/2.0
-              elseif( tout.le.dbldt )then
-                dbldt = tout
+              ! Do not shorten timesteps for events beyond the end of the window.
+              if( tout.gt.0.0d0 .and. (mtime+tout).le.dble(hifrq_end) )then
+                if( tout.gt.(2.0*dbldt) .and. tout.le.(3.0*dbldt)  )then
+                  dbldt = tout/3.0
+                elseif( tout.gt.dbldt .and. tout.le.(2.0*dbldt)  )then
+                  dbldt = tout/2.0
+                elseif( tout.le.dbldt )then
+                  dbldt = tout
+                endif
               endif
             ENDIF
 

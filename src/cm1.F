@@ -365,6 +365,9 @@ end module cuda_rt
       dolsw = .false.
       cmpr_output = .false.
       dohifrq = .false.
+      hifrqfrq = 0.0       ! must be explicitly positive when enabled
+      hifrq_start = 0.0
+      hifrq_end = 1.0e30
       iusetke = .false.
       ramp_up_turb = .false.
       do_adapt_move = .false.
@@ -2500,15 +2503,6 @@ end module cuda_rt
 
 
 
-!----------------------------------------------------------------------
-!  New for cm1r19.6  (not thoroughly tested)
-
-      dohifrq = .true.      ! do high-frequency output?
-
-      hifrqfrq = diagfrq    ! match domain diagnostics (seconds)
-
-!----------------------------------------------------------------------
-
       call init_physics(prs0,rf0,dum1,dum2,dum3,u0,ua,v0,va,o30,   &
                              lu_index,xland,emiss,thc,albd,znt,mavail,tsk,u1,v1,s1, &
                              zh,u10,v10,wspd,lowlyr,ivgtyp,ust,sice)
@@ -2642,17 +2636,17 @@ end module cuda_rt
         azimavgtim = 1.0d60
       ENDIF
 
+      ! Anchor the output clock to the requested start time, including restarts.
+      hifrqtim = 1.0d60
       IF( dohifrq )THEN
-        IF( restarted .and. hifrqfrq.ge.1.0e-6 )THEN
-          hifrqtim = mtime + hifrqfrq
-          if(dowr) write(outfile,*)
-          if(dowr) write(outfile,*) '   hifrqtim = ',hifrqtim
-          if(dowr) write(outfile,*)
-        ELSE
-          hifrqtim = 0.0
-        ENDIF
-      ELSE
-        hifrqtim = 1.0d60
+        hifrqtim = dble(hifrq_start)
+        if( restarted .and. mtime.ge.hifrqtim )then
+          hifrqtim = dble(hifrq_start) + &
+              (floor((mtime-dble(hifrq_start))/dble(hifrqfrq),kind=8)+1)*dble(hifrqfrq)
+          if( hifrqtim.le.mtime ) hifrqtim = hifrqtim+dble(hifrqfrq)
+        endif
+        if( hifrqtim.gt.dble(hifrq_end) ) hifrqtim = 1.0d60
+        if(dowr) write(outfile,*) '   hifrqtim = ',hifrqtim
       ENDIF
 
 
@@ -2830,8 +2824,11 @@ end module cuda_rt
         dosolve = .false.
         if( doazimavg .and. nwritea.eq.1 ) doazimwrite = .true.
         if( dodomaindiag .and. nwritet.eq.1 ) dotdwrite = .true.
-        if( dohifrq .and. nwriteh.eq.1 ) dohifrqwrite = .true.
       ENDIF
+
+      ! The normal startup/restart output flags must respect the HF window.
+      dohifrqwrite = dohifrq .and. mtime.ge.dble(hifrq_start) .and. &
+                     mtime.le.dble(hifrq_end) .and. mtime.ge.hifrqtim
 
       getvt = .false.
       IF( dowriteout .and. output_fallvel.eq.1 ) getvt = .true.
@@ -2960,8 +2957,10 @@ end module cuda_rt
               getdbz = .true.
             endif
           endif
-          if( dohifrq )then
-            if( (mtime+dbldt).ge.(hifrqtim-0.1*dt) .or. hifrqfrq.le.0.0 )then
+          if( dohifrq .and. hifrqtim.le.dble(hifrq_end) .and. &
+              (mtime+dbldt).ge.dble(hifrq_start) .and. &
+              (mtime+dbldt).le.dble(hifrq_end) )then
+            if( (mtime+dbldt).ge.(hifrqtim-0.1*dt) )then
               getdbz = .true.
             endif
           endif
@@ -2993,8 +2992,10 @@ end module cuda_rt
           endif
         ENDIF
 
-        IF( dohifrq )THEN
-          if( (mtime+dbldt).ge.(hifrqtim-0.1*dt) .or. hifrqfrq.le.0.0 )then
+        IF( dohifrq .and. hifrqtim.le.dble(hifrq_end) .and. &
+            (mtime+dbldt).ge.dble(hifrq_start) .and. &
+            (mtime+dbldt).le.dble(hifrq_end) )THEN
+          if( (mtime+dbldt).ge.(hifrqtim-0.1*dt) )then
             dohifrqwrite = .true.
           endif
         ENDIF
@@ -3980,6 +3981,7 @@ end module cuda_rt
             endif
           enddo
         endif
+        if( hifrqtim.gt.dble(hifrq_end) ) hifrqtim = 1.0d60
         if(myid.eq.0) print *,'  next hifrqtim = ',hifrqtim
         if(timestats.ge.1) time_hifrq = time_hifrq+mytime()
 
